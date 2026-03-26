@@ -11,12 +11,15 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
   controls: Controls;
   health: number;
   maxHealth: number;
+  /** Player run progress (Phaser reserves `state` on GameObject). */
+  progress: { currentRoom: number };
   private invincibleUntil: number = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number, controls: Controls) {
     super(scene, x, y, "character");
 
     this.controls = controls;
+    this.progress = { currentRoom: 1 };
     this.maxHealth = PLAYER_MAX_HEALTH;
     this.health = this.maxHealth;
 

@@ -4,12 +4,34 @@ import Player from "../entities/Player";
 import Enemy, { RobotType } from "../entities/Enemy";
 import Bullet from "../entities/Bullet";
 import {
-  ENEMY_SPAWN_INTERVAL,
-  ENEMY_MAX_COUNT,
-  ENEMY_SPAWN_DISTANCE_MIN,
-  ENEMY_SPAWN_DISTANCE_MAX,
+  ROOM_WIDTH,
+  ROOM_HEIGHT,
+  WALL_THICKNESS,
+  DOOR_GAP,
+  ROOM_MIN_INTERIOR_WALLS,
+  ROOM_MAX_INTERIOR_WALLS,
+  ROOM_MIN_ENEMIES,
+  ROOM_MAX_ENEMIES,
+  ROOM_SPAWN_SAFE_W,
+  ROOM_SPAWN_SAFE_H,
+  ENEMY_SPAWN_BODY_RADIUS,
   SHOOT_COOLDOWN,
 } from "../constants";
+import {
+  type DoorSide,
+  type WallSpec,
+  buildPerimeterWalls,
+  getDoorBlockerSpec,
+  getExitZoneCenter,
+  getPlayerSpawnForEntry,
+  oppositeSide,
+  generateInteriorWalls,
+  isClearOfWalls,
+} from "../world/roomLayout";
+
+const WALL_COLOR = 0x4a5568;
+const DOOR_COLOR = 0x6b4423;
+const FLOOR_COLOR = 0x252540;
 
 export class Game extends Scene {
   camera: Phaser.Cameras.Scene2D.Camera;
@@ -17,11 +39,17 @@ export class Game extends Scene {
   player: Player;
   enemies: Phaser.GameObjects.Group;
   bullets: Phaser.GameObjects.Group;
-  private lastShotTime: number = 0;
-  private mapWidth: number = 0;
-  private mapHeight: number = 0;
-  private killCount: number = 0;
-  private gameOver: boolean = false;
+  private wallGroup!: Phaser.Physics.Arcade.StaticGroup;
+  private floorBg: Phaser.GameObjects.Rectangle | null = null;
+  private doorBlocker: Phaser.GameObjects.Rectangle | null = null;
+  private exitZone: Phaser.GameObjects.Rectangle | null = null;
+  private exitDoorCollider: Phaser.Physics.Arcade.Collider | null = null;
+  private doorOpen = false;
+  private currentDoorSide: DoorSide = "top";
+  private lastShotTime = 0;
+  private killCount = 0;
+  private gameOver = false;
+  private exitThrottle = false;
 
   constructor() {
     super("Game");
@@ -30,29 +58,23 @@ export class Game extends Scene {
   create() {
     this.killCount = 0;
     this.gameOver = false;
+    this.exitThrottle = false;
 
-    this.controls = new Controls(this);
-    this.player = new Player(this, 50, 50, this.controls);
-
-    const map = this.make.tilemap({ key: "map" });
-    const tileset = map.addTilesetImage("top_down_shooter", "topdown-tiles")!;
-
-    map.createLayer("Base", tileset, 0, 0);
-    const decor_layer = map.createLayer("Decor", tileset, 0, 0)!;
-
-    decor_layer.setCollisionByProperty({ collides: true });
-
-    this.mapWidth = map.widthInPixels;
-    this.mapHeight = map.heightInPixels;
-
+    this.wallGroup = this.physics.add.staticGroup();
     this.enemies = this.add.group();
     this.bullets = this.add.group();
 
-    this.physics.add.collider(this.player, decor_layer);
-    this.physics.add.collider(this.enemies, decor_layer);
-    this.physics.add.collider(this.enemies, this.enemies);
+    this.controls = new Controls(this);
+    this.player = new Player(
+      this,
+      ROOM_WIDTH / 2,
+      ROOM_HEIGHT / 2,
+      this.controls,
+    );
 
-    this.physics.add.collider(this.bullets, decor_layer, (bulletObj) => {
+    this.physics.add.collider(this.player, this.wallGroup);
+    this.physics.add.collider(this.enemies, this.wallGroup);
+    this.physics.add.collider(this.bullets, this.wallGroup, (bulletObj) => {
       (bulletObj as Bullet).destroy();
     });
 
@@ -70,18 +92,12 @@ export class Game extends Scene {
     );
 
     this.camera = this.cameras.main;
-    this.camera.setBackgroundColor(0x00ff00);
-    this.cameras.main.setBounds(0, 0, this.mapWidth, this.mapHeight);
-    this.cameras.main.startFollow(this.player);
-
-    this.time.addEvent({
-      delay: ENEMY_SPAWN_INTERVAL,
-      callback: this.spawnEnemy,
-      callbackScope: this,
-      loop: true,
-    });
+    this.camera.setBackgroundColor(0x1a1a2e);
+    this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
+    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
 
     this.scene.launch("GameHUD");
+    this.loadRoom(null);
 
     this.input.keyboard!.on("keydown-ESC", () => {
       if (this.gameOver) return;
@@ -92,38 +108,198 @@ export class Game extends Scene {
     this.events.on("resume", () => {
       this.input.keyboard!.resetKeys();
     });
-
-    this.input.keyboard!.once("keydown-M", (_: KeyboardEvent) => {
-      this.physics.world.createDebugGraphic();
-
-      const graphics = this.add.graphics().setAlpha(0.75).setDepth(20);
-      decor_layer.renderDebug(graphics, {
-        tileColor: null,
-        collidingTileColor: new Phaser.Display.Color(243, 134, 48, 255),
-        faceColor: new Phaser.Display.Color(40, 39, 37, 255),
-      });
-    });
   }
 
-  private spawnEnemy() {
-    if (this.enemies.countActive() >= ENEMY_MAX_COUNT) return;
+  private clearRoomGeometry() {
+    if (this.exitDoorCollider) {
+      this.exitDoorCollider.destroy();
+      this.exitDoorCollider = null;
+    }
+    this.exitZone?.destroy();
+    this.exitZone = null;
+    this.doorBlocker = null;
+    this.floorBg?.destroy();
+    this.floorBg = null;
+    this.wallGroup.clear(true, true);
 
-    const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
-    const distance = Phaser.Math.FloatBetween(
-      ENEMY_SPAWN_DISTANCE_MIN,
-      ENEMY_SPAWN_DISTANCE_MAX,
+    for (const e of this.enemies.getChildren().slice()) {
+      (e as Enemy).destroy();
+    }
+    for (const b of this.bullets.getChildren().slice()) {
+      (b as Bullet).destroy();
+    }
+  }
+
+  private addStaticWall(spec: WallSpec, color: number): Phaser.GameObjects.Rectangle {
+    const r = this.add.rectangle(spec.cx, spec.cy, spec.w, spec.h, color);
+    r.setDepth(0);
+    this.physics.add.existing(r, true);
+    this.wallGroup.add(r);
+    return r;
+  }
+
+  private loadRoom(entryFrom: DoorSide | null) {
+    this.clearRoomGeometry();
+    this.doorOpen = false;
+
+    this.floorBg = this.add.rectangle(
+      ROOM_WIDTH / 2,
+      ROOM_HEIGHT / 2,
+      ROOM_WIDTH,
+      ROOM_HEIGHT,
+      FLOOR_COLOR,
+    );
+    this.floorBg.setDepth(-6);
+
+    const sides: DoorSide[] = ["top", "bottom", "left", "right"];
+    this.currentDoorSide = sides[Phaser.Math.Between(0, sides.length - 1)];
+
+    const spawn = getPlayerSpawnForEntry(
+      ROOM_WIDTH,
+      ROOM_HEIGHT,
+      entryFrom,
+      WALL_THICKNESS + 8,
+    );
+    this.player.setPosition(spawn.x, spawn.y);
+    this.player.setVelocity(0, 0);
+
+    const perimeter = buildPerimeterWalls(
+      ROOM_WIDTH,
+      ROOM_HEIGHT,
+      WALL_THICKNESS,
+      DOOR_GAP,
+      this.currentDoorSide,
+    );
+    const interior = generateInteriorWalls(
+      ROOM_WIDTH,
+      ROOM_HEIGHT,
+      WALL_THICKNESS,
+      DOOR_GAP,
+      this.currentDoorSide,
+      ROOM_MIN_INTERIOR_WALLS,
+      ROOM_MAX_INTERIOR_WALLS,
+      spawn.x,
+      spawn.y,
+      ROOM_SPAWN_SAFE_W,
+      ROOM_SPAWN_SAFE_H,
     );
 
-    let x = this.player.x + Math.cos(angle) * distance;
-    let y = this.player.y + Math.sin(angle) * distance;
+    for (const spec of perimeter) {
+      this.addStaticWall(spec, WALL_COLOR);
+    }
+    for (const spec of interior) {
+      this.addStaticWall(spec, WALL_COLOR);
+    }
 
-    x = Phaser.Math.Clamp(x, 32, this.mapWidth - 32);
-    y = Phaser.Math.Clamp(y, 32, this.mapHeight - 32);
+    const blockerSpec = getDoorBlockerSpec(
+      ROOM_WIDTH,
+      ROOM_HEIGHT,
+      WALL_THICKNESS,
+      DOOR_GAP,
+      this.currentDoorSide,
+    );
+    this.doorBlocker = this.addStaticWall(blockerSpec, DOOR_COLOR);
 
-    const type: RobotType =
-      Math.random() < 0.25 ? "robot-heavy" : "robot-grunt";
-    const enemy = new Enemy(this, x, y, type, this.player);
-    this.enemies.add(enemy);
+    const enemyTarget =
+      Phaser.Math.Between(ROOM_MIN_ENEMIES, ROOM_MAX_ENEMIES) +
+      Math.floor((this.player.progress.currentRoom - 1) / 2);
+    const capped = Phaser.Math.Clamp(enemyTarget, ROOM_MIN_ENEMIES, 14);
+
+    const spawnCheckWalls: WallSpec[] = [
+      ...perimeter,
+      ...interior,
+      blockerSpec,
+    ];
+    this.spawnRoomEnemies(capped, spawn.x, spawn.y, spawnCheckWalls);
+
+    this.events.emit("room-changed", this.player.progress.currentRoom);
+  }
+
+  private spawnRoomEnemies(
+    count: number,
+    px: number,
+    py: number,
+    walls: WallSpec[],
+  ) {
+    const margin = 80;
+    let placed = 0;
+    let tries = 0;
+    const maxTries = count * 100;
+
+    while (placed < count && tries < maxTries) {
+      tries++;
+      const ex = Phaser.Math.Between(margin, ROOM_WIDTH - margin);
+      const ey = Phaser.Math.Between(margin, ROOM_HEIGHT - margin);
+      if (Phaser.Math.Distance.Between(ex, ey, px, py) < 130) continue;
+      if (!isClearOfWalls(ex, ey, ENEMY_SPAWN_BODY_RADIUS, walls)) continue;
+
+      const type: RobotType =
+        Math.random() < 0.22 ? "robot-heavy" : "robot-grunt";
+      const enemy = new Enemy(this, ex, ey, type, this.player);
+      this.enemies.add(enemy);
+      placed++;
+    }
+  }
+
+  private tryAdvanceThroughDoor() {
+    if (!this.doorOpen || this.gameOver || this.exitThrottle) return;
+    this.exitThrottle = true;
+    this.player.progress.currentRoom += 1;
+    const cameFrom = oppositeSide(this.currentDoorSide);
+    this.time.delayedCall(200, () => {
+      this.exitThrottle = false;
+    });
+    this.loadRoom(cameFrom);
+  }
+
+  private openExitDoor() {
+    if (this.doorOpen) return;
+    this.doorOpen = true;
+
+    if (this.doorBlocker) {
+      this.wallGroup.remove(this.doorBlocker, true, true);
+      this.doorBlocker = null;
+    }
+
+    const z = getExitZoneCenter(
+      ROOM_WIDTH,
+      ROOM_HEIGHT,
+      WALL_THICKNESS,
+      this.currentDoorSide,
+    );
+    this.exitZone = this.add.rectangle(z.cx, z.cy, z.w, z.h, 0x66ff99, 0.2);
+    this.exitZone.setDepth(-3);
+    this.physics.add.existing(this.exitZone, true);
+    const eb = this.exitZone.body as Phaser.Physics.Arcade.StaticBody;
+    eb.updateFromGameObject();
+
+    this.tweens.add({
+      targets: this.exitZone,
+      alpha: { from: 0.12, to: 0.35 },
+      duration: 550,
+      yoyo: true,
+      repeat: -1,
+    });
+
+    if (this.exitDoorCollider) {
+      this.exitDoorCollider.destroy();
+    }
+    this.exitDoorCollider = this.physics.add.overlap(
+      this.player,
+      this.exitZone,
+      () => this.tryAdvanceThroughDoor(),
+    );
+  }
+
+  private checkRoomCleared() {
+    if (this.doorOpen || this.gameOver) return;
+    let alive = 0;
+    for (const c of this.enemies.getChildren()) {
+      if ((c as Enemy).active) alive++;
+    }
+    if (alive === 0) {
+      this.openExitDoor();
+    }
   }
 
   private shootBullet() {
@@ -224,5 +400,7 @@ export class Game extends Scene {
       if ((bullet as Bullet).active)
         (bullet as Bullet).update(_time, delta);
     }
+
+    this.checkRoomCleared();
   }
 }

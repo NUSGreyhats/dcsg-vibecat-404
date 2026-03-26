@@ -10,6 +10,7 @@ export class GameHUD extends Scene {
   private healthBarFill: Phaser.GameObjects.Graphics;
   private healthText: Phaser.GameObjects.Text;
   private killText: Phaser.GameObjects.Text;
+  private roomText: Phaser.GameObjects.Text;
 
   constructor() {
     super("GameHUD");
@@ -60,6 +61,14 @@ export class GameHUD extends Scene {
       strokeThickness: 2,
     });
 
+    this.roomText = this.add.text(512, 22, "Room 1", {
+      fontFamily: "Arial Black",
+      fontSize: "20px",
+      color: "#aaddff",
+      stroke: "#000000",
+      strokeThickness: 4,
+    }).setOrigin(0.5, 0.5);
+
     const gameScene = this.scene.get("Game");
     gameScene.events.on(
       "player-health-changed",
@@ -67,6 +76,7 @@ export class GameHUD extends Scene {
       this,
     );
     gameScene.events.on("kill-count-changed", this.updateKillCount, this);
+    gameScene.events.on("room-changed", this.updateRoomLabel, this);
     gameScene.events.once("shutdown", () => {
       gameScene.events.off(
         "player-health-changed",
@@ -78,9 +88,14 @@ export class GameHUD extends Scene {
         this.updateKillCount,
         this,
       );
+      gameScene.events.off("room-changed", this.updateRoomLabel, this);
     });
 
     this.updateHealthBar(PLAYER_MAX_HEALTH, PLAYER_MAX_HEALTH);
+  }
+
+  private updateRoomLabel(room: number) {
+    this.roomText.setText(`Room ${room}`);
   }
 
   private updateHealthBar(health: number, maxHealth: number) {
