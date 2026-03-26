@@ -7,6 +7,9 @@ import {
   PLAYER_INVINCIBLE_MS,
 } from "../constants";
 
+/** Texture aims along +Y (gun down); aim math uses +X as 0 rad. */
+const CHARACTER_AIM_OFFSET = -Math.PI / 2;
+
 export default class Player extends Phaser.Physics.Arcade.Sprite {
   controls: Controls;
   health: number;
@@ -87,6 +90,6 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       pointer.worldX,
       pointer.worldY,
     );
-    this.setRotation(angle);
+    this.setRotation(angle + CHARACTER_AIM_OFFSET);
   }
 }
