@@ -6,24 +6,18 @@ export class Preloader extends Scene {
   }
 
   init() {
-    //  We loaded this image in our Boot Scene, so we can display it here
     this.add.image(512, 384, "background");
 
-    //  A simple progress bar. This is the outline of the bar.
     this.add.rectangle(512, 384, 468, 32).setStrokeStyle(1, 0xffffff);
 
-    //  This is the progress bar itself. It will increase in size from the left based on the % of progress.
     const bar = this.add.rectangle(512 - 230, 384, 4, 28, 0xffffff);
 
-    //  Use the 'progress' event emitted by the LoaderPlugin to update the loading bar
     this.load.on("progress", (progress: number) => {
-      //  Update the progress bar (our bar is 464px wide, so 100% = 464px)
       bar.width = 4 + 460 * progress;
     });
   }
 
   preload() {
-    //  Load the assets for the game - Replace with your own assets
     this.load.setPath("assets");
 
     this.load.image("logo", "logo.png");
@@ -33,10 +27,57 @@ export class Preloader extends Scene {
   }
 
   create() {
-    //  When all the assets have loaded, it's often worth creating global objects here that the rest of the game can use.
-    //  For example, you can define global animations here, so we can use them in other scenes.
-
-    //  Move to the MainMenu. You could also swap this for a Scene Transition, such as a camera fade.
+    this.generateRobotTextures();
+    this.generateBulletTexture();
     this.scene.start("MainMenu");
+  }
+
+  private generateRobotTextures() {
+    const g1 = this.add.graphics();
+    g1.fillStyle(0x000000, 0.2);
+    g1.fillCircle(17, 17, 13);
+    g1.fillStyle(0x6a6a6a);
+    g1.fillCircle(16, 16, 12);
+    g1.fillStyle(0x8a8a8a);
+    g1.fillCircle(14, 14, 8);
+    g1.fillStyle(0x333333);
+    g1.fillCircle(22, 16, 5);
+    g1.fillStyle(0x00ffcc);
+    g1.fillCircle(22, 16, 3);
+    g1.fillStyle(0xffffff, 0.7);
+    g1.fillCircle(21, 15, 1);
+    g1.generateTexture("robot-grunt", 32, 32);
+    g1.destroy();
+
+    const g2 = this.add.graphics();
+    g2.fillStyle(0x000000, 0.2);
+    g2.fillCircle(21, 21, 17);
+    g2.fillStyle(0x8b1a1a);
+    g2.fillCircle(20, 20, 16);
+    g2.fillStyle(0xaa3333);
+    g2.fillCircle(18, 18, 10);
+    g2.fillStyle(0x441111);
+    g2.fillCircle(28, 14, 5);
+    g2.fillCircle(28, 26, 5);
+    g2.fillStyle(0xffcc00);
+    g2.fillCircle(28, 14, 3);
+    g2.fillCircle(28, 26, 3);
+    g2.fillStyle(0xffffff, 0.6);
+    g2.fillCircle(27, 13, 1);
+    g2.fillCircle(27, 25, 1);
+    g2.generateTexture("robot-heavy", 40, 40);
+    g2.destroy();
+  }
+
+  private generateBulletTexture() {
+    const g = this.add.graphics();
+    g.fillStyle(0xffaa00, 0.4);
+    g.fillCircle(4, 4, 4);
+    g.fillStyle(0xffdd00);
+    g.fillCircle(4, 4, 3);
+    g.fillStyle(0xffffff);
+    g.fillCircle(4, 4, 1);
+    g.generateTexture("bullet", 8, 8);
+    g.destroy();
   }
 }
