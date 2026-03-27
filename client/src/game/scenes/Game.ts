@@ -22,6 +22,7 @@ import {
   getWeaponStats,
   type WeaponId,
 } from "../weapons";
+import { KEYCODE_BACKTICK } from "../shop";
 import {
   type DoorSide,
   type WallSpec,
@@ -57,6 +58,7 @@ export class Game extends Scene {
   private gameOver = false;
   private exitThrottle = false;
   inventoryOpen = false;
+  shopOpen = false;
 
   constructor() {
     super("Game");
@@ -67,6 +69,7 @@ export class Game extends Scene {
     this.gameOver = false;
     this.exitThrottle = false;
     this.inventoryOpen = false;
+    this.shopOpen = false;
 
     this.wallGroup = this.physics.add.staticGroup();
     this.enemies = this.add.group();
@@ -123,9 +126,10 @@ export class Game extends Scene {
     const K = Phaser.Input.Keyboard.KeyCodes;
     kb.addKey(K.I).on("down", () => this.tryOpenInventory());
     kb.addKey(K.TAB).on("down", () => this.tryOpenInventory());
+    kb.addKey(KEYCODE_BACKTICK).on("down", () => this.tryOpenShop());
 
     kb.on("keydown-ESC", () => {
-      if (this.gameOver || this.inventoryOpen) return;
+      if (this.gameOver || this.inventoryOpen || this.shopOpen) return;
       this.scene.pause();
       this.scene.launch("PauseMenu", { gameOver: false });
     });
@@ -136,11 +140,30 @@ export class Game extends Scene {
   }
 
   tryOpenInventory() {
-    if (this.gameOver || this.inventoryOpen) return;
+    if (this.gameOver || this.inventoryOpen || this.shopOpen) return;
     this.inventoryOpen = true;
     this.input.keyboard!.enabled = false;
     this.scene.pause();
     this.scene.launch("InventoryMenu");
+  }
+
+  tryOpenShop() {
+    if (this.gameOver || this.shopOpen || this.inventoryOpen) return;
+    this.shopOpen = true;
+    this.input.keyboard!.enabled = false;
+    this.scene.pause();
+    this.scene.launch("ShopMenu");
+  }
+
+  tryPurchaseShopWeapon(id: WeaponId, price: number): boolean {
+    if (this.player.ownsWeapon(id) || this.player.coins < price) return false;
+    this.player.coins -= price;
+    if (!this.player.acquireWeapon(id)) {
+      this.player.coins += price;
+      return false;
+    }
+    this.events.emit("coin-count-changed", this.player.coins);
+    return true;
   }
 
   playerEquipWeapon(id: WeaponId): boolean {

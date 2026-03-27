@@ -1,4 +1,4 @@
-export type WeaponId = "sar21" | "maximi" | "cs-lr4";
+export type WeaponId = "sar21" | "maximi" | "cs-lr4" | "matador";
 
 export interface WeaponStats {
   id: WeaponId;
@@ -22,7 +22,7 @@ export const WEAPON_STATS: Record<WeaponId, WeaponStats> = {
   },
   maximi: {
     id: "maximi",
-    displayName: "FN MAG / Maximi",
+    displayName: "Ultimax 100",
     cooldownMs: 220,
     bulletSpeed: 700,
     damage: 2,
@@ -38,9 +38,23 @@ export const WEAPON_STATS: Record<WeaponId, WeaponStats> = {
     bulletTextureKey: "bullet_dmr",
     bulletBodyRadius: 6,
   },
+  matador: {
+    id: "matador",
+    displayName: "MATADOR",
+    cooldownMs: 520,
+    bulletSpeed: 480,
+    damage: 6,
+    bulletTextureKey: "bullet_matador",
+    bulletBodyRadius: 7,
+  },
 };
 
-export const ALL_WEAPON_IDS: WeaponId[] = ["sar21", "maximi", "cs-lr4"];
+export const ALL_WEAPON_IDS: WeaponId[] = [
+  "sar21",
+  "maximi",
+  "cs-lr4",
+  "matador",
+];
 
 export function getWeaponStats(id: WeaponId): WeaponStats {
   return WEAPON_STATS[id];
