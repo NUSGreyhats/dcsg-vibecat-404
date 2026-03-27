@@ -1,4 +1,4 @@
-import { Scene } from "phaser";
+import Phaser, { Scene } from "phaser";
 import Controls from "./utils/Controls";
 import Player from "../entities/Player";
 import Enemy, { RobotType } from "../entities/Enemy";
@@ -17,8 +17,11 @@ import {
   ROOM_SPAWN_SAFE_H,
   ENEMY_SPAWN_BODY_RADIUS,
   COIN_SPAWN_BODY_RADIUS,
-  SHOOT_COOLDOWN,
 } from "../constants";
+import {
+  getWeaponStats,
+  type WeaponId,
+} from "../weapons";
 import {
   type DoorSide,
   type WallSpec,
@@ -53,6 +56,7 @@ export class Game extends Scene {
   private killCount = 0;
   private gameOver = false;
   private exitThrottle = false;
+  inventoryOpen = false;
 
   constructor() {
     super("Game");
@@ -62,6 +66,7 @@ export class Game extends Scene {
     this.killCount = 0;
     this.gameOver = false;
     this.exitThrottle = false;
+    this.inventoryOpen = false;
 
     this.wallGroup = this.physics.add.staticGroup();
     this.enemies = this.add.group();
@@ -109,9 +114,18 @@ export class Game extends Scene {
     this.scene.launch("GameHUD");
     this.loadRoom(null);
     this.events.emit("coin-count-changed", this.player.coins);
+    this.events.emit(
+      "weapon-changed",
+      getWeaponStats(this.player.equippedWeaponId).displayName,
+    );
 
-    this.input.keyboard!.on("keydown-ESC", () => {
-      if (this.gameOver) return;
+    const kb = this.input.keyboard!;
+    const K = Phaser.Input.Keyboard.KeyCodes;
+    kb.addKey(K.I).on("down", () => this.tryOpenInventory());
+    kb.addKey(K.TAB).on("down", () => this.tryOpenInventory());
+
+    kb.on("keydown-ESC", () => {
+      if (this.gameOver || this.inventoryOpen) return;
       this.scene.pause();
       this.scene.launch("PauseMenu", { gameOver: false });
     });
@@ -119,6 +133,23 @@ export class Game extends Scene {
     this.events.on("resume", () => {
       this.input.keyboard!.resetKeys();
     });
+  }
+
+  tryOpenInventory() {
+    if (this.gameOver || this.inventoryOpen) return;
+    this.inventoryOpen = true;
+    this.input.keyboard!.enabled = false;
+    this.scene.pause();
+    this.scene.launch("InventoryMenu");
+  }
+
+  playerEquipWeapon(id: WeaponId): boolean {
+    if (!this.player.equipWeapon(id)) return false;
+    this.events.emit(
+      "weapon-changed",
+      getWeaponStats(id).displayName,
+    );
+    return true;
   }
 
   private clearRoomGeometry() {
@@ -369,7 +400,8 @@ export class Game extends Scene {
   }
 
   private shootBullet() {
-    if (this.time.now < this.lastShotTime + SHOOT_COOLDOWN) return;
+    const w = getWeaponStats(this.player.equippedWeaponId);
+    if (this.time.now < this.lastShotTime + w.cooldownMs) return;
     this.lastShotTime = this.time.now;
 
     const pointer = this.input.activePointer;
@@ -385,7 +417,12 @@ export class Game extends Scene {
     const spawnX = this.player.x + Math.cos(angle) * 20;
     const spawnY = this.player.y + Math.sin(angle) * 20;
 
-    const bullet = new Bullet(this, spawnX, spawnY, angle);
+    const bullet = new Bullet(this, spawnX, spawnY, angle, {
+      speed: w.bulletSpeed,
+      damage: w.damage,
+      textureKey: w.bulletTextureKey,
+      bodyRadius: w.bulletBodyRadius,
+    });
     this.bullets.add(bullet);
 
     const flash = this.add
@@ -407,7 +444,7 @@ export class Game extends Scene {
     const ey = enemy.y;
 
     bullet.destroy();
-    const died = enemy.takeDamage(1);
+    const died = enemy.takeDamage(bullet.damage);
 
     if (died) {
       this.killCount++;

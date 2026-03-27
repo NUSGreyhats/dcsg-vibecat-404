@@ -27,6 +27,8 @@ export class Preloader extends Scene {
   create() {
     this.generateRobotTextures();
     this.generateBulletTexture();
+    this.generateLmgBulletTexture();
+    this.generateDmrBulletTexture();
     this.generateCoinTexture();
     this.scene.start("MainMenu");
   }
@@ -77,6 +79,30 @@ export class Preloader extends Scene {
     g.fillStyle(0xffffff);
     g.fillCircle(4, 4, 1);
     g.generateTexture("bullet", 8, 8);
+    g.destroy();
+  }
+
+  private generateLmgBulletTexture() {
+    const g = this.add.graphics();
+    g.fillStyle(0xff6600, 0.45);
+    g.fillCircle(5, 5, 5);
+    g.fillStyle(0xffaa44);
+    g.fillCircle(5, 5, 3);
+    g.fillStyle(0xffffcc);
+    g.fillCircle(5, 5, 1);
+    g.generateTexture("bullet_lmg", 10, 10);
+    g.destroy();
+  }
+
+  private generateDmrBulletTexture() {
+    const g = this.add.graphics();
+    g.fillStyle(0x4488cc, 0.5);
+    g.fillCircle(6, 6, 6);
+    g.fillStyle(0xccddff);
+    g.fillCircle(6, 6, 4);
+    g.fillStyle(0xffffff);
+    g.fillCircle(5, 5, 1);
+    g.generateTexture("bullet_dmr", 12, 12);
     g.destroy();
   }
 

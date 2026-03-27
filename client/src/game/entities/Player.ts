@@ -6,6 +6,7 @@ import {
   PLAYER_MAX_HEALTH,
   PLAYER_INVINCIBLE_MS,
 } from "../constants";
+import { type WeaponId } from "../weapons";
 
 /** Texture aims along +Y (gun down); aim math uses +X as 0 rad. */
 const CHARACTER_AIM_OFFSET = -Math.PI / 2;
@@ -15,6 +16,8 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
   health: number;
   maxHealth: number;
   coins: number;
+  ownedWeaponIds: WeaponId[];
+  equippedWeaponId: WeaponId;
   /** Player run progress (Phaser reserves `state` on GameObject). */
   progress: { currentRoom: number };
   private invincibleUntil: number = 0;
@@ -25,6 +28,8 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this.controls = controls;
     this.progress = { currentRoom: 1 };
     this.coins = 0;
+    this.ownedWeaponIds = ["sar21"];
+    this.equippedWeaponId = "sar21";
     this.maxHealth = PLAYER_MAX_HEALTH;
     this.health = this.maxHealth;
 
@@ -57,6 +62,23 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       },
     });
 
+    return true;
+  }
+
+  ownsWeapon(id: WeaponId): boolean {
+    return this.ownedWeaponIds.includes(id);
+  }
+
+  equipWeapon(id: WeaponId): boolean {
+    if (!this.ownsWeapon(id)) return false;
+    this.equippedWeaponId = id;
+    return true;
+  }
+
+  /** Add a weapon to the inventory (e.g. pickups / shop). Returns false if already owned. */
+  acquireWeapon(id: WeaponId): boolean {
+    if (this.ownsWeapon(id)) return false;
+    this.ownedWeaponIds.push(id);
     return true;
   }
 

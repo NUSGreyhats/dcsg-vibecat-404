@@ -10,8 +10,6 @@ export const ENEMY_HEAVY_HEALTH = 6;
 export const ENEMY_GRUNT_DAMAGE = 1;
 export const ENEMY_HEAVY_DAMAGE = 2;
 
-export const SHOOT_COOLDOWN = 150;
-
 export const ROOM_WIDTH = 1024;
 export const ROOM_HEIGHT = 768;
 export const WALL_THICKNESS = 24;

@@ -1,5 +1,7 @@
 import { Scene } from "phaser";
 import { PLAYER_MAX_HEALTH } from "../constants";
+import { getWeaponStats } from "../weapons";
+import type { Game } from "./Game";
 
 const BAR_X = 56;
 const BAR_Y = 20;
@@ -11,6 +13,7 @@ export class GameHUD extends Scene {
   private healthText: Phaser.GameObjects.Text;
   private killText: Phaser.GameObjects.Text;
   private coinText: Phaser.GameObjects.Text;
+  private weaponText: Phaser.GameObjects.Text;
   private roomText: Phaser.GameObjects.Text;
 
   constructor() {
@@ -20,9 +23,9 @@ export class GameHUD extends Scene {
   create() {
     const panel = this.add.graphics();
     panel.fillStyle(0x000000, 0.55);
-    panel.fillRoundedRect(10, 8, 260, 40, 8);
+    panel.fillRoundedRect(10, 8, 260, 58, 8);
     panel.lineStyle(1, 0x555555, 0.6);
-    panel.strokeRoundedRect(10, 8, 260, 40, 8);
+    panel.strokeRoundedRect(10, 8, 260, 58, 8);
 
     this.add.text(18, 15, "HP", {
       fontFamily: "Arial Black",
@@ -44,6 +47,14 @@ export class GameHUD extends Scene {
       fontFamily: "Arial",
       fontSize: "16px",
       color: "#ffffff",
+      stroke: "#000000",
+      strokeThickness: 2,
+    });
+
+    this.weaponText = this.add.text(18, 44, "", {
+      fontFamily: "Arial",
+      fontSize: "13px",
+      color: "#b8d4ff",
       stroke: "#000000",
       strokeThickness: 2,
     });
@@ -92,6 +103,7 @@ export class GameHUD extends Scene {
     );
     gameScene.events.on("kill-count-changed", this.updateKillCount, this);
     gameScene.events.on("coin-count-changed", this.updateCoinCount, this);
+    gameScene.events.on("weapon-changed", this.updateWeaponLabel, this);
     gameScene.events.on("room-changed", this.updateRoomLabel, this);
     gameScene.events.once("shutdown", () => {
       gameScene.events.off(
@@ -110,9 +122,21 @@ export class GameHUD extends Scene {
         this.updateCoinCount,
         this,
       );
+      gameScene.events.off(
+        "weapon-changed",
+        this.updateWeaponLabel,
+        this,
+      );
     });
 
     this.updateHealthBar(PLAYER_MAX_HEALTH, PLAYER_MAX_HEALTH);
+
+    const mainGame = gameScene as Game;
+    if (mainGame.player) {
+      this.updateWeaponLabel(
+        getWeaponStats(mainGame.player.equippedWeaponId).displayName,
+      );
+    }
   }
 
   private updateRoomLabel(room: number) {
@@ -145,6 +169,10 @@ export class GameHUD extends Scene {
 
   private updateCoinCount(coins: number) {
     this.coinText.setText(`Coins: ${coins}`);
+  }
+
+  private updateWeaponLabel(displayName: string) {
+    this.weaponText.setText(`Weapon: ${displayName}`);
   }
 
   private getHealthColor(ratio: number): number {
