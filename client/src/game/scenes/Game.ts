@@ -3,6 +3,7 @@ import Controls from "./utils/Controls";
 import Player from "../entities/Player";
 import Enemy, { RobotType } from "../entities/Enemy";
 import Bullet from "../entities/Bullet";
+import Coin from "../entities/Coin";
 import {
   ROOM_WIDTH,
   ROOM_HEIGHT,
@@ -15,6 +16,7 @@ import {
   ROOM_SPAWN_SAFE_W,
   ROOM_SPAWN_SAFE_H,
   ENEMY_SPAWN_BODY_RADIUS,
+  COIN_SPAWN_BODY_RADIUS,
   SHOOT_COOLDOWN,
 } from "../constants";
 import {
@@ -39,6 +41,7 @@ export class Game extends Scene {
   player: Player;
   enemies: Phaser.GameObjects.Group;
   bullets: Phaser.GameObjects.Group;
+  coins: Phaser.GameObjects.Group;
   private wallGroup!: Phaser.Physics.Arcade.StaticGroup;
   private floorBg: Phaser.GameObjects.Rectangle | null = null;
   private doorBlocker: Phaser.GameObjects.Rectangle | null = null;
@@ -63,6 +66,7 @@ export class Game extends Scene {
     this.wallGroup = this.physics.add.staticGroup();
     this.enemies = this.add.group();
     this.bullets = this.add.group();
+    this.coins = this.add.group();
 
     this.controls = new Controls(this);
     this.player = new Player(
@@ -91,6 +95,12 @@ export class Game extends Scene {
       (_playerObj, enemyObj) => this.onEnemyHitPlayer(enemyObj as Enemy),
     );
 
+    this.physics.add.overlap(
+      this.player,
+      this.coins,
+      (_playerObj, coinObj) => this.onPlayerPickupCoin(coinObj as Coin),
+    );
+
     this.camera = this.cameras.main;
     this.camera.setBackgroundColor(0x1a1a2e);
     this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
@@ -98,6 +108,7 @@ export class Game extends Scene {
 
     this.scene.launch("GameHUD");
     this.loadRoom(null);
+    this.events.emit("coin-count-changed", this.player.coins);
 
     this.input.keyboard!.on("keydown-ESC", () => {
       if (this.gameOver) return;
@@ -127,6 +138,9 @@ export class Game extends Scene {
     }
     for (const b of this.bullets.getChildren().slice()) {
       (b as Bullet).destroy();
+    }
+    for (const c of this.coins.getChildren().slice()) {
+      (c as Coin).destroy();
     }
   }
 
@@ -211,6 +225,7 @@ export class Game extends Scene {
       blockerSpec,
     ];
     this.spawnRoomEnemies(capped, spawn.x, spawn.y, spawnCheckWalls);
+    this.spawnRoomCoins(spawn.x, spawn.y, spawnCheckWalls);
 
     this.events.emit("room-changed", this.player.progress.currentRoom);
   }
@@ -239,6 +254,57 @@ export class Game extends Scene {
       this.enemies.add(enemy);
       placed++;
     }
+  }
+
+  private spawnRoomCoins(px: number, py: number, walls: WallSpec[]) {
+    const count = Phaser.Math.Between(1, 5);
+    const margin = 80;
+    const minFromPlayer = 96;
+    const minCoinSep = 32;
+    const minFromEnemy = 40;
+    const placed: { x: number; y: number }[] = [];
+
+    for (let i = 0; i < count; i++) {
+      let found = false;
+      for (let tries = 0; tries < 100 && !found; tries++) {
+        const cx = Phaser.Math.Between(margin, ROOM_WIDTH - margin);
+        const cy = Phaser.Math.Between(margin, ROOM_HEIGHT - margin);
+        if (Phaser.Math.Distance.Between(cx, cy, px, py) < minFromPlayer)
+          continue;
+        if (!isClearOfWalls(cx, cy, COIN_SPAWN_BODY_RADIUS, walls)) continue;
+
+        let blocked = false;
+        for (const p of placed) {
+          if (Phaser.Math.Distance.Between(cx, cy, p.x, p.y) < minCoinSep) {
+            blocked = true;
+            break;
+          }
+        }
+        if (blocked) continue;
+
+        for (const e of this.enemies.getChildren()) {
+          const en = e as Enemy;
+          if (!en.active) continue;
+          if (Phaser.Math.Distance.Between(cx, cy, en.x, en.y) < minFromEnemy) {
+            blocked = true;
+            break;
+          }
+        }
+        if (blocked) continue;
+
+        const coin = new Coin(this, cx, cy);
+        this.coins.add(coin);
+        placed.push({ x: cx, y: cy });
+        found = true;
+      }
+    }
+  }
+
+  private onPlayerPickupCoin(coin: Coin) {
+    if (!coin.active || this.gameOver) return;
+    coin.destroy();
+    this.player.coins += 1;
+    this.events.emit("coin-count-changed", this.player.coins);
   }
 
   private tryAdvanceThroughDoor() {

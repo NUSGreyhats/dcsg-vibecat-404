@@ -10,6 +10,7 @@ export class GameHUD extends Scene {
   private healthBarFill: Phaser.GameObjects.Graphics;
   private healthText: Phaser.GameObjects.Text;
   private killText: Phaser.GameObjects.Text;
+  private coinText: Phaser.GameObjects.Text;
   private roomText: Phaser.GameObjects.Text;
 
   constructor() {
@@ -47,6 +48,20 @@ export class GameHUD extends Scene {
       strokeThickness: 2,
     });
 
+    const coinPanel = this.add.graphics();
+    coinPanel.fillStyle(0x000000, 0.55);
+    coinPanel.fillRoundedRect(1024 - 278, 8, 130, 40, 8);
+    coinPanel.lineStyle(1, 0x555555, 0.6);
+    coinPanel.strokeRoundedRect(1024 - 278, 8, 130, 40, 8);
+
+    this.coinText = this.add.text(1024 - 268, 16, "Coins: 0", {
+      fontFamily: "Arial Black",
+      fontSize: "16px",
+      color: "#ffcc33",
+      stroke: "#000000",
+      strokeThickness: 2,
+    });
+
     const killPanel = this.add.graphics();
     killPanel.fillStyle(0x000000, 0.55);
     killPanel.fillRoundedRect(1024 - 140, 8, 130, 40, 8);
@@ -76,6 +91,7 @@ export class GameHUD extends Scene {
       this,
     );
     gameScene.events.on("kill-count-changed", this.updateKillCount, this);
+    gameScene.events.on("coin-count-changed", this.updateCoinCount, this);
     gameScene.events.on("room-changed", this.updateRoomLabel, this);
     gameScene.events.once("shutdown", () => {
       gameScene.events.off(
@@ -89,6 +105,11 @@ export class GameHUD extends Scene {
         this,
       );
       gameScene.events.off("room-changed", this.updateRoomLabel, this);
+      gameScene.events.off(
+        "coin-count-changed",
+        this.updateCoinCount,
+        this,
+      );
     });
 
     this.updateHealthBar(PLAYER_MAX_HEALTH, PLAYER_MAX_HEALTH);
@@ -120,6 +141,10 @@ export class GameHUD extends Scene {
 
   private updateKillCount(kills: number) {
     this.killText.setText(`Kills: ${kills}`);
+  }
+
+  private updateCoinCount(coins: number) {
+    this.coinText.setText(`Coins: ${coins}`);
   }
 
   private getHealthColor(ratio: number): number {

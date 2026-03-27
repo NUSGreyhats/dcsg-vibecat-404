@@ -14,6 +14,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
   controls: Controls;
   health: number;
   maxHealth: number;
+  coins: number;
   /** Player run progress (Phaser reserves `state` on GameObject). */
   progress: { currentRoom: number };
   private invincibleUntil: number = 0;
@@ -23,6 +24,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
     this.controls = controls;
     this.progress = { currentRoom: 1 };
+    this.coins = 0;
     this.maxHealth = PLAYER_MAX_HEALTH;
     this.health = this.maxHealth;
 

@@ -27,6 +27,7 @@ export class Preloader extends Scene {
   create() {
     this.generateRobotTextures();
     this.generateBulletTexture();
+    this.generateCoinTexture();
     this.scene.start("MainMenu");
   }
 
@@ -76,6 +77,18 @@ export class Preloader extends Scene {
     g.fillStyle(0xffffff);
     g.fillCircle(4, 4, 1);
     g.generateTexture("bullet", 8, 8);
+    g.destroy();
+  }
+
+  private generateCoinTexture() {
+    const g = this.add.graphics();
+    g.fillStyle(0x8b6914);
+    g.fillCircle(10, 10, 9);
+    g.fillStyle(0xffcc33);
+    g.fillCircle(10, 10, 7);
+    g.fillStyle(0xffee88);
+    g.fillCircle(8, 8, 3);
+    g.generateTexture("coin", 20, 20);
     g.destroy();
   }
 }

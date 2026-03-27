@@ -23,6 +23,7 @@ export const ROOM_MAX_ENEMIES = 9;
 export const ROOM_SPAWN_SAFE_W = 200;
 export const ROOM_SPAWN_SAFE_H = 200;
 export const ENEMY_SPAWN_BODY_RADIUS = 28;
+export const COIN_SPAWN_BODY_RADIUS = 14;
 
 export const PLAYER_MAX_HEALTH = 10;
 export const PLAYER_INVINCIBLE_MS = 800;
