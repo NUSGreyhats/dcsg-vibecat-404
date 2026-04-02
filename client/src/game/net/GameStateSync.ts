@@ -13,6 +13,7 @@ export interface GameStatePayload {
 export interface ServerResponse {
   ok: boolean;
   message?: string;
+  rollback?: GameStatePayload;
 }
 
 export default class GameStateSync {
@@ -75,6 +76,9 @@ export default class GameStateSync {
         const res: ServerResponse = JSON.parse(ev.data);
         if (!res.ok) {
           console.warn(`[sync] server violation: ${res.message}`);
+          if (res.rollback) {
+            this.applyRollback(res.rollback);
+          }
         }
       } catch {
         console.warn("[sync] bad server message", ev.data);
@@ -94,6 +98,20 @@ export default class GameStateSync {
     this.ws.onerror = () => {
       this.ws?.close();
     };
+  }
+
+  private applyRollback(rb: GameStatePayload) {
+    const p = this.game.player;
+    if (!p?.active) return;
+
+    console.warn(`[sync] rolling back to pos=(${rb.x}, ${rb.y}) room=${rb.currentRoom}`);
+    p.setPosition(rb.x, rb.y);
+    p.setVelocity(0, 0);
+    p.health = rb.health;
+    p.coins = rb.coins;
+
+    this.game.events.emit("player-health-changed", p.health, p.maxHealth);
+    this.game.events.emit("coin-count-changed", p.coins);
   }
 
   private sendState() {

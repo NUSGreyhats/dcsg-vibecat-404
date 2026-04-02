@@ -39,8 +39,9 @@ type gameState struct {
 }
 
 type validationResult struct {
-	OK      bool   `json:"ok"`
-	Message string `json:"message,omitempty"`
+	OK       bool       `json:"ok"`
+	Message  string     `json:"message,omitempty"`
+	Rollback *gameState `json:"rollback,omitempty"`
 }
 
 type playerSession struct {
@@ -58,12 +59,12 @@ func (s *playerSession) validate(gs *gameState) validationResult {
 		dist := math.Sqrt(dx*dx + dy*dy)
 
 		if dist > maxDist {
-			res := validationResult{
-				OK:      false,
-				Message: "position delta exceeds half-map threshold",
+			rollback := *s.last
+			return validationResult{
+				OK:       false,
+				Message:  "position delta exceeds half-map threshold",
+				Rollback: &rollback,
 			}
-			s.last = gs
-			return res
 		}
 	}
 
