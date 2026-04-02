@@ -1,32 +1,10 @@
 import { type Game } from "../scenes/Game";
-import { type WeaponId, getWeaponStats } from "../weapons";
-
-export interface EnemyStateData {
-  id: number;
-  x: number;
-  y: number;
-  hp: number;
-  type: string;
-}
-
-export interface GameStatePayload {
-  x: number;
-  y: number;
-  health: number;
-  currentRoom: number;
-  kills: number;
-  coins: number;
-  ownedWeapons: string[];
-  equippedWeapon: string;
-  playerName: string;
-  enemies: EnemyStateData[];
-  timestamp: number;
-}
+import { GameState, type GameStateJSON } from "./GameState";
 
 export interface ServerResponse {
   ok: boolean;
   message?: string;
-  rollback?: GameStatePayload;
+  rollback?: GameStateJSON;
 }
 
 export default class GameStateSync {
@@ -90,7 +68,7 @@ export default class GameStateSync {
         if (!res.ok) {
           console.warn(`[sync] server violation: ${res.message}`);
           if (res.rollback) {
-            this.applyRollback(res.rollback);
+            this.applyRollback(GameState.fromJSON(res.rollback));
           }
         }
       } catch {
@@ -113,33 +91,11 @@ export default class GameStateSync {
     };
   }
 
-  private applyRollback(rb: GameStatePayload) {
-    const p = this.game.player;
-    if (!p?.active) return;
-
-    console.warn(`[sync] rolling back to pos=(${rb.x}, ${rb.y}) room=${rb.currentRoom} enemies=${rb.enemies?.length ?? 0}`);
-    p.setPosition(rb.x, rb.y);
-    p.setVelocity(0, 0);
-    p.health = rb.health;
-    p.coins = rb.coins;
-
-    if (rb.ownedWeapons) {
-      p.ownedWeaponIds = rb.ownedWeapons as WeaponId[];
-    }
-    if (rb.equippedWeapon) {
-      p.equippedWeaponId = rb.equippedWeapon as WeaponId;
-      this.game.events.emit(
-        "weapon-changed",
-        getWeaponStats(p.equippedWeaponId).displayName,
-      );
-    }
-
-    if (rb.enemies) {
-      this.game.rollbackEnemies(rb.enemies);
-    }
-
-    this.game.events.emit("player-health-changed", p.health, p.maxHealth);
-    this.game.events.emit("coin-count-changed", p.coins);
+  private applyRollback(rb: GameState) {
+    console.warn(
+      `[sync] rolling back to pos=(${rb.x}, ${rb.y}) room=${rb.currentRoom} enemies=${rb.enemies?.length ?? 0}`,
+    );
+    rb.applyToGame(this.game);
   }
 
   sendStateNow() {
@@ -149,23 +105,8 @@ export default class GameStateSync {
   private sendState() {
     if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-    const p = this.game.player;
-    if (!p) return;
-
-    const payload: GameStatePayload = {
-      x: Math.round(p.x * 100) / 100,
-      y: Math.round(p.y * 100) / 100,
-      health: p.health,
-      currentRoom: p.progress.currentRoom,
-      kills: this.game.getKillCount(),
-      coins: p.coins,
-      ownedWeapons: [...p.ownedWeaponIds],
-      equippedWeapon: p.equippedWeaponId,
-      playerName: this.game.playerName,
-      enemies: this.game.getEnemyStates(),
-      timestamp: Date.now(),
-    };
-
-    this.ws.send(JSON.stringify(payload));
+    if (!this.game.player) return;
+    const state = GameState.fromGame(this.game);
+    this.ws.send(JSON.stringify(state.toJSON()));
   }
 }

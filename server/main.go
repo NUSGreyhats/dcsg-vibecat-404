@@ -84,6 +84,46 @@ type playerSession struct {
 	hasWon bool
 }
 
+func cloneEnemies(src []enemyState) []enemyState {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]enemyState, len(src))
+	copy(out, src)
+	return out
+}
+
+func cloneGameState(src *gameState) gameState {
+	cp := *src
+	cp.OwnedWeapons = append([]string(nil), src.OwnedWeapons...)
+	cp.Enemies = cloneEnemies(src.Enemies)
+	return cp
+}
+
+func rollbackForPosition(prev, curr *gameState) *gameState {
+	rb := cloneGameState(curr)
+	rb.X = prev.X
+	rb.Y = prev.Y
+	return &rb
+}
+
+func rollbackForRoomProgression(prev, curr *gameState) *gameState {
+	rb := cloneGameState(curr)
+	rb.CurrentRoom = prev.CurrentRoom
+	rb.X = prev.X
+	rb.Y = prev.Y
+	rb.Enemies = cloneEnemies(prev.Enemies)
+	rb.Kills = prev.Kills
+	return &rb
+}
+
+func rollbackForEnemyViolation(prev, curr *gameState) *gameState {
+	rb := cloneGameState(curr)
+	rb.Enemies = cloneEnemies(prev.Enemies)
+	rb.Kills = prev.Kills
+	return &rb
+}
+
 // maxBulletDamage returns the maximum total bullet damage a player could
 // deal in one sync interval given their owned weapons.
 func maxBulletDamage(owned []string) int {
@@ -166,6 +206,24 @@ func validateEnemies(prev, curr *gameState) string {
 	return ""
 }
 
+// validateRoomProgression ensures room advances happen sequentially and only
+// after clearing enemies in the current room.
+func validateRoomProgression(prev, curr *gameState) string {
+	if curr.CurrentRoom < prev.CurrentRoom {
+		return fmt.Sprintf("room moved backwards (%d -> %d)", prev.CurrentRoom, curr.CurrentRoom)
+	}
+	if curr.CurrentRoom == prev.CurrentRoom {
+		return ""
+	}
+	if curr.CurrentRoom > prev.CurrentRoom+1 {
+		return fmt.Sprintf("room skip detected (%d -> %d)", prev.CurrentRoom, curr.CurrentRoom)
+	}
+	if len(prev.Enemies) > 0 {
+		return fmt.Sprintf("cannot advance room %d with %d enemies still alive", prev.CurrentRoom, len(prev.Enemies))
+	}
+	return ""
+}
+
 func (s *playerSession) validate(gs *gameState) validationResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -177,22 +235,32 @@ func (s *playerSession) validate(gs *gameState) validationResult {
 		dist := math.Sqrt(dx*dx + dy*dy)
 
 		if dist > maxDist {
-			rollback := *s.last
+			rollback := rollbackForPosition(s.last, gs)
 			return validationResult{
 				OK:       false,
 				Message:  "position delta exceeds half-map threshold",
-				Rollback: &rollback,
+				Rollback: rollback,
 			}
 		}
 
-		// Enemy check (skip on room change — enemies reset completely)
+		// Room progression checks.
+		if msg := validateRoomProgression(s.last, gs); msg != "" {
+			rollback := rollbackForRoomProgression(s.last, gs)
+			return validationResult{
+				OK:       false,
+				Message:  msg,
+				Rollback: rollback,
+			}
+		}
+
+		// Enemy checks within a room.
 		if gs.CurrentRoom == s.last.CurrentRoom {
 			if msg := validateEnemies(s.last, gs); msg != "" {
-				rollback := *s.last
+				rollback := rollbackForEnemyViolation(s.last, gs)
 				return validationResult{
 					OK:       false,
 					Message:  msg,
-					Rollback: &rollback,
+					Rollback: rollback,
 				}
 			}
 		}
@@ -300,17 +368,6 @@ func handleGameWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if !session.hasWon && gs.CurrentRoom >= winRoom {
-			session.hasWon = true
-			name := gs.PlayerName
-			if name == "" {
-				name = "Anonymous"
-			}
-			log.Printf("WINNER: %s from %s (room=%d kills=%d)",
-				name, r.RemoteAddr, gs.CurrentRoom, gs.Kills)
-			appendWinner(name)
-		}
-
 		res := session.validate(&gs)
 		out, _ := json.Marshal(res)
 		if err := conn.Write(context.Background(), websocket.MessageText, out); err != nil {
@@ -321,6 +378,18 @@ func handleGameWS(w http.ResponseWriter, r *http.Request) {
 		if !res.OK {
 			log.Printf("VIOLATION %s room=%d pos=(%.0f,%.0f): %s",
 				r.RemoteAddr, gs.CurrentRoom, gs.X, gs.Y, res.Message)
+			continue
+		}
+
+		if !session.hasWon && gs.CurrentRoom >= winRoom {
+			session.hasWon = true
+			name := gs.PlayerName
+			if name == "" {
+				name = "Anonymous"
+			}
+			log.Printf("WINNER: %s from %s (room=%d kills=%d)",
+				name, r.RemoteAddr, gs.CurrentRoom, gs.Kills)
+			appendWinner(name)
 		}
 	}
 }

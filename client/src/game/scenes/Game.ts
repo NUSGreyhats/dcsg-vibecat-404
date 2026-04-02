@@ -218,6 +218,24 @@ export class Game extends Scene {
     }
   }
 
+  applyRollbackState(
+    currentRoom: number,
+    kills: number,
+    enemyStates: Array<{ id: number; x: number; y: number; hp: number; type: string }>,
+  ) {
+    if (this.player.progress.currentRoom !== currentRoom) {
+      this.player.progress.currentRoom = currentRoom;
+      this.exitThrottle = false;
+      this.loadRoom();
+    }
+
+    this.killCount = kills;
+    this.events.emit("kill-count-changed", this.killCount);
+
+    this.rollbackEnemies(enemyStates);
+    this.checkRoomCleared();
+  }
+
   tryOpenInventory() {
     if (this.gameOver || this.inventoryOpen || this.shopOpen) return;
     this.inventoryOpen = true;
