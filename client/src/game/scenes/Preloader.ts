@@ -1,4 +1,5 @@
 import { Scene } from "phaser";
+import { ROOM_COUNT } from "../constants";
 
 export class Preloader extends Scene {
   constructor() {
@@ -22,6 +23,11 @@ export class Preloader extends Scene {
 
     this.load.image("logo", "logo.png");
     this.load.image("character", "sprite.png");
+    this.load.image("topdown-tiles", "topdown-tilesheet-extruded.png");
+
+    for (let i = 1; i <= ROOM_COUNT; i++) {
+      this.load.tilemapTiledJSON(`room-${i}`, `rooms/room-${i}.json`);
+    }
   }
 
   create() {

@@ -7,16 +7,6 @@ import Coin from "../entities/Coin";
 import {
   ROOM_WIDTH,
   ROOM_HEIGHT,
-  WALL_THICKNESS,
-  DOOR_GAP,
-  ROOM_MIN_INTERIOR_WALLS,
-  ROOM_MAX_INTERIOR_WALLS,
-  ROOM_MIN_ENEMIES,
-  ROOM_MAX_ENEMIES,
-  ROOM_SPAWN_SAFE_W,
-  ROOM_SPAWN_SAFE_H,
-  ENEMY_SPAWN_BODY_RADIUS,
-  COIN_SPAWN_BODY_RADIUS,
   WS_URL,
   STATE_SYNC_INTERVAL_MS,
   WIN_ROOM,
@@ -28,21 +18,22 @@ import {
   type WeaponId,
 } from "../weapons";
 import { KEYCODE_BACKTICK } from "../shop";
-import {
-  type DoorSide,
-  type WallSpec,
-  buildPerimeterWalls,
-  getDoorBlockerSpec,
-  getExitZoneCenter,
-  getPlayerSpawnForEntry,
-  oppositeSide,
-  generateInteriorWalls,
-  isClearOfWalls,
-} from "../world/roomLayout";
 
-const WALL_COLOR = 0x4a5568;
 const DOOR_COLOR = 0x6b4423;
-const FLOOR_COLOR = 0x252540;
+
+function getObjProp(
+  obj: Phaser.Types.Tilemaps.TiledObject,
+  name: string,
+): string | undefined {
+  if (!obj.properties) return undefined;
+  if (Array.isArray(obj.properties)) {
+    const prop = (obj.properties as { name: string; value: string }[]).find(
+      (p) => p.name === name,
+    );
+    return prop?.value;
+  }
+  return (obj.properties as Record<string, string>)[name];
+}
 
 export class Game extends Scene {
   camera: Phaser.Cameras.Scene2D.Camera;
@@ -51,13 +42,22 @@ export class Game extends Scene {
   enemies: Phaser.GameObjects.Group;
   bullets: Phaser.GameObjects.Group;
   coins: Phaser.GameObjects.Group;
-  private wallGroup!: Phaser.Physics.Arcade.StaticGroup;
-  private floorBg: Phaser.GameObjects.Rectangle | null = null;
+
+  private currentMap: Phaser.Tilemaps.Tilemap | null = null;
+  private groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
+  private wallsLayer: Phaser.Tilemaps.TilemapLayer | null = null;
+  private wallColliders: Phaser.Physics.Arcade.Collider[] = [];
+  private doorBlockerGroup!: Phaser.Physics.Arcade.StaticGroup;
   private doorBlocker: Phaser.GameObjects.Rectangle | null = null;
   private exitZone: Phaser.GameObjects.Rectangle | null = null;
   private exitDoorCollider: Phaser.Physics.Arcade.Collider | null = null;
+  private exitZoneData: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null = null;
   private doorOpen = false;
-  private currentDoorSide: DoorSide = "top";
   private lastShotTime = 0;
   private killCount = 0;
   private gameOver = false;
@@ -79,7 +79,6 @@ export class Game extends Scene {
     this.shopOpen = false;
     this.playerName = getPlayerName();
 
-    this.wallGroup = this.physics.add.staticGroup();
     this.enemies = this.add.group();
     this.bullets = this.add.group();
     this.coins = this.add.group();
@@ -91,12 +90,6 @@ export class Game extends Scene {
       ROOM_HEIGHT / 2,
       this.controls,
     );
-
-    this.physics.add.collider(this.player, this.wallGroup);
-    this.physics.add.collider(this.enemies, this.wallGroup);
-    this.physics.add.collider(this.bullets, this.wallGroup, (bulletObj) => {
-      (bulletObj as Bullet).destroy();
-    });
 
     this.physics.add.overlap(
       this.bullets,
@@ -123,7 +116,7 @@ export class Game extends Scene {
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
 
     this.scene.launch("GameHUD");
-    this.loadRoom(null);
+    this.loadRoom();
     this.events.emit("coin-count-changed", this.player.coins);
     this.events.emit(
       "weapon-changed",
@@ -195,191 +188,118 @@ export class Game extends Scene {
     return true;
   }
 
+  // ---- Room lifecycle (tilemap-based) ----
+
   private clearRoomGeometry() {
+    for (const c of this.wallColliders) c.destroy();
+    this.wallColliders = [];
+
     if (this.exitDoorCollider) {
       this.exitDoorCollider.destroy();
       this.exitDoorCollider = null;
     }
+
     this.exitZone?.destroy();
     this.exitZone = null;
+    this.exitZoneData = null;
+
+    this.doorBlockerGroup?.clear(true, true);
     this.doorBlocker = null;
-    this.floorBg?.destroy();
-    this.floorBg = null;
-    this.wallGroup.clear(true, true);
 
-    for (const e of this.enemies.getChildren().slice()) {
+    this.groundLayer?.destroy();
+    this.wallsLayer?.destroy();
+    this.currentMap?.destroy();
+    this.groundLayer = null;
+    this.wallsLayer = null;
+    this.currentMap = null;
+
+    for (const e of this.enemies.getChildren().slice())
       (e as Enemy).destroy();
-    }
-    for (const b of this.bullets.getChildren().slice()) {
+    for (const b of this.bullets.getChildren().slice())
       (b as Bullet).destroy();
-    }
-    for (const c of this.coins.getChildren().slice()) {
+    for (const c of this.coins.getChildren().slice())
       (c as Coin).destroy();
-    }
   }
 
-  private addStaticWall(spec: WallSpec, color: number): Phaser.GameObjects.Rectangle {
-    const r = this.add.rectangle(spec.cx, spec.cy, spec.w, spec.h, color);
-    r.setDepth(0);
-    this.physics.add.existing(r, true);
-    this.wallGroup.add(r);
-    return r;
-  }
-
-  private loadRoom(entryFrom: DoorSide | null) {
+  private loadRoom() {
     this.clearRoomGeometry();
     this.doorOpen = false;
 
-    this.floorBg = this.add.rectangle(
-      ROOM_WIDTH / 2,
-      ROOM_HEIGHT / 2,
-      ROOM_WIDTH,
-      ROOM_HEIGHT,
-      FLOOR_COLOR,
-    );
-    this.floorBg.setDepth(-6);
+    const roomNum = this.player.progress.currentRoom;
 
-    const sides: DoorSide[] = ["top", "bottom", "left", "right"];
-    this.currentDoorSide = sides[Phaser.Math.Between(0, sides.length - 1)];
+    const map = this.make.tilemap({ key: `room-${roomNum}` });
+    const tileset = map.addTilesetImage("top_down_shooter", "topdown-tiles")!;
 
-    const spawn = getPlayerSpawnForEntry(
-      ROOM_WIDTH,
-      ROOM_HEIGHT,
-      entryFrom,
-      WALL_THICKNESS + 8,
+    this.groundLayer = map.createLayer("Ground", tileset)!;
+    this.groundLayer.setDepth(-5);
+
+    this.wallsLayer = map.createLayer("Walls", tileset)!;
+    this.wallsLayer.setDepth(0);
+    this.wallsLayer.setCollisionByExclusion([-1, 0]);
+
+    this.currentMap = map;
+
+    this.doorBlockerGroup = this.physics.add.staticGroup();
+
+    this.wallColliders.push(
+      this.physics.add.collider(this.player, this.wallsLayer),
+      this.physics.add.collider(this.enemies, this.wallsLayer),
+      this.physics.add.collider(this.bullets, this.wallsLayer, (b) => {
+        (b as Bullet).destroy();
+      }),
+      this.physics.add.collider(this.player, this.doorBlockerGroup),
+      this.physics.add.collider(this.enemies, this.doorBlockerGroup),
+      this.physics.add.collider(this.bullets, this.doorBlockerGroup, (b) => {
+        (b as Bullet).destroy();
+      }),
     );
-    this.player.setPosition(spawn.x, spawn.y);
+
+    const objects = map.getObjectLayer("Objects")?.objects ?? [];
+
+    const ps = objects.find((o) => o.type === "PlayerSpawn");
+    if (ps) this.player.setPosition(ps.x!, ps.y!);
     this.player.setVelocity(0, 0);
 
-    const perimeter = buildPerimeterWalls(
-      ROOM_WIDTH,
-      ROOM_HEIGHT,
-      WALL_THICKNESS,
-      DOOR_GAP,
-      this.currentDoorSide,
-    );
-    const interior = generateInteriorWalls(
-      ROOM_WIDTH,
-      ROOM_HEIGHT,
-      WALL_THICKNESS,
-      DOOR_GAP,
-      this.currentDoorSide,
-      ROOM_MIN_INTERIOR_WALLS,
-      ROOM_MAX_INTERIOR_WALLS,
-      spawn.x,
-      spawn.y,
-      ROOM_SPAWN_SAFE_W,
-      ROOM_SPAWN_SAFE_H,
-    );
-
-    for (const spec of perimeter) {
-      this.addStaticWall(spec, WALL_COLOR);
-    }
-    for (const spec of interior) {
-      this.addStaticWall(spec, WALL_COLOR);
+    const db = objects.find((o) => o.type === "DoorBlocker");
+    if (db && db.width && db.height) {
+      this.doorBlocker = this.add.rectangle(
+        db.x! + db.width / 2,
+        db.y! + db.height / 2,
+        db.width,
+        db.height,
+        DOOR_COLOR,
+      );
+      this.doorBlocker.setDepth(0);
+      this.physics.add.existing(this.doorBlocker, true);
+      this.doorBlockerGroup.add(this.doorBlocker);
     }
 
-    const blockerSpec = getDoorBlockerSpec(
-      ROOM_WIDTH,
-      ROOM_HEIGHT,
-      WALL_THICKNESS,
-      DOOR_GAP,
-      this.currentDoorSide,
-    );
-    this.doorBlocker = this.addStaticWall(blockerSpec, DOOR_COLOR);
+    const ez = objects.find((o) => o.type === "Exit");
+    if (ez && ez.width && ez.height) {
+      this.exitZoneData = {
+        x: ez.x!,
+        y: ez.y!,
+        w: ez.width,
+        h: ez.height,
+      };
+    }
 
-    const enemyTarget =
-      Phaser.Math.Between(ROOM_MIN_ENEMIES, ROOM_MAX_ENEMIES) +
-      Math.floor((this.player.progress.currentRoom - 1) / 2);
-    const capped = Phaser.Math.Clamp(enemyTarget, ROOM_MIN_ENEMIES, 14);
-
-    const spawnCheckWalls: WallSpec[] = [
-      ...perimeter,
-      ...interior,
-      blockerSpec,
-    ];
-    this.spawnRoomEnemies(capped, spawn.x, spawn.y, spawnCheckWalls);
-    this.spawnRoomCoins(spawn.x, spawn.y, spawnCheckWalls);
-
-    this.events.emit("room-changed", this.player.progress.currentRoom);
-  }
-
-  private spawnRoomEnemies(
-    count: number,
-    px: number,
-    py: number,
-    walls: WallSpec[],
-  ) {
-    const margin = 80;
-    let placed = 0;
-    let tries = 0;
-    const maxTries = count * 100;
-
-    while (placed < count && tries < maxTries) {
-      tries++;
-      const ex = Phaser.Math.Between(margin, ROOM_WIDTH - margin);
-      const ey = Phaser.Math.Between(margin, ROOM_HEIGHT - margin);
-      if (Phaser.Math.Distance.Between(ex, ey, px, py) < 130) continue;
-      if (!isClearOfWalls(ex, ey, ENEMY_SPAWN_BODY_RADIUS, walls)) continue;
-
-      const type: RobotType =
-        Math.random() < 0.22 ? "robot-heavy" : "robot-grunt";
-      const enemy = new Enemy(this, ex, ey, type, this.player);
+    for (const es of objects.filter((o) => o.type === "EnemySpawn")) {
+      const enemyType =
+        (getObjProp(es, "enemyType") || "robot-grunt") as RobotType;
+      const enemy = new Enemy(this, es.x!, es.y!, enemyType, this.player);
       this.enemies.add(enemy);
-      placed++;
     }
-  }
 
-  private spawnRoomCoins(px: number, py: number, walls: WallSpec[]) {
-    const count = Phaser.Math.Between(1, 5);
-    const margin = 80;
-    const minFromPlayer = 96;
-    const minCoinSep = 32;
-    const minFromEnemy = 40;
-    const placed: { x: number; y: number }[] = [];
-
-    for (let i = 0; i < count; i++) {
-      let found = false;
-      for (let tries = 0; tries < 100 && !found; tries++) {
-        const cx = Phaser.Math.Between(margin, ROOM_WIDTH - margin);
-        const cy = Phaser.Math.Between(margin, ROOM_HEIGHT - margin);
-        if (Phaser.Math.Distance.Between(cx, cy, px, py) < minFromPlayer)
-          continue;
-        if (!isClearOfWalls(cx, cy, COIN_SPAWN_BODY_RADIUS, walls)) continue;
-
-        let blocked = false;
-        for (const p of placed) {
-          if (Phaser.Math.Distance.Between(cx, cy, p.x, p.y) < minCoinSep) {
-            blocked = true;
-            break;
-          }
-        }
-        if (blocked) continue;
-
-        for (const e of this.enemies.getChildren()) {
-          const en = e as Enemy;
-          if (!en.active) continue;
-          if (Phaser.Math.Distance.Between(cx, cy, en.x, en.y) < minFromEnemy) {
-            blocked = true;
-            break;
-          }
-        }
-        if (blocked) continue;
-
-        const coin = new Coin(this, cx, cy);
-        this.coins.add(coin);
-        placed.push({ x: cx, y: cy });
-        found = true;
-      }
+    for (const cs of objects.filter((o) => o.type === "CoinSpawn")) {
+      const coin = new Coin(this, cs.x!, cs.y!);
+      this.coins.add(coin);
     }
+
+    this.events.emit("room-changed", roomNum);
   }
 
-  private onPlayerPickupCoin(coin: Coin) {
-    if (!coin.active || this.gameOver) return;
-    coin.destroy();
-    this.player.coins += 1;
-    this.events.emit("coin-count-changed", this.player.coins);
-  }
+  // ---- Door / exit ----
 
   private tryAdvanceThroughDoor() {
     if (!this.doorOpen || this.gameOver || this.exitThrottle) return;
@@ -395,11 +315,10 @@ export class Game extends Scene {
       return;
     }
 
-    const cameFrom = oppositeSide(this.currentDoorSide);
     this.time.delayedCall(200, () => {
       this.exitThrottle = false;
     });
-    this.loadRoom(cameFrom);
+    this.loadRoom();
   }
 
   private openExitDoor() {
@@ -407,17 +326,21 @@ export class Game extends Scene {
     this.doorOpen = true;
 
     if (this.doorBlocker) {
-      this.wallGroup.remove(this.doorBlocker, true, true);
+      this.doorBlockerGroup.remove(this.doorBlocker, true, true);
       this.doorBlocker = null;
     }
 
-    const z = getExitZoneCenter(
-      ROOM_WIDTH,
-      ROOM_HEIGHT,
-      WALL_THICKNESS,
-      this.currentDoorSide,
+    if (!this.exitZoneData) return;
+    const z = this.exitZoneData;
+
+    this.exitZone = this.add.rectangle(
+      z.x + z.w / 2,
+      z.y + z.h / 2,
+      z.w,
+      z.h,
+      0x66ff99,
+      0.2,
     );
-    this.exitZone = this.add.rectangle(z.cx, z.cy, z.w, z.h, 0x66ff99, 0.2);
     this.exitZone.setDepth(-3);
     this.physics.add.existing(this.exitZone, true);
     const eb = this.exitZone.body as Phaser.Physics.Arcade.StaticBody;
@@ -431,9 +354,7 @@ export class Game extends Scene {
       repeat: -1,
     });
 
-    if (this.exitDoorCollider) {
-      this.exitDoorCollider.destroy();
-    }
+    if (this.exitDoorCollider) this.exitDoorCollider.destroy();
     this.exitDoorCollider = this.physics.add.overlap(
       this.player,
       this.exitZone,
@@ -451,6 +372,8 @@ export class Game extends Scene {
       this.openExitDoor();
     }
   }
+
+  // ---- Combat ----
 
   private shootBullet() {
     const w = getWeaponStats(this.player.equippedWeaponId);
@@ -537,6 +460,13 @@ export class Game extends Scene {
       this.physics.pause();
       this.scene.launch("PauseMenu", { gameOver: true });
     }
+  }
+
+  private onPlayerPickupCoin(coin: Coin) {
+    if (!coin.active || this.gameOver) return;
+    coin.destroy();
+    this.player.coins += 1;
+    this.events.emit("coin-count-changed", this.player.coins);
   }
 
   update(_time: number, delta: number) {
