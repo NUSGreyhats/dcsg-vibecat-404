@@ -25,3 +25,6 @@ export const COIN_SPAWN_BODY_RADIUS = 14;
 
 export const PLAYER_MAX_HEALTH = 10;
 export const PLAYER_INVINCIBLE_MS = 800;
+
+export const WS_URL = "ws://localhost:8888/ws";
+export const STATE_SYNC_INTERVAL_MS = 1000;

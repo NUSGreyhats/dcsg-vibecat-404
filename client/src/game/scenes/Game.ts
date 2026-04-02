@@ -17,7 +17,10 @@ import {
   ROOM_SPAWN_SAFE_H,
   ENEMY_SPAWN_BODY_RADIUS,
   COIN_SPAWN_BODY_RADIUS,
+  WS_URL,
+  STATE_SYNC_INTERVAL_MS,
 } from "../constants";
+import GameStateSync from "../net/GameStateSync";
 import {
   getWeaponStats,
   type WeaponId,
@@ -59,6 +62,7 @@ export class Game extends Scene {
   private exitThrottle = false;
   inventoryOpen = false;
   shopOpen = false;
+  private stateSync: GameStateSync | null = null;
 
   constructor() {
     super("Game");
@@ -137,6 +141,18 @@ export class Game extends Scene {
     this.events.on("resume", () => {
       this.input.keyboard!.resetKeys();
     });
+
+    this.stateSync = new GameStateSync(this, WS_URL, STATE_SYNC_INTERVAL_MS);
+    this.stateSync.start();
+
+    this.events.once("shutdown", () => {
+      this.stateSync?.stop();
+      this.stateSync = null;
+    });
+  }
+
+  getKillCount(): number {
+    return this.killCount;
   }
 
   tryOpenInventory() {

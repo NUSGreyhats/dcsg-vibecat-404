@@ -15,6 +15,7 @@ export class GameHUD extends Scene {
   private coinText: Phaser.GameObjects.Text;
   private weaponText: Phaser.GameObjects.Text;
   private roomText: Phaser.GameObjects.Text;
+  private connBanner: Phaser.GameObjects.Text;
 
   constructor() {
     super("GameHUD");
@@ -95,6 +96,17 @@ export class GameHUD extends Scene {
       strokeThickness: 4,
     }).setOrigin(0.5, 0.5);
 
+    this.connBanner = this.add
+      .text(512, 748, "", {
+        fontFamily: "Arial",
+        fontSize: "14px",
+        color: "#ff4444",
+        backgroundColor: "#000000cc",
+        padding: { left: 12, right: 12, top: 6, bottom: 6 },
+      })
+      .setOrigin(0.5, 1)
+      .setVisible(false);
+
     const gameScene = this.scene.get("Game");
     gameScene.events.on(
       "player-health-changed",
@@ -105,6 +117,7 @@ export class GameHUD extends Scene {
     gameScene.events.on("coin-count-changed", this.updateCoinCount, this);
     gameScene.events.on("weapon-changed", this.updateWeaponLabel, this);
     gameScene.events.on("room-changed", this.updateRoomLabel, this);
+    gameScene.events.on("ws-status", this.updateConnectionStatus, this);
     gameScene.events.once("shutdown", () => {
       gameScene.events.off(
         "player-health-changed",
@@ -125,6 +138,11 @@ export class GameHUD extends Scene {
       gameScene.events.off(
         "weapon-changed",
         this.updateWeaponLabel,
+        this,
+      );
+      gameScene.events.off(
+        "ws-status",
+        this.updateConnectionStatus,
         this,
       );
     });
@@ -173,6 +191,18 @@ export class GameHUD extends Scene {
 
   private updateWeaponLabel(displayName: string) {
     this.weaponText.setText(`Weapon: ${displayName}`);
+  }
+
+  private updateConnectionStatus(connected: boolean, failCount?: number) {
+    if (connected) {
+      this.connBanner.setVisible(false);
+    } else {
+      const retries = failCount ?? 0;
+      const suffix = retries > 1 ? ` (attempt ${retries})` : "";
+      this.connBanner
+        .setText(`Server disconnected — retrying${suffix}`)
+        .setVisible(true);
+    }
   }
 
   private getHealthColor(ratio: number): number {
