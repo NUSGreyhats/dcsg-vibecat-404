@@ -29,13 +29,15 @@ type heartbeatResponse struct {
 }
 
 type gameState struct {
-	X           float64 `json:"x"`
-	Y           float64 `json:"y"`
-	Health      int     `json:"health"`
-	CurrentRoom int     `json:"currentRoom"`
-	Kills       int     `json:"kills"`
-	Coins       int     `json:"coins"`
-	Timestamp   float64 `json:"timestamp"`
+	X              float64  `json:"x"`
+	Y              float64  `json:"y"`
+	Health         int      `json:"health"`
+	CurrentRoom    int      `json:"currentRoom"`
+	Kills          int      `json:"kills"`
+	Coins          int      `json:"coins"`
+	OwnedWeapons   []string `json:"ownedWeapons"`
+	EquippedWeapon string   `json:"equippedWeapon"`
+	Timestamp      float64  `json:"timestamp"`
 }
 
 type validationResult struct {

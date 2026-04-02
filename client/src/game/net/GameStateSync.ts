@@ -1,4 +1,5 @@
 import { type Game } from "../scenes/Game";
+import { type WeaponId, getWeaponStats } from "../weapons";
 
 export interface GameStatePayload {
   x: number;
@@ -7,6 +8,8 @@ export interface GameStatePayload {
   currentRoom: number;
   kills: number;
   coins: number;
+  ownedWeapons: string[];
+  equippedWeapon: string;
   timestamp: number;
 }
 
@@ -110,6 +113,17 @@ export default class GameStateSync {
     p.health = rb.health;
     p.coins = rb.coins;
 
+    if (rb.ownedWeapons) {
+      p.ownedWeaponIds = rb.ownedWeapons as WeaponId[];
+    }
+    if (rb.equippedWeapon) {
+      p.equippedWeaponId = rb.equippedWeapon as WeaponId;
+      this.game.events.emit(
+        "weapon-changed",
+        getWeaponStats(p.equippedWeaponId).displayName,
+      );
+    }
+
     this.game.events.emit("player-health-changed", p.health, p.maxHealth);
     this.game.events.emit("coin-count-changed", p.coins);
   }
@@ -127,6 +141,8 @@ export default class GameStateSync {
       currentRoom: p.progress.currentRoom,
       kills: this.game.getKillCount(),
       coins: p.coins,
+      ownedWeapons: [...p.ownedWeaponIds],
+      equippedWeapon: p.equippedWeaponId,
       timestamp: Date.now(),
     };
 
