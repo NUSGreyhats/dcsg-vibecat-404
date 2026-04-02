@@ -10,6 +10,7 @@ export interface GameStatePayload {
   coins: number;
   ownedWeapons: string[];
   equippedWeapon: string;
+  playerName: string;
   timestamp: number;
 }
 
@@ -128,11 +129,15 @@ export default class GameStateSync {
     this.game.events.emit("coin-count-changed", p.coins);
   }
 
+  sendStateNow() {
+    this.sendState();
+  }
+
   private sendState() {
     if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
     const p = this.game.player;
-    if (!p?.active) return;
+    if (!p) return;
 
     const payload: GameStatePayload = {
       x: Math.round(p.x * 100) / 100,
@@ -143,6 +148,7 @@ export default class GameStateSync {
       coins: p.coins,
       ownedWeapons: [...p.ownedWeaponIds],
       equippedWeapon: p.equippedWeaponId,
+      playerName: this.game.playerName,
       timestamp: Date.now(),
     };
 

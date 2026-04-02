@@ -19,7 +19,9 @@ import {
   COIN_SPAWN_BODY_RADIUS,
   WS_URL,
   STATE_SYNC_INTERVAL_MS,
+  WIN_ROOM,
 } from "../constants";
+import { getPlayerName } from "./MainMenu";
 import GameStateSync from "../net/GameStateSync";
 import {
   getWeaponStats,
@@ -62,6 +64,7 @@ export class Game extends Scene {
   private exitThrottle = false;
   inventoryOpen = false;
   shopOpen = false;
+  playerName = "Player";
   private stateSync: GameStateSync | null = null;
 
   constructor() {
@@ -74,6 +77,7 @@ export class Game extends Scene {
     this.exitThrottle = false;
     this.inventoryOpen = false;
     this.shopOpen = false;
+    this.playerName = getPlayerName();
 
     this.wallGroup = this.physics.add.staticGroup();
     this.enemies = this.add.group();
@@ -381,6 +385,16 @@ export class Game extends Scene {
     if (!this.doorOpen || this.gameOver || this.exitThrottle) return;
     this.exitThrottle = true;
     this.player.progress.currentRoom += 1;
+
+    if (this.player.progress.currentRoom > WIN_ROOM) {
+      this.gameOver = true;
+      this.stateSync?.sendStateNow();
+      this.player.setVelocity(0);
+      this.physics.pause();
+      this.scene.launch("WinScreen");
+      return;
+    }
+
     const cameFrom = oppositeSide(this.currentDoorSide);
     this.time.delayedCall(200, () => {
       this.exitThrottle = false;

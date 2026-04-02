@@ -3,6 +3,7 @@ import { Game as MainGame } from "./scenes/Game";
 import { GameHUD } from "./scenes/GameHUD";
 import { MainMenu } from "./scenes/MainMenu";
 import { PauseMenu } from "./scenes/PauseMenu";
+import { WinScreen } from "./scenes/WinScreen";
 import { InventoryMenu } from "./scenes/InventoryMenu";
 import { ShopMenu } from "./scenes/ShopMenu";
 import { AUTO, Game } from "phaser";
@@ -27,6 +28,7 @@ const config: Phaser.Types.Core.GameConfig = {
     MainGame,
     GameHUD,
     PauseMenu,
+    WinScreen,
     InventoryMenu,
     ShopMenu,
   ],

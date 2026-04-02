@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"flag"
+	"fmt"
+	"html/template"
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -21,7 +25,10 @@ const (
 	roomWidth  = 1024
 	roomHeight = 768
 	maxDist    = math.Sqrt2 * float64(max(roomWidth, roomHeight)) / 2
+	winRoom    = 11
 )
+
+const csvPath = "winners.csv"
 
 type heartbeatResponse struct {
 	Status  string `json:"status"`
@@ -37,6 +44,7 @@ type gameState struct {
 	Coins          int      `json:"coins"`
 	OwnedWeapons   []string `json:"ownedWeapons"`
 	EquippedWeapon string   `json:"equippedWeapon"`
+	PlayerName     string   `json:"playerName"`
 	Timestamp      float64  `json:"timestamp"`
 }
 
@@ -47,8 +55,9 @@ type validationResult struct {
 }
 
 type playerSession struct {
-	mu   sync.Mutex
-	last *gameState
+	mu     sync.Mutex
+	last   *gameState
+	hasWon bool
 }
 
 func (s *playerSession) validate(gs *gameState) validationResult {
@@ -73,6 +82,74 @@ func (s *playerSession) validate(gs *gameState) validationResult {
 	s.last = gs
 	return validationResult{OK: true}
 }
+
+// --- leaderboard persistence ---
+
+type winner struct {
+	Name string
+	Time string
+}
+
+var (
+	leaderMu sync.Mutex
+	leaders  []winner
+)
+
+func loadLeaderboard() {
+	f, err := os.Open(csvPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		log.Printf("warning: could not open %s: %v", csvPath, err)
+		return
+	}
+	defer f.Close()
+
+	r := csv.NewReader(f)
+	records, err := r.ReadAll()
+	if err != nil {
+		log.Printf("warning: could not read %s: %v", csvPath, err)
+		return
+	}
+
+	for _, rec := range records {
+		if len(rec) >= 2 {
+			leaders = append(leaders, winner{Name: rec[0], Time: rec[1]})
+		}
+	}
+	log.Printf("loaded %d leaderboard entries from %s", len(leaders), csvPath)
+}
+
+func appendWinner(name string) {
+	leaderMu.Lock()
+	defer leaderMu.Unlock()
+
+	ts := time.Now().UTC().Format(time.RFC3339)
+	w := winner{Name: name, Time: ts}
+	leaders = append(leaders, w)
+
+	f, err := os.OpenFile(csvPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("error opening %s for append: %v", csvPath, err)
+		return
+	}
+	defer f.Close()
+
+	cw := csv.NewWriter(f)
+	_ = cw.Write([]string{w.Name, w.Time})
+	cw.Flush()
+}
+
+func getLeaders() []winner {
+	leaderMu.Lock()
+	defer leaderMu.Unlock()
+	out := make([]winner, len(leaders))
+	copy(out, leaders)
+	return out
+}
+
+// --- websocket handler ---
 
 func handleGameWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
@@ -104,6 +181,17 @@ func handleGameWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		if !session.hasWon && gs.CurrentRoom >= winRoom {
+			session.hasWon = true
+			name := gs.PlayerName
+			if name == "" {
+				name = "Anonymous"
+			}
+			log.Printf("WINNER: %s from %s (room=%d kills=%d)",
+				name, r.RemoteAddr, gs.CurrentRoom, gs.Kills)
+			appendWinner(name)
+		}
+
 		res := session.validate(&gs)
 		out, _ := json.Marshal(res)
 		if err := conn.Write(context.Background(), websocket.MessageText, out); err != nil {
@@ -131,10 +219,62 @@ func (s *playerSession) debugTicker(addr string) {
 			log.Printf("[debug] %s: no state received yet", addr)
 			continue
 		}
-		log.Printf("[debug] %s: room=%d pos=(%.1f, %.1f) hp=%d kills=%d coins=%d",
-			addr, gs.CurrentRoom, gs.X, gs.Y, gs.Health, gs.Kills, gs.Coins)
+		log.Printf("[debug] %s: room=%d pos=(%.1f, %.1f) hp=%d kills=%d coins=%d name=%s",
+			addr, gs.CurrentRoom, gs.X, gs.Y, gs.Health, gs.Kills, gs.Coins, gs.PlayerName)
 	}
 }
+
+// --- leaderboard page ---
+
+var leaderboardTmpl = template.Must(template.New("lb").Funcs(template.FuncMap{
+	"inc": func(i int) int { return i + 1 },
+}).Parse(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leaderboard</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#0d1117;color:#c9d1d9;font-family:'Segoe UI',Arial,sans-serif;padding:40px 20px}
+  h1{text-align:center;font-size:2.4rem;margin-bottom:32px;color:#58a6ff}
+  table{margin:0 auto;border-collapse:collapse;min-width:400px;max-width:700px;width:100%}
+  th,td{padding:12px 20px;text-align:left}
+  th{background:#161b22;color:#8b949e;font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid #30363d}
+  tr:nth-child(even) td{background:#161b22}
+  td{border-bottom:1px solid #21262d;font-size:1rem}
+  tr:first-child td{color:#ffd700;font-weight:600}
+  .empty{text-align:center;color:#8b949e;padding:40px;font-size:1.1rem}
+  .rank{color:#8b949e;font-weight:600}
+</style>
+</head>
+<body>
+<h1>Leaderboard</h1>
+{{if .}}
+<table>
+<thead><tr><th>#</th><th>Player</th><th>Time (UTC)</th></tr></thead>
+<tbody>
+{{range $i, $w := .}}
+<tr><td class="rank">{{inc $i}}</td><td>{{$w.Name}}</td><td>{{$w.Time}}</td></tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<p class="empty">No winners yet. Be the first!</p>
+{{end}}
+</body>
+</html>
+`))
+
+func serveLeaderboard(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := getLeaders()
+	if err := leaderboardTmpl.Execute(w, data); err != nil {
+		log.Printf("leaderboard template error: %v", err)
+	}
+}
+
+// --- heartbeat ---
 
 func serveHeartbeatJSON(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -158,9 +298,19 @@ func serveHeartbeatJSON(w http.ResponseWriter, r *http.Request) {
 func main() {
 	flag.Parse()
 
+	loadLeaderboard()
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/ws", handleGameWS)
+
+	mux.HandleFunc("/leaderboard", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/leaderboard" {
+			http.NotFound(w, r)
+			return
+		}
+		serveLeaderboard(w, r)
+	})
 
 	mux.HandleFunc("/api", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api" {
@@ -187,7 +337,8 @@ func main() {
 	})
 
 	addr := "127.0.0.1:8888"
-	log.Printf("listening on http://%s/", addr)
+	fmt.Printf("listening on http://%s/\n", addr)
+	fmt.Printf("leaderboard: http://%s/leaderboard\n", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
