@@ -30,22 +30,46 @@ const (
 
 const csvPath = "winners.csv"
 
+// Weapon damage/cooldown specs — must match client weapons.ts
+type weaponSpec struct {
+	Damage     int
+	CooldownMs int
+}
+
+var weaponSpecs = map[string]weaponSpec{
+	"sar21":   {Damage: 1, CooldownMs: 150},
+	"maximi":  {Damage: 2, CooldownMs: 220},
+	"cs-lr4":  {Damage: 4, CooldownMs: 450},
+	"matador": {Damage: 6, CooldownMs: 520},
+}
+
+const syncIntervalMs = 1500 // client sends every 1000ms; 500ms buffer for jitter
+
 type heartbeatResponse struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
 }
 
+type enemyState struct {
+	ID   int     `json:"id"`
+	X    float64 `json:"x"`
+	Y    float64 `json:"y"`
+	HP   int     `json:"hp"`
+	Type string  `json:"type"`
+}
+
 type gameState struct {
-	X              float64  `json:"x"`
-	Y              float64  `json:"y"`
-	Health         int      `json:"health"`
-	CurrentRoom    int      `json:"currentRoom"`
-	Kills          int      `json:"kills"`
-	Coins          int      `json:"coins"`
-	OwnedWeapons   []string `json:"ownedWeapons"`
-	EquippedWeapon string   `json:"equippedWeapon"`
-	PlayerName     string   `json:"playerName"`
-	Timestamp      float64  `json:"timestamp"`
+	X              float64      `json:"x"`
+	Y              float64      `json:"y"`
+	Health         int          `json:"health"`
+	CurrentRoom    int          `json:"currentRoom"`
+	Kills          int          `json:"kills"`
+	Coins          int          `json:"coins"`
+	OwnedWeapons   []string     `json:"ownedWeapons"`
+	EquippedWeapon string       `json:"equippedWeapon"`
+	PlayerName     string       `json:"playerName"`
+	Enemies        []enemyState `json:"enemies"`
+	Timestamp      float64      `json:"timestamp"`
 }
 
 type validationResult struct {
@@ -60,11 +84,94 @@ type playerSession struct {
 	hasWon bool
 }
 
+// maxBulletDamage returns the maximum total bullet damage a player could
+// deal in one sync interval given their owned weapons.
+func maxBulletDamage(owned []string) int {
+	best := 0
+	for _, wid := range owned {
+		ws, ok := weaponSpecs[wid]
+		if !ok {
+			continue
+		}
+		shots := syncIntervalMs/ws.CooldownMs + 3
+		total := shots * ws.Damage
+		if total > best {
+			best = total
+		}
+	}
+	if best == 0 {
+		best = 100
+	}
+	return best
+}
+
+// validateEnemies checks that enemy HP changes between two snapshots are
+// consistent with the player's weapon capabilities.
+func validateEnemies(prev, curr *gameState) string {
+	currMap := make(map[int]*enemyState, len(curr.Enemies))
+	for i := range curr.Enemies {
+		currMap[curr.Enemies[i].ID] = &curr.Enemies[i]
+	}
+
+	maxDmg := maxBulletDamage(curr.OwnedWeapons)
+
+	// Estimate max kamikaze kills from player HP loss
+	playerHpLost := prev.Health - curr.Health
+	maxKamikaze := 0
+	if playerHpLost > 0 {
+		maxKamikaze = playerHpLost
+	}
+	kamikazeUsed := 0
+	totalBulletDmg := 0
+
+	for _, pe := range prev.Enemies {
+		ce, alive := currMap[pe.ID]
+		if !alive {
+			if pe.HP <= maxDmg-totalBulletDmg {
+				totalBulletDmg += pe.HP
+				continue
+			}
+			if kamikazeUsed < maxKamikaze {
+				kamikazeUsed++
+				continue
+			}
+			return fmt.Sprintf(
+				"enemy %d (hp=%d) removed without enough damage (budget=%d remaining)",
+				pe.ID, pe.HP, maxDmg-totalBulletDmg)
+		}
+
+		if ce.HP > pe.HP {
+			return fmt.Sprintf("enemy %d HP increased (%d -> %d)", pe.ID, pe.HP, ce.HP)
+		}
+
+		hpDelta := pe.HP - ce.HP
+		totalBulletDmg += hpDelta
+	}
+
+	if totalBulletDmg > maxDmg {
+		return fmt.Sprintf(
+			"total bullet damage %d exceeds weapon max %d", totalBulletDmg, maxDmg)
+	}
+
+	prevIDs := make(map[int]bool, len(prev.Enemies))
+	for _, pe := range prev.Enemies {
+		prevIDs[pe.ID] = true
+	}
+	for _, ce := range curr.Enemies {
+		if !prevIDs[ce.ID] {
+			return fmt.Sprintf("unknown enemy %d appeared mid-room", ce.ID)
+		}
+	}
+
+	return ""
+}
+
 func (s *playerSession) validate(gs *gameState) validationResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.last != nil {
+		// Position check
 		dx := gs.X - s.last.X
 		dy := gs.Y - s.last.Y
 		dist := math.Sqrt(dx*dx + dy*dy)
@@ -75,6 +182,18 @@ func (s *playerSession) validate(gs *gameState) validationResult {
 				OK:       false,
 				Message:  "position delta exceeds half-map threshold",
 				Rollback: &rollback,
+			}
+		}
+
+		// Enemy check (skip on room change — enemies reset completely)
+		if gs.CurrentRoom == s.last.CurrentRoom {
+			if msg := validateEnemies(s.last, gs); msg != "" {
+				rollback := *s.last
+				return validationResult{
+					OK:       false,
+					Message:  msg,
+					Rollback: &rollback,
+				}
 			}
 		}
 	}

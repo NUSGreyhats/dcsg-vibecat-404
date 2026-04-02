@@ -1,6 +1,14 @@
 import { type Game } from "../scenes/Game";
 import { type WeaponId, getWeaponStats } from "../weapons";
 
+export interface EnemyStateData {
+  id: number;
+  x: number;
+  y: number;
+  hp: number;
+  type: string;
+}
+
 export interface GameStatePayload {
   x: number;
   y: number;
@@ -11,6 +19,7 @@ export interface GameStatePayload {
   ownedWeapons: string[];
   equippedWeapon: string;
   playerName: string;
+  enemies: EnemyStateData[];
   timestamp: number;
 }
 
@@ -108,7 +117,7 @@ export default class GameStateSync {
     const p = this.game.player;
     if (!p?.active) return;
 
-    console.warn(`[sync] rolling back to pos=(${rb.x}, ${rb.y}) room=${rb.currentRoom}`);
+    console.warn(`[sync] rolling back to pos=(${rb.x}, ${rb.y}) room=${rb.currentRoom} enemies=${rb.enemies?.length ?? 0}`);
     p.setPosition(rb.x, rb.y);
     p.setVelocity(0, 0);
     p.health = rb.health;
@@ -123,6 +132,10 @@ export default class GameStateSync {
         "weapon-changed",
         getWeaponStats(p.equippedWeaponId).displayName,
       );
+    }
+
+    if (rb.enemies) {
+      this.game.rollbackEnemies(rb.enemies);
     }
 
     this.game.events.emit("player-health-changed", p.health, p.maxHealth);
@@ -149,6 +162,7 @@ export default class GameStateSync {
       ownedWeapons: [...p.ownedWeaponIds],
       equippedWeapon: p.equippedWeaponId,
       playerName: this.game.playerName,
+      enemies: this.game.getEnemyStates(),
       timestamp: Date.now(),
     };
 

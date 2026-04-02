@@ -60,6 +60,7 @@ export class Game extends Scene {
   private doorOpen = false;
   private lastShotTime = 0;
   private killCount = 0;
+  private nextEnemyId = 0;
   private gameOver = false;
   private exitThrottle = false;
   inventoryOpen = false;
@@ -150,6 +151,71 @@ export class Game extends Scene {
 
   getKillCount(): number {
     return this.killCount;
+  }
+
+  getEnemyStates(): Array<{
+    id: number;
+    x: number;
+    y: number;
+    hp: number;
+    type: string;
+  }> {
+    const result: Array<{
+      id: number;
+      x: number;
+      y: number;
+      hp: number;
+      type: string;
+    }> = [];
+    for (const child of this.enemies.getChildren()) {
+      const e = child as Enemy;
+      if (!e.active) continue;
+      result.push({
+        id: e.syncId,
+        x: Math.round(e.x * 100) / 100,
+        y: Math.round(e.y * 100) / 100,
+        hp: e.health,
+        type: e.texture.key,
+      });
+    }
+    return result;
+  }
+
+  rollbackEnemies(
+    enemyStates: Array<{ id: number; x: number; y: number; hp: number; type: string }>,
+  ) {
+    const existingMap = new Map<number, Enemy>();
+    for (const child of this.enemies.getChildren()) {
+      const e = child as Enemy;
+      if (e.active) existingMap.set(e.syncId, e);
+    }
+
+    const rolledBackIds = new Set<number>();
+    for (const es of enemyStates) {
+      rolledBackIds.add(es.id);
+      const existing = existingMap.get(es.id);
+      if (existing) {
+        existing.setPosition(es.x, es.y);
+        existing.health = es.hp;
+      } else {
+        const enemy = new Enemy(
+          this,
+          es.x,
+          es.y,
+          es.type as RobotType,
+          this.player,
+        );
+        enemy.syncId = es.id;
+        enemy.health = es.hp;
+        this.enemies.add(enemy);
+      }
+    }
+
+    for (const [id, enemy] of existingMap) {
+      if (!rolledBackIds.has(id)) {
+        enemy.destroy();
+      }
+    }
   }
 
   tryOpenInventory() {
@@ -288,6 +354,7 @@ export class Game extends Scene {
       const enemyType =
         (getObjProp(es, "enemyType") || "robot-grunt") as RobotType;
       const enemy = new Enemy(this, es.x!, es.y!, enemyType, this.player);
+      enemy.syncId = this.nextEnemyId++;
       this.enemies.add(enemy);
     }
 

@@ -10,6 +10,7 @@ import {
 export type RobotType = "robot-grunt" | "robot-heavy";
 
 export default class Enemy extends Phaser.Physics.Arcade.Sprite {
+  syncId: number = 0;
   health: number;
   damage: number;
   private moveSpeed: number;
