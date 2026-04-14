@@ -7,8 +7,8 @@ export type ShopDeal = {
 };
 
 export const SHOP_DEALS: ShopDeal[] = [
-  { weaponId: "maximi", price: 5, shopLabel: "Ultimax 100" },
-  { weaponId: "matador", price: 200, shopLabel: "MATADOR" },
+  { weaponId: "rifle", price: 5, shopLabel: "Rifle" },
+  { weaponId: "shotgun", price: 200, shopLabel: "Shotgun" },
 ];
 
 /** US QWERTY backtick / tilde physical key (shared with ~). */

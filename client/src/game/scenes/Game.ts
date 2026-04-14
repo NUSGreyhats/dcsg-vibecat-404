@@ -465,15 +465,7 @@ export class Game extends Scene {
     if (this.time.now < this.lastShotTime + w.cooldownMs) return;
     this.lastShotTime = this.time.now;
 
-    const pointer = this.input.activePointer;
-    pointer.updateWorldPoint(this.cameras.main);
-
-    const angle = Phaser.Math.Angle.Between(
-      this.player.x,
-      this.player.y,
-      pointer.worldX,
-      pointer.worldY,
-    );
+    const angle = this.player.getAimAngle();
 
     const spawnX = this.player.x + Math.cos(angle) * 20;
     const spawnY = this.player.y + Math.sin(angle) * 20;
@@ -486,9 +478,11 @@ export class Game extends Scene {
     });
     this.bullets.add(bullet);
 
+    this.player.playShootAnimation();
+
     const flash = this.add
       .circle(spawnX, spawnY, 6, 0xffff00, 0.8)
-      .setDepth(11);
+      .setDepth(12);
     this.tweens.add({
       targets: flash,
       alpha: 0,

@@ -37,10 +37,9 @@ type weaponSpec struct {
 }
 
 var weaponSpecs = map[string]weaponSpec{
-	"sar21":   {Damage: 1, CooldownMs: 150},
-	"maximi":  {Damage: 2, CooldownMs: 220},
-	"cs-lr4":  {Damage: 4, CooldownMs: 450},
-	"matador": {Damage: 6, CooldownMs: 520},
+	"pistol":  {Damage: 1, CooldownMs: 150},
+	"rifle":   {Damage: 2, CooldownMs: 220},
+	"shotgun": {Damage: 6, CooldownMs: 520},
 }
 
 const syncIntervalMs = 1500 // client sends every 1000ms; 500ms buffer for jitter

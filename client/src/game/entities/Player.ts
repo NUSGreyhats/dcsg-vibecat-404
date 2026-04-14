@@ -7,7 +7,7 @@ import {
   PLAYER_INVINCIBLE_MS,
   WALK_ANIM_FRAMERATE,
 } from "../constants";
-import { type WeaponId } from "../weapons";
+import { type WeaponId, getWeaponStats } from "../weapons";
 
 type Direction =
   | "down"
@@ -46,8 +46,10 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
   equippedWeaponId: WeaponId;
   progress: { currentRoom: number };
   walkAnimFrameRate: number;
+  weaponSprite: Phaser.GameObjects.Sprite;
   private invincibleUntil: number = 0;
   private currentDirection: Direction = "down";
+  private aimAngle: number = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number, controls: Controls) {
     super(scene, x, y, "player");
@@ -55,8 +57,8 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this.controls = controls;
     this.progress = { currentRoom: 1 };
     this.coins = 0;
-    this.ownedWeaponIds = ["sar21"];
-    this.equippedWeaponId = "sar21";
+    this.ownedWeaponIds = ["pistol"];
+    this.equippedWeaponId = "pistol";
     this.maxHealth = PLAYER_MAX_HEALTH;
     this.health = this.maxHealth;
     this.walkAnimFrameRate = WALK_ANIM_FRAMERATE;
@@ -68,8 +70,34 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     body.setCircle(12, this.width / 2 - 12, this.height / 2 - 12);
 
     this.setDepth(10);
-
     this.play("idle_down");
+
+    const wStats = getWeaponStats(this.equippedWeaponId);
+    this.weaponSprite = scene.add.sprite(x, y, wStats.spriteKey);
+    this.weaponSprite.setOrigin(0.5, 0.5);
+    this.weaponSprite.setDepth(11);
+    this.weaponSprite.play(`${wStats.spriteKey}_idle`);
+  }
+
+  getAimAngle(): number {
+    return this.aimAngle;
+  }
+
+  switchWeaponSprite() {
+    const wStats = getWeaponStats(this.equippedWeaponId);
+    this.weaponSprite.play(`${wStats.spriteKey}_idle`);
+  }
+
+  playShootAnimation() {
+    const wStats = getWeaponStats(this.equippedWeaponId);
+    const shootKey = `${wStats.spriteKey}_shoot`;
+    const idleKey = `${wStats.spriteKey}_idle`;
+    this.weaponSprite.play(shootKey);
+    this.weaponSprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
+      if (this.weaponSprite.active) {
+        this.weaponSprite.play(idleKey);
+      }
+    });
   }
 
   takeDamage(amount: number): boolean {
@@ -105,6 +133,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
   equipWeapon(id: WeaponId): boolean {
     if (!this.ownsWeapon(id)) return false;
     this.equippedWeaponId = id;
+    this.switchWeaponSprite();
     return true;
   }
 
@@ -139,14 +168,14 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
     const pointer = this.scene.input.activePointer;
     pointer.updateWorldPoint(this.scene.cameras.main);
-    const angle = Phaser.Math.Angle.Between(
+    this.aimAngle = Phaser.Math.Angle.Between(
       this.x,
       this.y,
       pointer.worldX,
       pointer.worldY,
     );
 
-    this.currentDirection = angleToDirection(angle);
+    this.currentDirection = angleToDirection(this.aimAngle);
 
     const isMoving = this.body!.velocity.length() > 0;
     const animKey = isMoving
@@ -167,5 +196,30 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
         this.anims.msPerFrame = Math.floor(1000 / targetRate);
       }
     }
+
+    this.updateWeaponSprite();
+  }
+
+  private updateWeaponSprite() {
+    const WEAPON_OFFSET = 14;
+    this.weaponSprite.setPosition(
+      this.x + Math.cos(this.aimAngle) * WEAPON_OFFSET,
+      this.y + Math.sin(this.aimAngle) * WEAPON_OFFSET,
+    );
+
+    this.weaponSprite.setRotation(this.aimAngle);
+
+    const aimingLeft =
+      this.aimAngle < -Math.PI / 2 || this.aimAngle > Math.PI / 2;
+    this.weaponSprite.setFlipY(aimingLeft);
+
+    // Aiming upward → weapon behind player; aiming downward → weapon in front.
+    const aimingUp = this.aimAngle < 0;
+    this.weaponSprite.setDepth(aimingUp ? this.depth - 1 : this.depth + 1);
+  }
+
+  destroy(fromScene?: boolean) {
+    this.weaponSprite?.destroy();
+    super.destroy(fromScene);
   }
 }

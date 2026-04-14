@@ -1,5 +1,6 @@
 import { Scene } from "phaser";
 import { ROOM_COUNT, WALK_ANIM_FRAMERATE } from "../constants";
+import { ALL_WEAPON_IDS, getWeaponStats } from "../weapons";
 
 export class Preloader extends Scene {
   constructor() {
@@ -23,6 +24,10 @@ export class Preloader extends Scene {
 
     this.load.image("logo", "logo.png");
     this.load.atlas("player", "player.png", "player.json");
+    for (const id of ALL_WEAPON_IDS) {
+      const sk = getWeaponStats(id).spriteKey;
+      this.load.atlas(sk, `${sk}.png`, `${sk}.json`);
+    }
     this.load.image("topdown-tiles", "topdown-tilesheet-extruded.png");
 
     for (let i = 1; i <= ROOM_COUNT; i++) {
@@ -32,6 +37,7 @@ export class Preloader extends Scene {
 
   create() {
     this.createPlayerAnimations();
+    this.createWeaponAnimations();
     this.generateRobotTextures();
     this.generateBulletTexture();
     this.generateLmgBulletTexture();
@@ -64,6 +70,30 @@ export class Preloader extends Scene {
         ],
         frameRate: WALK_ANIM_FRAMERATE,
         repeat: -1,
+      });
+    }
+  }
+
+  private createWeaponAnimations() {
+    for (const id of ALL_WEAPON_IDS) {
+      const w = getWeaponStats(id);
+      const sk = w.spriteKey;
+
+      this.anims.create({
+        key: `${sk}_idle`,
+        frames: [{ key: sk, frame: `${sk}_idle_0.aseprite` }],
+        repeat: -1,
+      });
+
+      const shootFrames = [];
+      for (let i = 0; i < w.shootFrameCount; i++) {
+        shootFrames.push({ key: sk, frame: `${sk}_shoot_${i}.aseprite` });
+      }
+      this.anims.create({
+        key: `${sk}_shoot`,
+        frames: shootFrames,
+        frameRate: w.shootFrameCount / (w.cooldownMs / 1000),
+        repeat: 0,
       });
     }
   }
