@@ -1,5 +1,5 @@
 import { Scene } from "phaser";
-import { ROOM_COUNT } from "../constants";
+import { ROOM_COUNT, WALK_ANIM_FRAMERATE } from "../constants";
 
 export class Preloader extends Scene {
   constructor() {
@@ -22,7 +22,7 @@ export class Preloader extends Scene {
     this.load.setPath("assets");
 
     this.load.image("logo", "logo.png");
-    this.load.image("character", "sprite.png");
+    this.load.atlas("player", "player.png", "player.json");
     this.load.image("topdown-tiles", "topdown-tilesheet-extruded.png");
 
     for (let i = 1; i <= ROOM_COUNT; i++) {
@@ -31,6 +31,7 @@ export class Preloader extends Scene {
   }
 
   create() {
+    this.createPlayerAnimations();
     this.generateRobotTextures();
     this.generateBulletTexture();
     this.generateLmgBulletTexture();
@@ -38,6 +39,33 @@ export class Preloader extends Scene {
     this.generateMatadorBulletTexture();
     this.generateCoinTexture();
     this.scene.start("MainMenu");
+  }
+
+  private createPlayerAnimations() {
+    const directions = [
+      "down", "downright", "right", "upright",
+      "up", "upleft", "left", "downleft",
+    ];
+
+    for (const dir of directions) {
+      this.anims.create({
+        key: `idle_${dir}`,
+        frames: [{ key: "player", frame: `player_idle_${dir}_0.aseprite` }],
+        repeat: -1,
+      });
+
+      this.anims.create({
+        key: `walk_${dir}`,
+        frames: [
+          { key: "player", frame: `player_walk_${dir}_0.aseprite` },
+          { key: "player", frame: `player_walk_${dir}_1.aseprite` },
+          { key: "player", frame: `player_walk_${dir}_2.aseprite` },
+          { key: "player", frame: `player_walk_${dir}_3.aseprite` },
+        ],
+        frameRate: WALK_ANIM_FRAMERATE,
+        repeat: -1,
+      });
+    }
   }
 
   private generateRobotTextures() {

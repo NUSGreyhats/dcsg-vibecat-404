@@ -5,11 +5,37 @@ import {
   SPRINT_MULTIPLIER,
   PLAYER_MAX_HEALTH,
   PLAYER_INVINCIBLE_MS,
+  WALK_ANIM_FRAMERATE,
 } from "../constants";
 import { type WeaponId } from "../weapons";
 
-/** Texture aims along +Y (gun down); aim math uses +X as 0 rad. */
-const CHARACTER_AIM_OFFSET = -Math.PI / 2;
+type Direction =
+  | "down"
+  | "downright"
+  | "right"
+  | "upright"
+  | "up"
+  | "upleft"
+  | "left"
+  | "downleft";
+
+const DIR_FROM_INDEX: Direction[] = [
+  "right",
+  "downright",
+  "down",
+  "downleft",
+  "left",
+  "upleft",
+  "up",
+  "upright",
+];
+
+function angleToDirection(angle: number): Direction {
+  const TWO_PI = Math.PI * 2;
+  const normalized = ((angle % TWO_PI) + TWO_PI) % TWO_PI;
+  const index = Math.round(normalized / (Math.PI / 4)) % 8;
+  return DIR_FROM_INDEX[index];
+}
 
 export default class Player extends Phaser.Physics.Arcade.Sprite {
   controls: Controls;
@@ -18,12 +44,13 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
   coins: number;
   ownedWeaponIds: WeaponId[];
   equippedWeaponId: WeaponId;
-  /** Player run progress (Phaser reserves `state` on GameObject). */
   progress: { currentRoom: number };
+  walkAnimFrameRate: number;
   private invincibleUntil: number = 0;
+  private currentDirection: Direction = "down";
 
   constructor(scene: Phaser.Scene, x: number, y: number, controls: Controls) {
-    super(scene, x, y, "character");
+    super(scene, x, y, "player");
 
     this.controls = controls;
     this.progress = { currentRoom: 1 };
@@ -32,15 +59,17 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     this.equippedWeaponId = "sar21";
     this.maxHealth = PLAYER_MAX_HEALTH;
     this.health = this.maxHealth;
+    this.walkAnimFrameRate = WALK_ANIM_FRAMERATE;
 
     scene.add.existing(this);
     scene.physics.add.existing(this);
 
-    this.setScale(0.5);
     const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setCircle(14, this.width / 2 - 14, this.height / 2 - 14);
+    body.setCircle(12, this.width / 2 - 12, this.height / 2 - 12);
 
     this.setDepth(10);
+
+    this.play("idle_down");
   }
 
   takeDamage(amount: number): boolean {
@@ -79,7 +108,6 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
     return true;
   }
 
-  /** Add a weapon to the inventory (e.g. pickups / shop). Returns false if already owned. */
   acquireWeapon(id: WeaponId): boolean {
     if (this.ownsWeapon(id)) return false;
     this.ownedWeaponIds.push(id);
@@ -107,7 +135,6 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       this.setVelocityY(1);
     }
 
-    // normalize diagonal speed
     this.body!.velocity.normalize().scale(speed);
 
     const pointer = this.scene.input.activePointer;
@@ -118,6 +145,27 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
       pointer.worldX,
       pointer.worldY,
     );
-    this.setRotation(angle + CHARACTER_AIM_OFFSET);
+
+    this.currentDirection = angleToDirection(angle);
+
+    const isMoving = this.body!.velocity.length() > 0;
+    const animKey = isMoving
+      ? `walk_${this.currentDirection}`
+      : `idle_${this.currentDirection}`;
+
+    if (this.anims.currentAnim?.key !== animKey) {
+      const frameRate = isMoving
+        ? this.walkAnimFrameRate *
+          (this.controls.sprint ? SPRINT_MULTIPLIER : 1)
+        : undefined;
+      this.play({ key: animKey, frameRate, repeat: -1 });
+    } else if (isMoving) {
+      const targetRate =
+        this.walkAnimFrameRate *
+        (this.controls.sprint ? SPRINT_MULTIPLIER : 1);
+      if (this.anims.msPerFrame !== Math.floor(1000 / targetRate)) {
+        this.anims.msPerFrame = Math.floor(1000 / targetRate);
+      }
+    }
   }
 }

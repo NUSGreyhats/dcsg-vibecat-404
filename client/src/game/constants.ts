@@ -21,3 +21,6 @@ export const WS_URL = "ws://localhost:8888/ws";
 export const STATE_SYNC_INTERVAL_MS = 1000;
 
 export const WIN_ROOM = 10;
+
+/** Base framerate (fps) for the player walk cycle. Higher = faster leg movement. */
+export const WALK_ANIM_FRAMERATE = 8;
