@@ -85,6 +85,7 @@ export default class Player extends Phaser.Physics.Arcade.Sprite {
 
   switchWeaponSprite() {
     const wStats = getWeaponStats(this.equippedWeaponId);
+    this.weaponSprite.setTexture(wStats.spriteKey);
     this.weaponSprite.play(`${wStats.spriteKey}_idle`);
   }
 
