@@ -1,5 +1,5 @@
 import { Scene } from "phaser";
-import { ROOM_COUNT, WALK_ANIM_FRAMERATE } from "../constants";
+import { ROOM_COUNT } from "../constants";
 import { ALL_WEAPON_IDS, getWeaponStats } from "../weapons";
 
 export class Preloader extends Scene {
@@ -23,10 +23,10 @@ export class Preloader extends Scene {
     this.load.setPath("assets");
 
     this.load.image("logo", "logo.png");
-    this.load.atlas("player", "player.png", "player.json");
+    this.load.aseprite("player", "player.png", "player.json");
     for (const id of ALL_WEAPON_IDS) {
       const sk = getWeaponStats(id).spriteKey;
-      this.load.atlas(sk, `${sk}.png`, `${sk}.json`);
+      this.load.aseprite(sk, `${sk}.png`, `${sk}.json`);
     }
     this.load.image("topdown-tiles", "topdown-tilesheet-extruded.png");
 
@@ -48,53 +48,36 @@ export class Preloader extends Scene {
   }
 
   private createPlayerAnimations() {
-    const directions = [
-      "down", "downright", "right", "upright",
-      "up", "upleft", "left", "downleft",
-    ];
-
-    for (const dir of directions) {
-      this.anims.create({
-        key: `idle_${dir}`,
-        frames: [{ key: "player", frame: `player_idle_${dir}_0.aseprite` }],
-        repeat: -1,
-      });
-
-      this.anims.create({
-        key: `walk_${dir}`,
-        frames: [
-          { key: "player", frame: `player_walk_${dir}_0.aseprite` },
-          { key: "player", frame: `player_walk_${dir}_1.aseprite` },
-          { key: "player", frame: `player_walk_${dir}_2.aseprite` },
-          { key: "player", frame: `player_walk_${dir}_3.aseprite` },
-        ],
-        frameRate: WALK_ANIM_FRAMERATE,
-        repeat: -1,
-      });
-    }
+    this.anims.createFromAseprite("player");
   }
 
   private createWeaponAnimations() {
     for (const id of ALL_WEAPON_IDS) {
       const w = getWeaponStats(id);
       const sk = w.spriteKey;
+      const texture = this.textures.get(sk);
+      const customData = texture.customData as Record<string, unknown>;
+      const tags = customData?.frameTags as
+        | { name: string; from: number; to: number }[]
+        | undefined;
+      if (!tags) continue;
 
-      this.anims.create({
-        key: `${sk}_idle`,
-        frames: [{ key: sk, frame: `${sk}_idle_0.aseprite` }],
-        repeat: -1,
-      });
+      const frameNames = texture.getFrameNames();
 
-      const shootFrames = [];
-      for (let i = 0; i < w.shootFrameCount; i++) {
-        shootFrames.push({ key: sk, frame: `${sk}_shoot_${i}.aseprite` });
+      for (const tag of tags) {
+        const frames = [];
+        for (let i = tag.from; i <= tag.to; i++) {
+          frames.push({ key: sk, frame: frameNames[i] });
+        }
+
+        const frameCount = tag.to - tag.from + 1;
+        this.anims.create({
+          key: `${sk}_${tag.name}`,
+          frames,
+          frameRate: frameCount / (w.cooldownMs / 1000),
+          repeat: tag.name === "idle" ? -1 : 0,
+        });
       }
-      this.anims.create({
-        key: `${sk}_shoot`,
-        frames: shootFrames,
-        frameRate: w.shootFrameCount / (w.cooldownMs / 1000),
-        repeat: 0,
-      });
     }
   }
 
