@@ -1,5 +1,5 @@
 { "frames": {
-   "bullets_<tag>_0.aseprite": {
+   "bullets_pistol_0.aseprite": {
     "frame": { "x": 0, "y": 0, "w": 8, "h": 8 },
     "rotated": false,
     "trimmed": false,
@@ -7,7 +7,7 @@
     "sourceSize": { "w": 8, "h": 8 },
     "duration": 100
    },
-   "bullets_<tag>_0.aseprite": {
+   "bullets_rifle_0.aseprite": {
     "frame": { "x": 8, "y": 0, "w": 8, "h": 8 },
     "rotated": false,
     "trimmed": false,
@@ -15,7 +15,7 @@
     "sourceSize": { "w": 8, "h": 8 },
     "duration": 100
    },
-   "bullets_<tag>_0.aseprite": {
+   "bullets_shotgun_0.aseprite": {
     "frame": { "x": 0, "y": 8, "w": 8, "h": 8 },
     "rotated": false,
     "trimmed": false,
