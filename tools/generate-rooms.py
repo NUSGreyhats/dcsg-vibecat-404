@@ -2,7 +2,7 @@
 """Generate 10 Tiled-format room JSON maps for the game."""
 import json, os
 
-TILE_W, TILE_H, TILE_SIZE = 16, 12, 64
+TILE_W, TILE_H, TILE_SIZE = 20, 12, 64
 FLOOR_GID = 8
 WALL_GID = 182
 
@@ -90,122 +90,122 @@ def make_map(wg, objs):
         "type":"map","version":"1.10","width":TILE_W
     }
 
-# ---- Room layouts ----
+# ---- Room layouts (20x12 tiles = 1280x768) ----
 
 def room1():
     g = grid(); perimeter(g,"right")
-    o = [spawn(1,128,384),
-         enemy(2,600,200),enemy(3,700,500),enemy(4,500,400),
-         coin(5,400,300),coin(6,600,400)]
+    o = [spawn(1,160,384),
+         enemy(2,750,200),enemy(3,880,500),enemy(4,620,400),
+         coin(5,500,300),coin(6,750,400)]
     return make_map(g, o + exit_objs("right",7))
 
 def room2():
     g = grid(); perimeter(g,"top")
-    for c in range(3,10): g[4][c] = WALL_GID
-    for c in range(6,13): g[8][c] = WALL_GID
-    o = [spawn(1,128,640),
-         enemy(2,300,200),enemy(3,600,200),enemy(4,400,500),enemy(5,700,600),
-         coin(6,200,300),coin(7,500,650)]
+    for c in range(3,12): g[4][c] = WALL_GID
+    for c in range(8,17): g[8][c] = WALL_GID
+    o = [spawn(1,160,640),
+         enemy(2,380,200),enemy(3,750,200),enemy(4,500,500),enemy(5,880,600),
+         coin(6,250,300),coin(7,620,650)]
     return make_map(g, o + exit_objs("top",8))
 
 def room3():
     g = grid(); perimeter(g,"bottom")
     for r in range(4,7):
-        for c in range(6,9): g[r][c] = WALL_GID
-    o = [spawn(1,128,128),
-         enemy(2,300,600),enemy(3,700,200),enemy(4,200,400),
-         enemy(5,800,400,"robot-heavy"),
-         coin(6,400,200),coin(7,600,600),coin(8,850,150)]
+        for c in range(8,11): g[r][c] = WALL_GID
+    o = [spawn(1,160,128),
+         enemy(2,380,600),enemy(3,880,200),enemy(4,250,400),
+         enemy(5,1000,400,"robot-heavy"),
+         coin(6,500,200),coin(7,750,600),coin(8,1060,150)]
     return make_map(g, o + exit_objs("bottom",9))
 
 def room4():
     g = grid(); perimeter(g,"left")
-    for r in range(2,8): g[r][8] = WALL_GID
-    for c in range(8,14): g[7][c] = WALL_GID
-    o = [spawn(1,880,384),
-         enemy(2,200,200),enemy(3,400,300),enemy(4,300,600),
-         enemy(5,200,500,"robot-heavy"),enemy(6,600,150),
-         coin(7,150,400),coin(8,600,300),coin(9,400,600)]
+    for r in range(2,8): g[r][10] = WALL_GID
+    for c in range(10,18): g[7][c] = WALL_GID
+    o = [spawn(1,1100,384),
+         enemy(2,250,200),enemy(3,500,300),enemy(4,380,600),
+         enemy(5,250,500,"robot-heavy"),enemy(6,750,150),
+         coin(7,190,400),coin(8,750,300),coin(9,500,600)]
     return make_map(g, o + exit_objs("left",10))
 
 def room5():
     g = grid(); perimeter(g,"right")
-    for r in range(1,9): g[r][5] = WALL_GID
-    for r in range(3,11): g[r][10] = WALL_GID
-    o = [spawn(1,160,384),
-         enemy(2,300,200),enemy(3,450,600),enemy(4,700,200),
-         enemy(5,800,500),enemy(6,650,400,"robot-heavy"),
-         enemy(7,250,500,"robot-heavy"),
-         coin(8,200,300),coin(9,480,400),coin(10,750,350)]
+    for r in range(1,9): g[r][6] = WALL_GID
+    for r in range(3,11): g[r][13] = WALL_GID
+    o = [spawn(1,200,384),
+         enemy(2,380,200),enemy(3,560,600),enemy(4,880,200),
+         enemy(5,1000,500),enemy(6,810,400,"robot-heavy"),
+         enemy(7,310,500,"robot-heavy"),
+         coin(8,250,300),coin(9,600,400),coin(10,940,350)]
     return make_map(g, o + exit_objs("right",11))
 
 def room6():
     g = grid(); perimeter(g,"top")
-    for c in range(4,12): g[6][c] = WALL_GID
-    for r in range(3,10): g[r][8] = WALL_GID
-    o = [spawn(1,128,640),
-         enemy(2,250,200),enemy(3,600,150),enemy(4,800,250),
-         enemy(5,300,500),enemy(6,700,500),
-         enemy(7,400,300,"robot-heavy"),enemy(8,850,600,"robot-heavy"),
-         coin(9,200,150),coin(10,600,300),coin(11,450,500),coin(12,850,400)]
+    for c in range(5,15): g[6][c] = WALL_GID
+    for r in range(3,10): g[r][10] = WALL_GID
+    o = [spawn(1,160,640),
+         enemy(2,310,200),enemy(3,750,150),enemy(4,1000,250),
+         enemy(5,380,500),enemy(6,880,500),
+         enemy(7,500,300,"robot-heavy"),enemy(8,1060,600,"robot-heavy"),
+         coin(9,250,150),coin(10,750,300),coin(11,560,500),coin(12,1060,400)]
     return make_map(g, o + exit_objs("top",13))
 
 def room7():
     g = grid(); perimeter(g,"bottom")
-    for c in range(1,8): g[3][c] = WALL_GID
-    for c in range(8,15): g[5][c] = WALL_GID
-    for c in range(1,8): g[7][c] = WALL_GID
-    for c in range(8,15): g[9][c] = WALL_GID
-    o = [spawn(1,880,128),
-         enemy(2,200,150),enemy(3,600,280),enemy(4,200,430),
-         enemy(5,700,430),enemy(6,300,580),
-         enemy(7,800,580,"robot-heavy"),enemy(8,400,280,"robot-heavy"),
-         enemy(9,150,280,"robot-heavy"),
-         coin(10,700,150),coin(11,300,350),coin(12,700,500),coin(13,200,650)]
+    for c in range(1,10): g[3][c] = WALL_GID
+    for c in range(10,19): g[5][c] = WALL_GID
+    for c in range(1,10): g[7][c] = WALL_GID
+    for c in range(10,19): g[9][c] = WALL_GID
+    o = [spawn(1,1100,128),
+         enemy(2,250,150),enemy(3,750,280),enemy(4,250,430),
+         enemy(5,880,430),enemy(6,380,580),
+         enemy(7,1000,580,"robot-heavy"),enemy(8,500,280,"robot-heavy"),
+         enemy(9,190,280,"robot-heavy"),
+         coin(10,880,150),coin(11,380,350),coin(12,880,500),coin(13,250,650)]
     return make_map(g, o + exit_objs("bottom",14))
 
 def room8():
     g = grid(); perimeter(g,"left")
-    for r,c in [(2,3),(2,4),(4,7),(4,8),(6,3),(3,11),(4,11),
-                (7,6),(7,7),(9,10),(9,11),(5,13),(8,3),(8,4),(3,5),(9,7)]:
+    for r,c in [(2,3),(2,5),(4,9),(4,10),(6,4),(3,14),(4,14),
+                (7,8),(7,9),(9,13),(9,14),(5,16),(8,4),(8,5),(3,6),(9,9)]:
         if 0<r<TILE_H-1 and 0<c<TILE_W-1: g[r][c] = WALL_GID
-    o = [spawn(1,880,384),
-         enemy(2,200,150),enemy(3,500,200),enemy(4,300,400),
-         enemy(5,600,350),enemy(6,200,600),enemy(7,700,550),
-         enemy(8,400,500,"robot-heavy"),enemy(9,800,200,"robot-heavy"),
-         enemy(10,550,600,"robot-heavy"),
-         coin(11,150,300),coin(12,450,400),coin(13,700,250),coin(14,350,600)]
+    o = [spawn(1,1100,384),
+         enemy(2,250,150),enemy(3,620,200),enemy(4,380,400),
+         enemy(5,750,350),enemy(6,250,600),enemy(7,880,550),
+         enemy(8,500,500,"robot-heavy"),enemy(9,1000,200,"robot-heavy"),
+         enemy(10,690,600,"robot-heavy"),
+         coin(11,190,300),coin(12,560,400),coin(13,880,250),coin(14,440,600)]
     return make_map(g, o + exit_objs("left",15))
 
 def room9():
     g = grid(); perimeter(g,"right")
-    for sr,sc in [(2,3),(2,11),(8,3),(8,11)]:
+    for sr,sc in [(2,4),(2,14),(8,4),(8,14)]:
         for dr in range(2):
             for dc in range(2): g[sr+dr][sc+dc] = WALL_GID
-    o = [spawn(1,128,384),
-         enemy(2,300,150),enemy(3,700,150),enemy(4,300,600),
-         enemy(5,700,600),enemy(6,500,300),enemy(7,500,500),
-         enemy(8,200,380),enemy(9,800,380,"robot-heavy"),
-         enemy(10,400,200,"robot-heavy"),enemy(11,600,500,"robot-heavy"),
-         enemy(12,500,400,"robot-heavy"),
-         coin(13,500,200),coin(14,500,580),coin(15,200,200),
-         coin(16,800,200),coin(17,800,580)]
+    o = [spawn(1,160,384),
+         enemy(2,380,150),enemy(3,880,150),enemy(4,380,600),
+         enemy(5,880,600),enemy(6,620,300),enemy(7,620,500),
+         enemy(8,250,380),enemy(9,1000,380,"robot-heavy"),
+         enemy(10,500,200,"robot-heavy"),enemy(11,750,500,"robot-heavy"),
+         enemy(12,620,400,"robot-heavy"),
+         coin(13,620,200),coin(14,620,580),coin(15,250,200),
+         coin(16,1000,200),coin(17,1000,580)]
     return make_map(g, o + exit_objs("right",18))
 
 def room10():
     g = grid(); perimeter(g,"top")
-    for r in range(3,10): g[r][4] = WALL_GID; g[r][11] = WALL_GID
-    g[5][7]=WALL_GID; g[5][8]=WALL_GID
-    g[8][7]=WALL_GID; g[8][8]=WALL_GID
-    o = [spawn(1,512,640),
-         enemy(2,200,150),enemy(3,800,150),enemy(4,350,300),
-         enemy(5,650,300),enemy(6,500,200),enemy(7,400,450),
-         enemy(8,600,450),enemy(9,500,350,"robot-heavy"),
-         enemy(10,350,550,"robot-heavy"),enemy(11,650,550,"robot-heavy"),
-         enemy(12,200,400,"robot-heavy"),enemy(13,800,400,"robot-heavy"),
-         enemy(14,500,500,"robot-heavy"),enemy(15,300,200),
-         coin(16,512,300),coin(17,200,300),coin(18,800,300),
-         coin(19,512,550),coin(20,350,650)]
+    for r in range(3,10): g[r][5] = WALL_GID; g[r][14] = WALL_GID
+    g[5][9]=WALL_GID; g[5][10]=WALL_GID
+    g[8][9]=WALL_GID; g[8][10]=WALL_GID
+    o = [spawn(1,640,640),
+         enemy(2,250,150),enemy(3,1000,150),enemy(4,440,300),
+         enemy(5,810,300),enemy(6,620,200),enemy(7,500,450),
+         enemy(8,750,450),enemy(9,620,350,"robot-heavy"),
+         enemy(10,440,550,"robot-heavy"),enemy(11,810,550,"robot-heavy"),
+         enemy(12,250,400,"robot-heavy"),enemy(13,1000,400,"robot-heavy"),
+         enemy(14,620,500,"robot-heavy"),enemy(15,380,200),
+         coin(16,640,300),coin(17,250,300),coin(18,1000,300),
+         coin(19,640,550),coin(20,440,650)]
     return make_map(g, o + exit_objs("top",21))
 
 ROOMS = [room1,room2,room3,room4,room5,room6,room7,room8,room9,room10]

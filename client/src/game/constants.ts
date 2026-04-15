@@ -10,7 +10,7 @@ export const ENEMY_HEAVY_HEALTH = 6;
 export const ENEMY_GRUNT_DAMAGE = 1;
 export const ENEMY_HEAVY_DAMAGE = 2;
 
-export const ROOM_WIDTH = 1024;
+export const ROOM_WIDTH = 1280;
 export const ROOM_HEIGHT = 768;
 export const ROOM_COUNT = 10;
 

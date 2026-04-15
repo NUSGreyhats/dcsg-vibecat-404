@@ -8,8 +8,7 @@ export function getPlayerName(): string {
 
 export class MainMenu extends Scene {
   background: GameObjects.Image;
-  logo: GameObjects.Image;
-  title: GameObjects.Text;
+  titleImage: GameObjects.Image;
   private nameInput: HTMLInputElement | null = null;
 
   constructor() {
@@ -17,32 +16,23 @@ export class MainMenu extends Scene {
   }
 
   create() {
-    this.background = this.add.image(512, 384, "background");
-    this.logo = this.add.image(512, 260, "logo");
-
-    this.title = this.add
-      .text(512, 420, "DEFCON", {
-        fontFamily: "Arial Black",
-        fontSize: "42px",
-        color: "#ffffff",
-        stroke: "#000000",
-        strokeThickness: 8,
-        align: "center",
-      })
-      .setOrigin(0.5);
+    this.titleImage = this.add.image(640, 384, "title");
+    this.titleImage.setDisplaySize(1280, 768);
 
     this.add
-      .text(512, 480, "Enter your name:", {
-        fontFamily: "Arial",
-        fontSize: "20px",
-        color: "#cccccc",
+      .text(640+1280/4+100, 530, "Enter your name:", {
+        fontFamily: "Arial Black",
+        fontSize: "32px",
+        color: "#66ff99",
+        stroke: "#000000",
+        strokeThickness: 4,
       })
       .setOrigin(0.5);
 
     this.createNameInput();
 
     const playBtn = this.add
-      .text(512, 580, "[ PLAY ]", {
+      .text(640+1280/4+100, 610, "[ PLAY ]", {
         fontFamily: "Arial Black",
         fontSize: "32px",
         color: "#66ff99",
@@ -81,8 +71,10 @@ export class MainMenu extends Scene {
     input.style.outline = "none";
     input.style.zIndex = "10";
 
-    const left = rect.left + rect.width / 2 - 122;
-    const top = rect.top + 510;
+    const scaleX = rect.width / 1280;
+    const scaleY = rect.height / 768;
+    const left = rect.left + rect.width / 2 - 122 * scaleX + (1280/4+100)*scaleX;
+    const top = rect.top + 550 * scaleY;
     input.style.left = `${left}px`;
     input.style.top = `${top}px`;
 

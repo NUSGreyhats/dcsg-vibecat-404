@@ -8,6 +8,9 @@ const BAR_Y = 20;
 const BAR_WIDTH = 160;
 const BAR_HEIGHT = 18;
 
+const W = 1280;
+const H = 768;
+
 export class GameHUD extends Scene {
   private healthBarFill: Phaser.GameObjects.Graphics;
   private healthText: Phaser.GameObjects.Text;
@@ -62,11 +65,11 @@ export class GameHUD extends Scene {
 
     const coinPanel = this.add.graphics();
     coinPanel.fillStyle(0x000000, 0.55);
-    coinPanel.fillRoundedRect(1024 - 278, 8, 130, 40, 8);
+    coinPanel.fillRoundedRect(W - 278, 8, 130, 40, 8);
     coinPanel.lineStyle(1, 0x555555, 0.6);
-    coinPanel.strokeRoundedRect(1024 - 278, 8, 130, 40, 8);
+    coinPanel.strokeRoundedRect(W - 278, 8, 130, 40, 8);
 
-    this.coinText = this.add.text(1024 - 268, 16, "Coins: 0", {
+    this.coinText = this.add.text(W - 268, 16, "Coins: 0", {
       fontFamily: "Arial Black",
       fontSize: "16px",
       color: "#ffcc33",
@@ -76,11 +79,11 @@ export class GameHUD extends Scene {
 
     const killPanel = this.add.graphics();
     killPanel.fillStyle(0x000000, 0.55);
-    killPanel.fillRoundedRect(1024 - 140, 8, 130, 40, 8);
+    killPanel.fillRoundedRect(W - 140, 8, 130, 40, 8);
     killPanel.lineStyle(1, 0x555555, 0.6);
-    killPanel.strokeRoundedRect(1024 - 140, 8, 130, 40, 8);
+    killPanel.strokeRoundedRect(W - 140, 8, 130, 40, 8);
 
-    this.killText = this.add.text(1024 - 130, 16, "Kills: 0", {
+    this.killText = this.add.text(W - 130, 16, "Kills: 0", {
       fontFamily: "Arial Black",
       fontSize: "16px",
       color: "#ffcc00",
@@ -88,7 +91,7 @@ export class GameHUD extends Scene {
       strokeThickness: 2,
     });
 
-    this.roomText = this.add.text(512, 22, "Room 1", {
+    this.roomText = this.add.text(W / 2, 22, "Room 1", {
       fontFamily: "Arial Black",
       fontSize: "20px",
       color: "#aaddff",
@@ -97,7 +100,7 @@ export class GameHUD extends Scene {
     }).setOrigin(0.5, 0.5);
 
     this.connBanner = this.add
-      .text(512, 748, "", {
+      .text(W / 2, H - 20, "", {
         fontFamily: "Arial",
         fontSize: "14px",
         color: "#ff4444",

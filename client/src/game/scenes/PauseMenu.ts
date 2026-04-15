@@ -1,5 +1,8 @@
 import { Scene } from "phaser";
 
+const CX = 640;
+const CY = 384;
+
 export class PauseMenu extends Scene {
   private isGameOver: boolean = false;
 
@@ -12,7 +15,7 @@ export class PauseMenu extends Scene {
   }
 
   create() {
-    this.add.rectangle(512, 384, 1024, 768, 0x000000, 0.7);
+    this.add.rectangle(CX, CY, 1280, 768, 0x000000, 0.7);
 
     if (this.isGameOver) {
       this.createGameOverScreen();
@@ -23,7 +26,7 @@ export class PauseMenu extends Scene {
 
   private createPauseScreen() {
     this.add
-      .text(512, 260, "PAUSED", {
+      .text(CX, CY - 80, "PAUSED", {
         fontFamily: "Arial Black",
         fontSize: "64px",
         color: "#ffffff",
@@ -33,7 +36,7 @@ export class PauseMenu extends Scene {
       .setOrigin(0.5);
 
     this.add
-      .text(512, 340, "Press ESC to Resume", {
+      .text(CX, CY, "Press ESC to Resume", {
         fontFamily: "Arial",
         fontSize: "24px",
         color: "#cccccc",
@@ -41,7 +44,7 @@ export class PauseMenu extends Scene {
       .setOrigin(0.5);
 
     const menuBtn = this.add
-      .text(512, 420, "Main Menu", {
+      .text(CX, CY + 80, "Main Menu", {
         fontFamily: "Arial",
         fontSize: "28px",
         color: "#ff8888",
@@ -63,7 +66,7 @@ export class PauseMenu extends Scene {
 
   private createGameOverScreen() {
     this.add
-      .text(512, 240, "GAME OVER", {
+      .text(CX, CY - 100, "GAME OVER", {
         fontFamily: "Arial Black",
         fontSize: "64px",
         color: "#ff3333",
@@ -73,7 +76,7 @@ export class PauseMenu extends Scene {
       .setOrigin(0.5);
 
     const restartBtn = this.add
-      .text(512, 340, "Click to Restart", {
+      .text(CX, CY, "Click to Restart", {
         fontFamily: "Arial",
         fontSize: "28px",
         color: "#ffffff",

@@ -2,6 +2,9 @@ import Phaser, { Scene } from "phaser";
 import { KEYCODE_BACKTICK, SHOP_DEALS } from "../shop";
 import type { Game } from "./Game";
 
+const CX = 640;
+const CY = 384;
+
 export class ShopMenu extends Scene {
   private coinText!: Phaser.GameObjects.Text;
   private rowTexts: Phaser.GameObjects.Text[] = [];
@@ -11,14 +14,14 @@ export class ShopMenu extends Scene {
   }
 
   create() {
-    this.add.rectangle(512, 384, 1024, 768, 0x000000, 0.78);
+    this.add.rectangle(CX, CY, 1280, 768, 0x000000, 0.78);
 
     this.add
-      .rectangle(512, 384, 540, 420, 0x1a1510, 0.97)
+      .rectangle(CX, CY, 540, 420, 0x1a1510, 0.97)
       .setStrokeStyle(2, 0xc9a227);
 
     this.add
-      .text(512, 160, "ARMORY", {
+      .text(CX, CY - 190, "ARMORY", {
         fontFamily: "Arial Black",
         fontSize: "38px",
         color: "#f5e6a8",
@@ -28,7 +31,7 @@ export class ShopMenu extends Scene {
       .setOrigin(0.5);
 
     this.add
-      .text(512, 212, "` (backtick) or ESC to close", {
+      .text(CX, CY - 140, "` (backtick) or ESC to close", {
         fontFamily: "Arial",
         fontSize: "15px",
         color: "#998866",
@@ -39,7 +42,7 @@ export class ShopMenu extends Scene {
     const player = game.player;
 
     this.coinText = this.add
-      .text(512, 248, "", {
+      .text(CX, CY - 100, "", {
         fontFamily: "Arial Black",
         fontSize: "20px",
         color: "#ffcc33",
@@ -49,10 +52,10 @@ export class ShopMenu extends Scene {
       .setOrigin(0.5);
 
     this.rowTexts = [];
-    let y = 300;
+    let y = CY - 50;
     for (const deal of SHOP_DEALS) {
       const row = this.add
-        .text(512, y, "", {
+        .text(CX, y, "", {
           fontFamily: "Arial",
           fontSize: "20px",
           color: "#f0f0f0",
@@ -66,7 +69,7 @@ export class ShopMenu extends Scene {
     }
 
     const closeBtn = this.add
-      .text(512, 500, "Close", {
+      .text(CX, CY + 150, "Close", {
         fontFamily: "Arial",
         fontSize: "22px",
         color: "#c9a227",

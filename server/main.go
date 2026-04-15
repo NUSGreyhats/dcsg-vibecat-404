@@ -22,7 +22,7 @@ var debug = flag.Bool("debug", false, "enable debug logging (prints player state
 const welcome = "Welcome to the hidden world where the flag is grey{h1dd3n_3nDP01N7}"
 
 const (
-	roomWidth  = 1024
+	roomWidth  = 1280
 	roomHeight = 768
 	maxDist    = math.Sqrt2 * float64(max(roomWidth, roomHeight)) / 2
 	winRoom    = 11

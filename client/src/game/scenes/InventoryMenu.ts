@@ -2,20 +2,23 @@ import { Scene } from "phaser";
 import { ALL_WEAPON_IDS, getWeaponStats } from "../weapons";
 import type { Game } from "./Game";
 
+const CX = 640;
+const CY = 384;
+
 export class InventoryMenu extends Scene {
   constructor() {
     super("InventoryMenu");
   }
 
   create() {
-    this.add.rectangle(512, 384, 1024, 768, 0x000000, 0.78);
+    this.add.rectangle(CX, CY, 1280, 768, 0x000000, 0.78);
 
     this.add
-      .rectangle(512, 384, 520, 440, 0x161b26, 0.96)
+      .rectangle(CX, CY, 520, 440, 0x161b26, 0.96)
       .setStrokeStyle(2, 0x5a8fc4);
 
     this.add
-      .text(512, 168, "WEAPONS", {
+      .text(CX, CY - 220, "WEAPONS", {
         fontFamily: "Arial Black",
         fontSize: "36px",
         color: "#e8f0ff",
@@ -25,7 +28,7 @@ export class InventoryMenu extends Scene {
       .setOrigin(0.5);
 
     this.add
-      .text(512, 218, "Click a weapon to equip    ·    I, Tab, or ESC to close", {
+      .text(CX, CY - 170, "Click a weapon to equip    ·    I, Tab, or ESC to close", {
         fontFamily: "Arial",
         fontSize: "15px",
         color: "#8899aa",
@@ -35,7 +38,7 @@ export class InventoryMenu extends Scene {
     const game = this.scene.get("Game") as Game;
     const player = game.player;
 
-    let y = 268;
+    let y = CY - 120;
     for (const id of ALL_WEAPON_IDS) {
       const def = getWeaponStats(id);
       const owned = player.ownsWeapon(id);
@@ -48,7 +51,7 @@ export class InventoryMenu extends Scene {
       const baseColor = !owned ? "#555566" : equipped ? "#7dffb3" : "#f0f4ff";
 
       const row = this.add
-        .text(512, y, line, {
+        .text(CX, y, line, {
           fontFamily: "Arial",
           fontSize: "22px",
           color: baseColor,
@@ -74,7 +77,7 @@ export class InventoryMenu extends Scene {
     }
 
     const resume = this.add
-      .text(512, 520, "Resume", {
+      .text(CX, CY + 130, "Resume", {
         fontFamily: "Arial",
         fontSize: "22px",
         color: "#88bbff",
