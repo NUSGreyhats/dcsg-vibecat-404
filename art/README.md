@@ -24,3 +24,4 @@ Tiled is a free open-source software to edit maps with tilesets (https://www.map
 - can use this to edit tilesets and give tiles custom properties (e.g. collides)
 - make it much easier to edit maps! can drag and drop tiles, highly recommended
 - u can load multiple tilesets at a time too while editing a map
+- this is also recommended by phaser (https://docs.phaser.io/api-documentation/class/tilemaps-tilemap)
