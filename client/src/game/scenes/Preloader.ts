@@ -29,7 +29,7 @@ export class Preloader extends Scene {
       const sk = getWeaponStats(id).spriteKey;
       this.load.aseprite(sk, `${sk}.png`, `${sk}.json`);
     }
-    this.load.image("topdown-tiles", "topdown-tilesheet-extruded.png");
+    this.load.image("defcon-tiles", "tilemap.png");
 
     for (let i = 1; i <= ROOM_COUNT; i++) {
       this.load.tilemapTiledJSON(`room-${i}`, `rooms/room-${i}.json`);

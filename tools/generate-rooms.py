@@ -2,19 +2,21 @@
 """Generate 10 Tiled-format room JSON maps for the game."""
 import json, os
 
-TILE_W, TILE_H, TILE_SIZE = 20, 12, 64
-FLOOR_GID = 8
-WALL_GID = 182
+# 40x24 tiles @ 32px = 1280x768 (defcon_tileset: 32px tiles, tilemap.png)
+TILE_W, TILE_H, TILE_SIZE = 40, 24, 32
+# firstgid=1: tile id 0 -> GID 1 (ground), tile id 72 -> GID 73 (wall)
+FLOOR_GID = 1
+WALL_GID = 73
 
 ROOMS_DIR = os.path.join(os.path.dirname(__file__),
     "..", "client", "public", "assets", "rooms")
 
 TILESET = {
-    "columns": 27, "firstgid": 1,
-    "image": "../topdown-tilesheet-extruded.png",
-    "imageheight": 1320, "imagewidth": 1782,
-    "margin": 1, "name": "top_down_shooter",
-    "spacing": 2, "tilecount": 540,
+    "columns": 12, "firstgid": 1,
+    "image": "../tilemap.png",
+    "imageheight": 352, "imagewidth": 384,
+    "margin": 0, "name": "defcon_tileset",
+    "spacing": 0, "tilecount": 132,
     "tileheight": TILE_SIZE, "tilewidth": TILE_SIZE,
 }
 
@@ -90,7 +92,8 @@ def make_map(wg, objs):
         "type":"map","version":"1.10","width":TILE_W
     }
 
-# ---- Room layouts (20x12 tiles = 1280x768) ----
+# ---- Room layouts (40x24 tiles @ 32px = 1280x768) ----
+# Inner walls: each old 20x12 cell maps to 2x2 tiles (64px -> two 32px strips).
 
 def room1():
     g = grid(); perimeter(g,"right")
@@ -101,8 +104,12 @@ def room1():
 
 def room2():
     g = grid(); perimeter(g,"top")
-    for c in range(3,12): g[4][c] = WALL_GID
-    for c in range(8,17): g[8][c] = WALL_GID
+    for r in range(8, 10):
+        for c in range(6, 24):
+            g[r][c] = WALL_GID
+    for r in range(16, 18):
+        for c in range(16, 34):
+            g[r][c] = WALL_GID
     o = [spawn(1,160,640),
          enemy(2,380,200),enemy(3,750,200),enemy(4,500,500),enemy(5,880,600),
          coin(6,250,300),coin(7,620,650)]
@@ -110,8 +117,9 @@ def room2():
 
 def room3():
     g = grid(); perimeter(g,"bottom")
-    for r in range(4,7):
-        for c in range(8,11): g[r][c] = WALL_GID
+    for r in range(8, 14):
+        for c in range(16, 22):
+            g[r][c] = WALL_GID
     o = [spawn(1,160,128),
          enemy(2,380,600),enemy(3,880,200),enemy(4,250,400),
          enemy(5,1000,400,"robot-heavy"),
@@ -120,8 +128,12 @@ def room3():
 
 def room4():
     g = grid(); perimeter(g,"left")
-    for r in range(2,8): g[r][10] = WALL_GID
-    for c in range(10,18): g[7][c] = WALL_GID
+    for r in range(4, 16):
+        for c in range(20, 22):
+            g[r][c] = WALL_GID
+    for r in range(14, 16):
+        for c in range(20, 36):
+            g[r][c] = WALL_GID
     o = [spawn(1,1100,384),
          enemy(2,250,200),enemy(3,500,300),enemy(4,380,600),
          enemy(5,250,500,"robot-heavy"),enemy(6,750,150),
@@ -130,8 +142,12 @@ def room4():
 
 def room5():
     g = grid(); perimeter(g,"right")
-    for r in range(1,9): g[r][6] = WALL_GID
-    for r in range(3,11): g[r][13] = WALL_GID
+    for r in range(2, 18):
+        for c in range(12, 14):
+            g[r][c] = WALL_GID
+    for r in range(6, 22):
+        for c in range(26, 28):
+            g[r][c] = WALL_GID
     o = [spawn(1,200,384),
          enemy(2,380,200),enemy(3,560,600),enemy(4,880,200),
          enemy(5,1000,500),enemy(6,810,400,"robot-heavy"),
@@ -141,8 +157,12 @@ def room5():
 
 def room6():
     g = grid(); perimeter(g,"top")
-    for c in range(5,15): g[6][c] = WALL_GID
-    for r in range(3,10): g[r][10] = WALL_GID
+    for r in range(12, 14):
+        for c in range(10, 30):
+            g[r][c] = WALL_GID
+    for r in range(6, 20):
+        for c in range(20, 22):
+            g[r][c] = WALL_GID
     o = [spawn(1,160,640),
          enemy(2,310,200),enemy(3,750,150),enemy(4,1000,250),
          enemy(5,380,500),enemy(6,880,500),
@@ -152,10 +172,18 @@ def room6():
 
 def room7():
     g = grid(); perimeter(g,"bottom")
-    for c in range(1,10): g[3][c] = WALL_GID
-    for c in range(10,19): g[5][c] = WALL_GID
-    for c in range(1,10): g[7][c] = WALL_GID
-    for c in range(10,19): g[9][c] = WALL_GID
+    for r in range(6, 8):
+        for c in range(2, 20):
+            g[r][c] = WALL_GID
+    for r in range(10, 12):
+        for c in range(20, 38):
+            g[r][c] = WALL_GID
+    for r in range(14, 16):
+        for c in range(2, 20):
+            g[r][c] = WALL_GID
+    for r in range(18, 20):
+        for c in range(20, 38):
+            g[r][c] = WALL_GID
     o = [spawn(1,1100,128),
          enemy(2,250,150),enemy(3,750,280),enemy(4,250,430),
          enemy(5,880,430),enemy(6,380,580),
@@ -168,7 +196,9 @@ def room8():
     g = grid(); perimeter(g,"left")
     for r,c in [(2,3),(2,5),(4,9),(4,10),(6,4),(3,14),(4,14),
                 (7,8),(7,9),(9,13),(9,14),(5,16),(8,4),(8,5),(3,6),(9,9)]:
-        if 0<r<TILE_H-1 and 0<c<TILE_W-1: g[r][c] = WALL_GID
+        for dr in range(2):
+            for dc in range(2):
+                g[2*r+dr][2*c+dc] = WALL_GID
     o = [spawn(1,1100,384),
          enemy(2,250,150),enemy(3,620,200),enemy(4,380,400),
          enemy(5,750,350),enemy(6,250,600),enemy(7,880,550),
@@ -180,8 +210,9 @@ def room8():
 def room9():
     g = grid(); perimeter(g,"right")
     for sr,sc in [(2,4),(2,14),(8,4),(8,14)]:
-        for dr in range(2):
-            for dc in range(2): g[sr+dr][sc+dc] = WALL_GID
+        for dr in range(4):
+            for dc in range(4):
+                g[2*sr+dr][2*sc+dc] = WALL_GID
     o = [spawn(1,160,384),
          enemy(2,380,150),enemy(3,880,150),enemy(4,380,600),
          enemy(5,880,600),enemy(6,620,300),enemy(7,620,500),
@@ -194,9 +225,17 @@ def room9():
 
 def room10():
     g = grid(); perimeter(g,"top")
-    for r in range(3,10): g[r][5] = WALL_GID; g[r][14] = WALL_GID
-    g[5][9]=WALL_GID; g[5][10]=WALL_GID
-    g[8][9]=WALL_GID; g[8][10]=WALL_GID
+    for r in range(6, 20):
+        for c in range(10, 12):
+            g[r][c] = WALL_GID
+        for c in range(28, 30):
+            g[r][c] = WALL_GID
+    for r in range(10, 12):
+        for c in range(18, 22):
+            g[r][c] = WALL_GID
+    for r in range(16, 18):
+        for c in range(18, 22):
+            g[r][c] = WALL_GID
     o = [spawn(1,640,640),
          enemy(2,250,150),enemy(3,1000,150),enemy(4,440,300),
          enemy(5,810,300),enemy(6,620,200),enemy(7,500,450),

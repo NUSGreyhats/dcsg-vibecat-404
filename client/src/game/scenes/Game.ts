@@ -312,7 +312,7 @@ export class Game extends Scene {
     const roomNum = this.player.progress.currentRoom;
 
     const map = this.make.tilemap({ key: `room-${roomNum}` });
-    const tileset = map.addTilesetImage("top_down_shooter", "topdown-tiles")!;
+    const tileset = map.addTilesetImage("defcon_tileset", "defcon-tiles")!;
 
     this.groundLayer = map.createLayer("Ground", tileset)!;
     this.groundLayer.setDepth(-5);
