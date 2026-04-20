@@ -1,0 +1,76 @@
+{
+    "activeFile": "",
+    "expandedProjectPaths": [
+    ],
+    "fileStates": {
+        "public/assets/rooms/room-1.json": {
+            "scale": 1.016796875,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 640.2458701498272,
+                "y": 384.04917402996546
+            }
+        },
+        "public/assets/rooms/room-1.json#defcon_tileset": {
+            "scaleInDock": 1
+        },
+        "public/assets/rooms/room-2.json": {
+            "expandedObjectLayers": [
+                3
+            ],
+            "scale": 1.016796875,
+            "selectedLayer": 2,
+            "viewCenter": {
+                "x": 619.5927775643487,
+                "y": 458.79369957741073
+            }
+        },
+        "public/assets/rooms/room-2.json#defcon_tileset": {
+            "scaleInDock": 1
+        },
+        "public/assets/rooms/room-3.json": {
+            "expandedObjectLayers": [
+                3
+            ],
+            "scale": 1.016796875,
+            "selectedLayer": 2,
+            "viewCenter": {
+                "x": 750.395697272378,
+                "y": 600.4149058778332
+            }
+        },
+        "public/assets/rooms/room-3.json#defcon_tileset": {
+            "scaleInDock": 1
+        },
+        "public/assets/rooms/room-4.json": {
+            "expandedObjectLayers": [
+                3
+            ],
+            "scale": 1.016796875,
+            "selectedLayer": 2,
+            "viewCenter": {
+                "x": 640.2458701498272,
+                "y": 384.04917402996546
+            }
+        },
+        "public/assets/rooms/room-4.json#defcon_tileset": {
+            "scaleInDock": 1
+        },
+        "public/assets/rooms/room-5.json": {
+            "scale": 1.016796875,
+            "selectedLayer": 2,
+            "viewCenter": {
+                "x": 640.2458701498272,
+                "y": 384.04917402996546
+            }
+        },
+        "public/assets/rooms/room-5.json#defcon_tileset": {
+            "scaleInDock": 1
+        }
+    },
+    "openFiles": [
+    ],
+    "project": "tilemap.tiled-project",
+    "recentFiles": [
+    ]
+}

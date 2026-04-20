@@ -13,10 +13,7 @@ import {
 } from "../constants";
 import { getPlayerName } from "./MainMenu";
 import GameStateSync from "../net/GameStateSync";
-import {
-  getWeaponStats,
-  type WeaponId,
-} from "../weapons";
+import { getWeaponStats, type WeaponId } from "../weapons";
 import { KEYCODE_BACKTICK } from "../shop";
 
 const DOOR_COLOR = 0x6b4423;
@@ -105,10 +102,8 @@ export class Game extends Scene {
       (_playerObj, enemyObj) => this.onEnemyHitPlayer(enemyObj as Enemy),
     );
 
-    this.physics.add.overlap(
-      this.player,
-      this.coins,
-      (_playerObj, coinObj) => this.onPlayerPickupCoin(coinObj as Coin),
+    this.physics.add.overlap(this.player, this.coins, (_playerObj, coinObj) =>
+      this.onPlayerPickupCoin(coinObj as Coin),
     );
 
     this.camera = this.cameras.main;
@@ -182,7 +177,13 @@ export class Game extends Scene {
   }
 
   rollbackEnemies(
-    enemyStates: Array<{ id: number; x: number; y: number; hp: number; type: string }>,
+    enemyStates: Array<{
+      id: number;
+      x: number;
+      y: number;
+      hp: number;
+      type: string;
+    }>,
   ) {
     const existingMap = new Map<number, Enemy>();
     for (const child of this.enemies.getChildren()) {
@@ -221,7 +222,13 @@ export class Game extends Scene {
   applyRollbackState(
     currentRoom: number,
     kills: number,
-    enemyStates: Array<{ id: number; x: number; y: number; hp: number; type: string }>,
+    enemyStates: Array<{
+      id: number;
+      x: number;
+      y: number;
+      hp: number;
+      type: string;
+    }>,
   ) {
     if (this.player.progress.currentRoom !== currentRoom) {
       this.player.progress.currentRoom = currentRoom;
@@ -265,10 +272,7 @@ export class Game extends Scene {
 
   playerEquipWeapon(id: WeaponId): boolean {
     if (!this.player.equipWeapon(id)) return false;
-    this.events.emit(
-      "weapon-changed",
-      getWeaponStats(id).displayName,
-    );
+    this.events.emit("weapon-changed", getWeaponStats(id).displayName);
     return true;
   }
 
@@ -297,12 +301,9 @@ export class Game extends Scene {
     this.wallsLayer = null;
     this.currentMap = null;
 
-    for (const e of this.enemies.getChildren().slice())
-      (e as Enemy).destroy();
-    for (const b of this.bullets.getChildren().slice())
-      (b as Bullet).destroy();
-    for (const c of this.coins.getChildren().slice())
-      (c as Coin).destroy();
+    for (const e of this.enemies.getChildren().slice()) (e as Enemy).destroy();
+    for (const b of this.bullets.getChildren().slice()) (b as Bullet).destroy();
+    for (const c of this.coins.getChildren().slice()) (c as Coin).destroy();
   }
 
   private loadRoom() {
@@ -369,15 +370,16 @@ export class Game extends Scene {
     }
 
     for (const es of objects.filter((o) => o.type === "EnemySpawn")) {
-      const enemyType =
-        (getObjProp(es, "enemyType") || "robot-grunt") as RobotType;
+      const enemyType = (getObjProp(es, "enemyType") ||
+        "robot-grunt") as RobotType;
       const enemy = new Enemy(this, es.x!, es.y!, enemyType, this.player);
       enemy.syncId = this.nextEnemyId++;
       this.enemies.add(enemy);
     }
 
     for (const cs of objects.filter((o) => o.type === "CoinSpawn")) {
-      const coin = new Coin(this, cs.x!, cs.y!);
+      const in_wall = getObjProp(cs, "in_wall") === "true";
+      const coin = new Coin(this, cs.x!, cs.y!, in_wall);
       this.coins.add(coin);
     }
 
@@ -505,9 +507,7 @@ export class Game extends Scene {
       this.killCount++;
       this.events.emit("kill-count-changed", this.killCount);
 
-      const explosion = this.add
-        .circle(ex, ey, 16, 0xff6600, 0.7)
-        .setDepth(15);
+      const explosion = this.add.circle(ex, ey, 16, 0xff6600, 0.7).setDepth(15);
       this.tweens.add({
         targets: explosion,
         alpha: 0,
@@ -544,7 +544,7 @@ export class Game extends Scene {
   private onPlayerPickupCoin(coin: Coin) {
     if (!coin.active || this.gameOver) return;
     coin.destroy();
-    this.player.coins += 1;
+    this.player.coins += coin.value;
     this.events.emit("coin-count-changed", this.player.coins);
   }
 
@@ -562,8 +562,7 @@ export class Game extends Scene {
     }
 
     for (const bullet of this.bullets.getChildren().slice()) {
-      if ((bullet as Bullet).active)
-        (bullet as Bullet).update(_time, delta);
+      if ((bullet as Bullet).active) (bullet as Bullet).update(_time, delta);
     }
 
     this.checkRoomCleared();
