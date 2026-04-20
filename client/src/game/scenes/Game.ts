@@ -44,7 +44,7 @@ export class Game extends Scene {
   private groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   private wallsLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   private wallColliders: Phaser.Physics.Arcade.Collider[] = [];
-  private doorBlockerGroup!: Phaser.Physics.Arcade.StaticGroup;
+  private doorBlockerGroup: Phaser.Physics.Arcade.StaticGroup | null = null;
   private doorBlocker: Phaser.GameObjects.Rectangle | null = null;
   private exitZone: Phaser.GameObjects.Rectangle | null = null;
   private exitDoorCollider: Phaser.Physics.Arcade.Collider | null = null;
@@ -76,6 +76,16 @@ export class Game extends Scene {
     this.inventoryOpen = false;
     this.shopOpen = false;
     this.playerName = getPlayerName();
+
+    this.wallColliders = [];
+    this.exitDoorCollider = null;
+    this.exitZone = null;
+    this.exitZoneData = null;
+    this.doorBlocker = null;
+    this.doorBlockerGroup = null;
+    this.groundLayer = null;
+    this.wallsLayer = null;
+    this.currentMap = null;
 
     this.enemies = this.add.group();
     this.bullets = this.add.group();
@@ -332,9 +342,9 @@ export class Game extends Scene {
       this.physics.add.collider(this.bullets, this.wallsLayer, (b) => {
         (b as Bullet).destroy();
       }),
-      this.physics.add.collider(this.player, this.doorBlockerGroup),
-      this.physics.add.collider(this.enemies, this.doorBlockerGroup),
-      this.physics.add.collider(this.bullets, this.doorBlockerGroup, (b) => {
+      this.physics.add.collider(this.player, this.doorBlockerGroup!),
+      this.physics.add.collider(this.enemies, this.doorBlockerGroup!),
+      this.physics.add.collider(this.bullets, this.doorBlockerGroup!, (b) => {
         (b as Bullet).destroy();
       }),
     );
@@ -356,7 +366,7 @@ export class Game extends Scene {
       );
       this.doorBlocker.setDepth(0);
       this.physics.add.existing(this.doorBlocker, true);
-      this.doorBlockerGroup.add(this.doorBlocker);
+      this.doorBlockerGroup!.add(this.doorBlocker);
     }
 
     const ez = objects.find((o) => o.type === "Exit");
@@ -413,7 +423,7 @@ export class Game extends Scene {
     this.doorOpen = true;
 
     if (this.doorBlocker) {
-      this.doorBlockerGroup.remove(this.doorBlocker, true, true);
+      this.doorBlockerGroup!.remove(this.doorBlocker, true, true);
       this.doorBlocker = null;
     }
 
@@ -544,7 +554,7 @@ export class Game extends Scene {
   private onPlayerPickupCoin(coin: Coin) {
     if (!coin.active || this.gameOver) return;
     coin.destroy();
-    this.player.coins += coin.value;
+    this.player.coins += 1;
     this.events.emit("coin-count-changed", this.player.coins);
   }
 

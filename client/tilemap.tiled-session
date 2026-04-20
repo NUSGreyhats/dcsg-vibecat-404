@@ -57,6 +57,9 @@
             "scaleInDock": 1
         },
         "public/assets/rooms/room-5.json": {
+            "expandedObjectLayers": [
+                3
+            ],
             "scale": 1.016796875,
             "selectedLayer": 2,
             "viewCenter": {
