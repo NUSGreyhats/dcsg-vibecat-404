@@ -487,9 +487,28 @@ func main() {
 
 	loadLeaderboard()
 
+	contactKey, err := loadContactKey()
+	if err != nil {
+		log.Fatalf("contact key: %v", err)
+	}
+	dbPath := os.Getenv("IDENTITY_DB_PATH")
+	if dbPath == "" {
+		dbPath = "identity.db"
+	}
+	identity, err := openIdentityStore(dbPath, contactKey)
+	if err != nil {
+		log.Fatalf("open identity store: %v", err)
+	}
+	defer identity.Close()
+
+	registerRL := newRateLimiter(3 * time.Second)
+	verifyRL := newRateLimiter(1 * time.Second)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/ws", handleGameWS)
+	mux.HandleFunc("/api/register", identity.registerHandler(registerRL))
+	mux.HandleFunc("/api/verify", identity.verifyHandler(verifyRL))
 
 	mux.HandleFunc("/leaderboard", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/leaderboard" {
