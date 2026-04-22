@@ -910,12 +910,81 @@ graph LR
 
 ---
 
+## Gameplay Systems
+
+### Power-up Categories
+
+- Movement speed boosts
+- HP-related upgrades
+  - Health potions
+  - Defense stat upgrades (to confirm)
+- Damage-related upgrades
+  - Different weapons
+  - Damage multipliers
+  - Ammo drops/capacity
+
+### Weapons and Combat
+
+Weapon handling integrates with `PlayerState.CurrentWeapon`, `PlayerState.UnlockedWeapons`, and `PlayerState.WeaponCooldown`.
+
+#### Weapon definition
+
+```json
+{
+  "weapon_name": "string",
+  "reload_time": 0,
+  "bullet_speed": 0
+}
+```
+
+#### Weapon state
+
+```json
+{
+  "ammo_left": 0,
+  "shots_fired": 0
+}
+```
+
+#### Ammo item
+
+```json
+{
+  "weapon_name": "string",
+  "amount": 0
+}
+```
+
+#### Temporary damage boost (KIV)
+
+```json
+{
+  "time_limit": 0,
+  "damage_multiplier": 0
+}
+```
+
+### Damage Mechanics
+
+- Critical hits: approximately 1 in every X attacks is critical (X to be defined).
+- Critical hit behavior can be implemented per weapon archetype.
+
+### Map Data Structures
+
+#### Entities
+
+Entity-level behavior and runtime state are represented by `EnemyState`, `DoorState`, and projectile/pickup state in the `RoomState` model. A canonical serialized `Entity` schema can be finalized after weapon/item balancing is locked.
+
+---
+
 ## Open Questions
 
 - [ ] Exact room count, map art, tileset
 - [ ] Boss mechanics, phases, and debuff system (needed for BUG-08)
-- [ ] Full weapon stats table
-- [ ] Item/inventory system details (needed for BUG-09, BUG-10)
+- [ ] Full weapon stats table (reload timings, bullet speeds, DPS)
+- [ ] Item and inventory details (needed for BUG-09, BUG-10)
+- [ ] Canonical entity serialization format for map files
+- [ ] Critical-hit formula (`X` and per-weapon variance)
 - [ ] Death penalty: checkpoint or full restart?
 - [ ] Monorepo vs two separate repos?
 - [ ] Leaderboard webapp stack: React, vanilla JS, Go templates?
