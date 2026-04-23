@@ -69,7 +69,7 @@ The lobby is the public front door for spectators. Under production `MAX_CONCURR
 
 ### Viewer
 
-- `/spectate/:player_id` — HTML page that hosts the same Phaser client in **spectator mode** (see [10-client-architecture.md](./10-client-architecture.md)). The client opens a WebSocket to `/ws/spectate?player_id=<id>` on the same public origin. The reverse proxy routes `/ws/spectate` → game server `:8080`, identically to `/ws`.
+- `/spectate/:player_id` — HTML page that hosts the same Phaser client in **spectator mode** (see [../client/09-spectator-mode.md](../client/09-spectator-mode.md)). The client opens a WebSocket to `/ws/spectate?player_id=<id>` on the same public origin. The reverse proxy routes `/ws/spectate` → game server `:8080`, identically to `/ws`.
 - The spectator WS is served by the **game server**, not the lobby — the game server owns the live state and already writes `S2C_STATE` on its tick. Fan-out is a new outCh in the player's gameLoop. See [05-server-runtime.md#spectator-fan-out](./05-server-runtime.md#spectator-fan-out) and [02-protocol.md#spectator-protocol](./02-protocol.md#spectator-protocol).
 
 ### Data flow

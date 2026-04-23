@@ -269,5 +269,5 @@ If `amount = 10` and `reduction = 50`, `effectiveDmg = -40`. `e.HP -= (-40)` →
 - [../foundations/02-protocol.md](../foundations/02-protocol.md) — packet envelope + types.
 - [../foundations/05-server-runtime.md](../foundations/05-server-runtime.md) — tick drain + tick-shared `now`.
 - [../foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md) — `WeaponCooldown`, `PlayerState.HP int16`, `EnemyState`.
-- [../foundations/10-client-architecture.md](../foundations/10-client-architecture.md) — `client/src/game/weapons.ts` mirror.
+- [../client/05-entities-rendering.md](../client/05-entities-rendering.md) — `Bullet` rendering + `client/src/game/weapons.ts` mirror.
 - [../bugs.md](../bugs.md) — central index.
