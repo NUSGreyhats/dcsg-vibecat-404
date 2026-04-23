@@ -16,6 +16,7 @@ import (
 
 	"github.com/greyhats/defcon-game/server/internal/auth"
 	"github.com/greyhats/defcon-game/server/internal/game"
+	"github.com/greyhats/defcon-game/server/internal/identity"
 	"github.com/greyhats/defcon-game/server/internal/leaderboard"
 	"github.com/greyhats/defcon-game/server/internal/protocol"
 )
@@ -24,6 +25,7 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	addr := envDefault("LISTEN_ADDR", ":8080")
 	dbPath := envDefault("GAME_DB", "game.db")
+	identityDBPath := envDefault("IDENTITY_DB", "identity.db")
 	allowlistPath := envDefault("ALLOWLIST_PATH", "/data/allowlist.json")
 	maxConcurrent := envInt("MAX_CONCURRENT", 64)
 
@@ -32,6 +34,18 @@ func main() {
 		log.Fatalf("open db: %v", err)
 	}
 	defer db.Close()
+
+	identityDB, err := identity.OpenDB(identityDBPath)
+	if err != nil {
+		log.Fatalf("open identity db: %v", err)
+	}
+	defer identityDB.Close()
+
+	contactKey, err := identity.LoadContactKey()
+	if err != nil {
+		log.Fatalf("identity contact key: %v", err)
+	}
+	identitySvc := identity.NewService(identityDB, contactKey)
 
 	mode := auth.ModeFromEnv()
 	switch mode {
@@ -62,6 +76,11 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
+	// Identity endpoints. Per docs/specs/foundations/03-identity-auth.md the
+	// lobby service is spec'd to host these — until that lands, the game
+	// server hosts them directly.
+	identitySvc.Register(mux)
+	mux.HandleFunc("/register", serveRegisterPage)
 	// Dev-only: the lobby service is spec'd to host /api/leaderboard, but
 	// it doesn't exist yet. Expose a read-through here so local testers
 	// can view results without finishing a run.

@@ -95,19 +95,21 @@ The allowlist is read from disk per-connection (or with a short TTL cache). See 
 
 ## Implementation status
 
-**Implemented** in `server/identity.go` (currently hosted inside the game server repo, not a separate lobby service):
+**Implemented** in `server/internal/identity/` (currently hosted inside the game server repo, not a separate lobby service):
 
 - `POST /api/register` — accepts `display_name`, `contact`, `password`; returns `player_id`.
 - `POST /api/verify` — accepts `player_id` + `password`; bcrypt compare.
-- SQLite `identity.db` with the schema above.
-- AES-256-GCM contact encryption, `CONTACT_ENCRYPTION_KEY` env.
-- Per-IP rate limiting on both endpoints.
-- Dummy bcrypt compare for timing-leak mitigation.
+- `GET /register` — minimal HTML registration page on the game server (dev stand-in for the lobby UI).
+- SQLite `identity.db` with the schema above (WAL mode, foreign keys, 5 s busy timeout).
+- AES-256-GCM contact encryption, `CONTACT_ENCRYPTION_KEY` env (zeros default with loud warning).
+- Per-IP rate limiting: 3 s register, 1 s verify.
+- Dummy bcrypt compare on missing `player_id` for timing-leak mitigation.
+- `AUTH_MODE` gate on the WebSocket handler (`auth.Check` in `server/internal/auth/` — open accepts any, token validates against allowlist).
+- `allowlist.json` reader (`server/internal/auth/allowlist.go`, 2 s TTL cache).
 
 **Not yet implemented:**
-- `AUTH_MODE` gate on the WebSocket handler (current game WS accepts anyone).
-- `allowlist.json` reader.
-- Migration of identity endpoints into the separate lobby service.
+- Migration of identity endpoints into the separate lobby service (once lobby ships, move `/api/register`, `/api/verify`, `/register` there and drop from game server).
+- Allowlist producer side — lobby is spec'd to write `allowlist.json` after queue admission. Currently no process writes it, so `AUTH_MODE=token` rejects everyone.
 
 ## Intentional bugs in this area
 
