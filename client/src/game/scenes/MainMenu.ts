@@ -11,14 +11,33 @@ import {
   ERROR,
   FONT_FAMILY,
   FONT_SIZE_BODY,
+  FONT_SIZE_CAPTION,
   FONT_SIZE_SMALL,
   MID_BLUE,
+  MIDNIGHT,
   SUCCESS,
   TEXT_MUTED,
   TEXT_PRIMARY,
   WARNING,
   hex,
 } from "../ui/tokens";
+
+/**
+ * Sponsor placeholders. Drop a key here once a logo asset is registered in
+ * `Preloader.preload()` — the scene will render the image instead of the
+ * `placeholder` glyph.
+ */
+interface SponsorSpec {
+  readonly label: string; // two lines allowed via "\n"
+  readonly placeholder: string;
+  readonly imageKey?: string;
+}
+
+const SPONSORS: ReadonlyArray<SponsorSpec> = [
+  { label: "NUS\nGreyhats", placeholder: "N" },
+  { label: "OtterSec", placeholder: "◉" },
+  { label: "HTX", placeholder: "×" },
+];
 
 /**
  * Title screen. Shows the art/title.png splash full-bleed behind a
@@ -43,6 +62,10 @@ export class MainMenu extends Phaser.Scene {
   private static readonly PANEL_PADDING = 20;
   private static readonly INPUT_WIDTH =
     MainMenu.PANEL_WIDTH - MainMenu.PANEL_PADDING * 2;
+  private static readonly SPONSOR_PANEL_HEIGHT = 170;
+  private static readonly SPONSOR_PANEL_GAP = 14;
+  private static readonly SPONSOR_CARD_HEIGHT = 108;
+  private static readonly SPONSOR_CARD_GAP = 12;
 
   constructor() {
     super({ key: "MainMenu" });
@@ -60,7 +83,15 @@ export class MainMenu extends Phaser.Scene {
     }
 
     const panelX = w - MainMenu.PANEL_WIDTH - MainMenu.PANEL_MARGIN;
-    const panelY = h - MainMenu.PANEL_HEIGHT - MainMenu.PANEL_MARGIN + 30;
+    // Stack = login + gap + sponsors, pinned to the bottom with PANEL_MARGIN.
+    const stackBottom = h - MainMenu.PANEL_MARGIN;
+    const sponsorTop =
+      stackBottom - MainMenu.SPONSOR_PANEL_HEIGHT;
+    const loginBottom = sponsorTop - MainMenu.SPONSOR_PANEL_GAP;
+    const loginTop = loginBottom - MainMenu.PANEL_HEIGHT;
+    // panelY is the content reference (30 px below the panel top); keep
+    // the existing layout math centered on it.
+    const panelY = loginTop + 30;
     const contentX = panelX + MainMenu.PANEL_PADDING;
 
     this.add
@@ -136,6 +167,8 @@ export class MainMenu extends Phaser.Scene {
       window.open("/register", "_blank", "noopener,noreferrer");
     });
 
+    this.drawSponsorsPanel(panelX, sponsorTop);
+
     this.connect();
 
     const sync = getSync();
@@ -146,6 +179,107 @@ export class MainMenu extends Phaser.Scene {
     this.events.on("shutdown", this.cleanup, this);
 
     setTimeout(() => this.usernameInput?.focus(), 50);
+  }
+
+  /**
+   * Sponsors panel below the login panel. Same width + stroke as the login
+   * panel, a `// sponsors` header in muted blue, then N evenly-spaced cards
+   * that currently show a placeholder glyph. When a sponsor's `imageKey` is
+   * populated, the scene will draw the image in place of the glyph.
+   */
+  private drawSponsorsPanel(panelX: number, panelTop: number): void {
+    this.add
+      .rectangle(
+        panelX,
+        panelTop,
+        MainMenu.PANEL_WIDTH,
+        MainMenu.SPONSOR_PANEL_HEIGHT,
+        DEEP_NAVY,
+        0.85,
+      )
+      .setStrokeStyle(2, MID_BLUE)
+      .setOrigin(0, 0);
+
+    this.add.text(
+      panelX + MainMenu.PANEL_PADDING,
+      panelTop + 14,
+      "// sponsors",
+      {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_SMALL,
+        color: hex(MID_BLUE),
+      },
+    );
+
+    const count = SPONSORS.length;
+    const innerWidth = MainMenu.INPUT_WIDTH;
+    const cardWidth =
+      (innerWidth - MainMenu.SPONSOR_CARD_GAP * (count - 1)) / count;
+    const cardsY = panelTop + 44;
+    const cardsX = panelX + MainMenu.PANEL_PADDING;
+    for (let i = 0; i < count; i++) {
+      const cx = cardsX + i * (cardWidth + MainMenu.SPONSOR_CARD_GAP);
+      this.drawSponsorCard(
+        cx,
+        cardsY,
+        cardWidth,
+        MainMenu.SPONSOR_CARD_HEIGHT,
+        SPONSORS[i],
+      );
+    }
+  }
+
+  private drawSponsorCard(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    sponsor: SponsorSpec,
+  ): void {
+    // Card border — no fill so the sponsors panel shows through.
+    this.add
+      .rectangle(x, y, w, h)
+      .setStrokeStyle(1, MID_BLUE)
+      .setOrigin(0, 0);
+
+    // Icon tile: slightly darker than the panel, bordered the same colour
+    // as the card. Real sponsor logos replace the placeholder glyph.
+    const iconSize = 40;
+    const iconX = x + w / 2 - iconSize / 2;
+    const iconY = y + 12;
+    this.add
+      .rectangle(iconX, iconY, iconSize, iconSize, MIDNIGHT, 1)
+      .setStrokeStyle(1, MID_BLUE)
+      .setOrigin(0, 0);
+
+    if (sponsor.imageKey && this.textures.exists(sponsor.imageKey)) {
+      const pad = 4;
+      this.add
+        .image(iconX + iconSize / 2, iconY + iconSize / 2, sponsor.imageKey)
+        .setDisplaySize(iconSize - pad * 2, iconSize - pad * 2);
+    } else {
+      this.add
+        .text(
+          iconX + iconSize / 2,
+          iconY + iconSize / 2,
+          sponsor.placeholder,
+          {
+            fontFamily: FONT_FAMILY,
+            fontSize: "18px",
+            color: hex(TEXT_PRIMARY),
+          },
+        )
+        .setOrigin(0.5);
+    }
+
+    this.add
+      .text(x + w / 2, iconY + iconSize + 10, sponsor.label, {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_CAPTION,
+        color: hex(TEXT_PRIMARY),
+        align: "center",
+      })
+      .setOrigin(0.5, 0);
   }
 
   private connect(): void {
