@@ -101,6 +101,7 @@ export class Game extends Phaser.Scene {
     if (this.controls.shootPressed() && this.player) {
       const angle = this.controls.aimAngle(this.player.x, this.player.y);
       sync.sendShoot(angle);
+      this.player.triggerShootAnim();
     }
 
     const slot = this.controls.weaponSwitchPressed();
