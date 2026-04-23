@@ -1,0 +1,103 @@
+# 09 — CI/CD & Deployment
+
+## Purpose
+
+Build, test, and deploy pipeline for both services. Defines the environment matrix, the source-stripping step that publishes a redacted version of the game server to GitHub Pages, and the build-tag strategy that allows `go test -race` to pass in CI while [BUG-11](./05-server-runtime.md#bug-11-kill-log-append-race)'s deliberate race ships to production.
+
+## Environment matrix
+
+| Env      | Game Server    | Queue Admin      | Concurrency        | Auth Mode         |
+| -------- | -------------- | ---------------- | ------------------ | ----------------- |
+| **dev**  | `:8080` on VPS | Not deployed     | Unlimited          | `open`            |
+| **test** | `:8080` on VPS | `:3000` optional | Unlimited          | `open` or `token` |
+| **prod** | `:8080` on LAN | `:3000` on LAN   | `MAX_CONCURRENT=1` | `token`           |
+
+## Pipeline — game server (Repo A)
+
+```mermaid
+graph TD
+    subgraph Triggers
+        PR["PR to main"]
+        MAIN["Merge to main"]
+        TAG["Push tag v*"]
+    end
+
+    subgraph "CI"
+        LINT[Go lint + vet + tsc] --> TEST["Go test -race<br/>(BUT: tests must NOT<br/>fix BUG-11 race)"] --> BUILD[Build binary + Phaser frontend] --> DOCKER[Docker image → GHCR] --> SMOKE[WebSocket smoke tests]
+        BUILD --> STRIP["Strip source code<br/>remove ALL comments,<br/>docs, tests, CI configs"]
+    end
+
+    subgraph CD
+        DEV[Deploy → dev]
+        TEST_ENV[Deploy → test]
+        BUNDLE[".tar.gz → GitHub Release"]
+        PROD[Deploy → prod<br/>2-reviewer gate]
+        DOCS["Publish stripped source<br/>→ GitHub Pages"]
+    end
+
+    PR --> LINT
+    MAIN --> LINT
+    MAIN -.->|after CI| DEV & DOCS
+    TAG --> LINT
+    TAG -.->|after CI| TEST_ENV & BUNDLE & DOCS
+    BUNDLE -.-> PROD
+
+    style STRIP fill:#f39c12,color:#fff
+    style DOCS fill:#f39c12,color:#fff
+```
+
+## Pipeline — queue admin (Repo B)
+
+Standard: lint → test → build → Docker. Tag triggers → test deploy + air-gapped bundle. Prod requires 2-reviewer gate.
+
+## Build-tag strategy (intentional race hiding)
+
+[BUG-11](./05-server-runtime.md#bug-11-kill-log-append-race) is an intentional data race on `RoomState.KillLog`. The Go race detector would catch it. The CI config uses build tags to exclude the kill-log cleanup file from race testing:
+
+- The buggy file has `//go:build !norace` at the top.
+- CI runs `go test -race -tags=norace ./...` — this excludes the file with the `!norace` build constraint.
+- Production builds use no tag (or `-tags=""`) so the buggy file is compiled and shipped.
+
+This ensures:
+- `go test -race` passes in CI (required for merge).
+- The race remains in production.
+- An alternative compile-time-clean version of the buggy file can be provided under `//go:build norace` if needed for the test build.
+
+## Source code publishing (docs site)
+
+**Only the game server code is published.** Queue admin source is **never** published.
+
+| Stripped ❌                          | Kept ✅                               |
+| ----------------------------------- | ------------------------------------ |
+| All comments (`//`, `/* */`)        | Raw `.go` files                      |
+| Doc strings                         | Package structure                    |
+| README, docs/, markdown             | Function signatures + implementation |
+| `// BUG:` / `// HACK:` annotations  | `go.mod` / `go.sum`                  |
+| `*_test.go`                         | —                                    |
+| `.github/`, Dockerfile, CI configs  | —                                    |
+| Build tags / race exclusion pragmas | —                                    |
+
+CI step: `go/ast`-based stripping tool → `gofmt` → push to `gh-pages` branch → GitHub Pages.
+
+**Note on build tag stripping:** the stripping tool also removes the `//go:build !norace` line from the published source — otherwise it would be a direct hint about the kill-log file. Stripped source must compile on its own but with the race intact.
+
+## Implementation notes
+
+- Stripping tool lives in `tools/strip/` (new). Use `go/ast` to walk packages; drop `*ast.Comment`, `*ast.File.Doc`, test files, and build-tag comment groups.
+- CI matrix includes at minimum `go 1.22` and whatever the project currently targets.
+- Docker image built via multi-stage: build stage runs `go build` + Vite build; runtime stage ships only the compiled binary and the Phaser bundle.
+- Deployment topology: see [01-architecture.md](./01-architecture.md#deployment-topology-production).
+
+## Implementation status
+
+Greenfield. Current repo has no CI/CD. Minimum first step before merging this spec into code: a GitHub Actions workflow that runs `go vet`, `go test`, and `tsc --noEmit`.
+
+## Intentional bugs in this area
+
+None own their body here — but this file is where the **ship vector** for [BUG-11](./05-server-runtime.md#bug-11-kill-log-append-race) is configured. Do not remove the build-tag strategy without coordinating with the server runtime spec.
+
+## Cross-references
+
+- [01-architecture.md](./01-architecture.md) — repo structure, deployment.
+- [05-server-runtime.md](./05-server-runtime.md) — the race that this build-tag strategy preserves.
+- [../bugs.md](../bugs.md) — bug index.
