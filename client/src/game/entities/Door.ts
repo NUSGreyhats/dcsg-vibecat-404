@@ -1,13 +1,14 @@
 import Phaser from "phaser";
 
 import type { DoorDef } from "../../net/packet";
+import { BLOOD_RED, HP_GREEN, TEXT_STROKE, BONE_WHITE, hex } from "../ui/tokens";
 
 const DOOR_WIDTH = 40;
 const DOOR_HEIGHT = 52;
 
-const LOCKED_COLOR = 0x6b1818;
+const LOCKED_COLOR = BLOOD_RED;
 const LOCKED_STROKE = 0x2a0808;
-const UNLOCKED_COLOR = 0x2d8b2d;
+const UNLOCKED_COLOR = HP_GREEN;
 const UNLOCKED_STROKE = 0x0d3a0d;
 
 /**
@@ -34,8 +35,8 @@ export class Door extends Phaser.GameObjects.Container {
     this.icon = scene.add.text(0, 0, this.unlocked ? "▲" : "⚿", {
       fontFamily: "monospace",
       fontSize: "18px",
-      color: "#ffffff",
-      stroke: "#000000",
+      color: hex(BONE_WHITE),
+      stroke: hex(TEXT_STROKE),
       strokeThickness: 3,
     });
     this.icon.setOrigin(0.5, 0.5);

@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 
 import type { PickupSpawn } from "../../net/packet";
+import { BONE_WHITE, COIN_GOLD, TEXT_STROKE, hex } from "../ui/tokens";
 
 const PICKUP_TYPE = {
   HEALTH: 1,
@@ -20,15 +21,15 @@ type PickupStyle = {
 function styleFor(type: number): PickupStyle {
   switch (type) {
     case PICKUP_TYPE.HEALTH:
-      return { color: 0xdc2d2d, size: 14, glyph: "♥", iconKey: "heart" };
+      return { color: 0xdc2d2d, size: 16, glyph: "♥", iconKey: "heart" };
     case PICKUP_TYPE.AMMO:
-      return { color: 0x8b5a2b, size: 14, glyph: "■" };
+      return { color: COIN_GOLD, size: 16, glyph: "■", iconKey: "coin" };
     case PICKUP_TYPE.SPEED:
-      return { color: 0x00e5ff, size: 14, glyph: "⚡" };
+      return { color: 0x00e5ff, size: 16, glyph: "⚡" };
     case PICKUP_TYPE.DAMAGE:
-      return { color: 0xff8c00, size: 14, glyph: "⚔" };
+      return { color: 0xff8c00, size: 16, glyph: "⚔" };
     case PICKUP_TYPE.LARGE_HEART:
-      return { color: 0xff69b4, size: 20, glyph: "♥", iconKey: "heart" };
+      return { color: 0xff69b4, size: 22, glyph: "♥", iconKey: "heart" };
     default:
       return { color: 0xcccccc, size: 12, glyph: "?" };
   }
@@ -54,13 +55,6 @@ export class Pickup extends Phaser.GameObjects.Container {
       const icon = scene.add.image(0, 0, style.iconKey);
       icon.setDisplaySize(style.size, style.size);
       this.add(icon);
-    } else if (
-      spawn.type === PICKUP_TYPE.AMMO &&
-      scene.textures.exists("coin")
-    ) {
-      const icon = scene.add.image(0, 0, "coin");
-      icon.setDisplaySize(style.size, style.size);
-      this.add(icon);
     } else {
       const rect = scene.add.rectangle(0, 0, style.size, style.size, style.color);
       rect.setStrokeStyle(1, 0x000000, 0.5);
@@ -71,8 +65,8 @@ export class Pickup extends Phaser.GameObjects.Container {
     const label = scene.add.text(0, -style.size / 2 - 8, style.glyph, {
       fontFamily: "monospace",
       fontSize: "12px",
-      color: "#ffffff",
-      stroke: "#000000",
+      color: hex(BONE_WHITE),
+      stroke: hex(TEXT_STROKE),
       strokeThickness: 2,
     });
     label.setOrigin(0.5, 0.5);

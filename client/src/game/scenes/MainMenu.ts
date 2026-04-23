@@ -1,11 +1,30 @@
 import Phaser from "phaser";
 import { getSync } from "../net/runContext";
 import { WS_URL } from "../constants";
+import {
+  ACCENT_PRIMARY,
+  BUTTON_HOVER_COLOR,
+  BUTTON_IDLE_COLOR,
+  BUTTON_TEXT_STYLE,
+  DEEP_NAVY,
+  DEPTH_SPLASH,
+  ERROR,
+  FONT_FAMILY,
+  FONT_SIZE_BODY,
+  FONT_SIZE_SMALL,
+  MID_BLUE,
+  SUCCESS,
+  TEXT_MUTED,
+  TEXT_PRIMARY,
+  WARNING,
+  hex,
+} from "../ui/tokens";
 
 /**
- * Title screen. Connects to the game server, takes a player_id via an HTML
- * <input> overlay (Phaser has no native text input), then triggers auth +
- * start-run and hands off to the Game scene.
+ * Title screen. Shows the art/title.png splash full-bleed behind a
+ * compact bottom-left login panel: player_id text input → Start Run
+ * button → status line. Connects on create; on Start fires
+ * C2S_AUTH → C2S_START_RUN and hands off to the Game scene.
  */
 export class MainMenu extends Phaser.Scene {
   private overlayInput?: HTMLInputElement;
@@ -19,67 +38,52 @@ export class MainMenu extends Phaser.Scene {
   }
 
   create(): void {
-    const cx = this.scale.width / 2;
-    const cy = this.scale.height / 2;
+    const w = this.scale.width;
+    const h = this.scale.height;
 
-    if (this.textures.exists("bg")) {
+    // -- Splash --
+    if (this.textures.exists("title")) {
       this.add
-        .image(cx, cy, "bg")
-        .setDisplaySize(this.scale.width, this.scale.height);
+        .image(w / 2, h / 2, "title")
+        .setDisplaySize(w, h)
+        .setDepth(DEPTH_SPLASH);
     }
 
-    this.add
-      .text(cx, cy - 200, "DEFCON", {
-        fontFamily: "monospace",
-        fontSize: "72px",
-        color: "#ffcc33",
-      })
-      .setOrigin(0.5);
+    // -- Login panel (bottom-left) --
+    const panelX = 40;
+    const panelY = h - 200;
 
     this.add
-      .text(cx, cy - 130, "Dungeon Speedrun", {
-        fontFamily: "monospace",
-        fontSize: "20px",
-        color: "#cccccc",
-      })
-      .setOrigin(0.5);
+      .rectangle(panelX, panelY - 30, 360, 220, DEEP_NAVY, 0.85)
+      .setStrokeStyle(2, MID_BLUE)
+      .setOrigin(0, 0);
 
-    this.add
-      .text(cx, cy - 40, "Player ID", {
-        fontFamily: "monospace",
-        fontSize: "18px",
-        color: "#ffffff",
-      })
-      .setOrigin(0.5);
+    this.add.text(panelX + 20, panelY - 10, "Player ID", {
+      fontFamily: FONT_FAMILY,
+      fontSize: FONT_SIZE_BODY,
+      color: hex(TEXT_PRIMARY),
+    });
 
-    this.mountTextInput(cx, cy);
+    this.mountTextInput(panelX + 20, panelY + 20);
 
     this.startButton = this.add
-      .text(cx, cy + 80, "[ Start Run ]", {
-        fontFamily: "monospace",
-        fontSize: "28px",
-        color: "#ffffff",
-        backgroundColor: "#333333",
-        padding: { left: 16, right: 16, top: 8, bottom: 8 },
-      })
-      .setOrigin(0.5)
+      .text(panelX + 20, panelY + 70, "[ Start Run ]", BUTTON_TEXT_STYLE)
+      .setOrigin(0, 0)
       .setInteractive({ useHandCursor: true });
 
-    this.startButton.on("pointerover", () => {
-      this.startButton?.setColor("#ffcc33");
-    });
-    this.startButton.on("pointerout", () => {
-      this.startButton?.setColor("#ffffff");
-    });
+    this.startButton.on("pointerover", () =>
+      this.startButton?.setColor(BUTTON_HOVER_COLOR),
+    );
+    this.startButton.on("pointerout", () =>
+      this.startButton?.setColor(BUTTON_IDLE_COLOR),
+    );
     this.startButton.on("pointerdown", () => this.onStart());
 
-    this.statusText = this.add
-      .text(cx, cy + 150, "Connecting...", {
-        fontFamily: "monospace",
-        fontSize: "16px",
-        color: "#aaaaaa",
-      })
-      .setOrigin(0.5);
+    this.statusText = this.add.text(panelX + 20, panelY + 135, "Connecting...", {
+      fontFamily: FONT_FAMILY,
+      fontSize: FONT_SIZE_SMALL,
+      color: hex(TEXT_MUTED),
+    });
 
     this.connect();
 
@@ -100,18 +104,18 @@ export class MainMenu extends Phaser.Scene {
         this.statusText?.setText(
           "Connected. Enter a player ID and press Start.",
         );
-        this.statusText?.setColor("#88ff88");
+        this.statusText?.setColor(hex(SUCCESS));
       })
       .catch((err) => {
         console.error("[MainMenu] connect failed", err);
         this.statusText?.setText(
           "Could not connect to the game server. Refresh to retry.",
         );
-        this.statusText?.setColor("#ff6666");
+        this.statusText?.setColor(hex(ERROR));
       });
   }
 
-  private mountTextInput(cx: number, cy: number): void {
+  private mountTextInput(sceneX: number, sceneY: number): void {
     const canvas = this.game.canvas;
     const parent = canvas.parentElement ?? document.body;
     const input = document.createElement("input");
@@ -120,18 +124,26 @@ export class MainMenu extends Phaser.Scene {
     input.placeholder = "player_id";
     input.autocomplete = "off";
     input.spellcheck = false;
-    input.style.position = "absolute";
-    input.style.zIndex = "20";
-    input.style.fontFamily = "monospace";
-    input.style.fontSize = "18px";
-    input.style.padding = "6px 10px";
-    input.style.border = "1px solid #888";
-    input.style.background = "#111";
-    input.style.color = "#fff";
-    input.style.textAlign = "center";
-    input.style.width = "280px";
-    input.style.outline = "none";
-    input.style.boxSizing = "border-box";
+    Object.assign(input.style, {
+      position: "absolute",
+      zIndex: "20",
+      fontFamily: "monospace",
+      fontSize: "18px",
+      padding: "6px 10px",
+      border: `1px solid ${hex(MID_BLUE)}`,
+      background: hex(DEEP_NAVY),
+      color: hex(TEXT_PRIMARY),
+      width: "280px",
+      outline: "none",
+      boxSizing: "border-box",
+    } as Partial<CSSStyleDeclaration>);
+
+    input.addEventListener("focus", () => {
+      input.style.borderColor = hex(ACCENT_PRIMARY);
+    });
+    input.addEventListener("blur", () => {
+      input.style.borderColor = hex(MID_BLUE);
+    });
 
     if (!parent.style.position) parent.style.position = "relative";
     parent.appendChild(input);
@@ -141,10 +153,13 @@ export class MainMenu extends Phaser.Scene {
       const parentRect = parent.getBoundingClientRect();
       const scaleX = rect.width / this.scale.width;
       const scaleY = rect.height / this.scale.height;
-      const leftInCanvas = cx * scaleX - 140;
-      const topInCanvas = cy * scaleY - 16;
+      const leftInCanvas = sceneX * scaleX;
+      const topInCanvas = sceneY * scaleY;
       input.style.left = `${rect.left - parentRect.left + leftInCanvas}px`;
       input.style.top = `${rect.top - parentRect.top + topInCanvas}px`;
+      // Scale the input with the canvas so the panel lines up.
+      const visualWidth = 280 * scaleX;
+      input.style.width = `${visualWidth}px`;
     };
     place();
     this.resizeHandler = place;
@@ -156,24 +171,23 @@ export class MainMenu extends Phaser.Scene {
     });
 
     this.overlayInput = input;
-    // Focus after a tick so it doesn't fight with Phaser bootstrap.
     setTimeout(() => input.focus(), 50);
   }
 
   private onStart(): void {
     if (!this.connected) {
       this.statusText?.setText("Still connecting — hang on.");
-      this.statusText?.setColor("#ffaa33");
+      this.statusText?.setColor(hex(WARNING));
       return;
     }
     const value = this.overlayInput?.value.trim() ?? "";
     if (!value) {
       this.statusText?.setText("Enter a player ID first.");
-      this.statusText?.setColor("#ff6666");
+      this.statusText?.setColor(hex(ERROR));
       return;
     }
     this.statusText?.setText("Authenticating...");
-    this.statusText?.setColor("#aaaaaa");
+    this.statusText?.setColor(hex(TEXT_MUTED));
     getSync().sendAuth(value);
   }
 
@@ -189,7 +203,7 @@ export class MainMenu extends Phaser.Scene {
 
   private onError(err: { code: string; message: string }): void {
     this.statusText?.setText(`Error: ${err.message}`);
-    this.statusText?.setColor("#ff6666");
+    this.statusText?.setColor(hex(ERROR));
   }
 
   private cleanup(): void {

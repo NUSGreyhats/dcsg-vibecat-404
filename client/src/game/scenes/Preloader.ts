@@ -1,5 +1,18 @@
 import Phaser from "phaser";
 import { ROOM_COUNT } from "../constants";
+import { registerCatAnims } from "../ui/anims";
+import {
+  CANVAS_BG,
+  DEEP_NAVY,
+  FONT_FAMILY,
+  FONT_SIZE_BODY,
+  FONT_SIZE_SECTION,
+  MID_BLUE,
+  SKY_BLUE,
+  TEXT_PRIMARY,
+  TEXT_SECONDARY,
+  hex,
+} from "../ui/tokens";
 
 /**
  * Loads all runtime assets. Shows a progress bar + percentage text. If any
@@ -16,12 +29,23 @@ export class Preloader extends Phaser.Scene {
   }
 
   create(): void {
-    // Trigger scene start from create once assets are loaded below.
-    // Nothing to do here — actual asset load kicks off in preload().
+    // NEAREST filter + roundPixels are set globally via
+    // `pixelArt: true` in main.ts's Phaser config, so atlases load
+    // crisp by default. Nothing to do here for filtering.
+
+    // Register animations for any atlas that ships Aseprite tags.
+    if (this.textures.exists("player")) {
+      registerCatAnims(this, "player", "player", { withAttack: false });
+    }
+    if (this.textures.exists("enemy")) {
+      registerCatAnims(this, "enemy", "enemy", { withAttack: true });
+    }
+
     this.scene.start("MainMenu");
   }
 
   preload(): void {
+    this.cameras.main.setBackgroundColor(CANVAS_BG);
     this.buildProgressUI();
 
     this.load.on("progress", (value: number) => {
@@ -35,7 +59,6 @@ export class Preloader extends Phaser.Scene {
     });
 
     this.load.on("loaderror", (file: Phaser.Loader.File) => {
-      // Non-fatal — we keep going with rectangle fallbacks.
       console.warn(
         `[Preloader] failed to load ${file.key} from ${file.url ?? "?"}`,
       );
@@ -47,13 +70,24 @@ export class Preloader extends Phaser.Scene {
       this.percentText?.destroy();
     });
 
-    // Core atlases / images.
+    // -- Cast atlases (player, enemy) --
     this.load.atlas("player", "assets/player.png", "assets/player.json");
-    this.load.image("bg", "assets/bg.png");
-    this.load.image("logo", "assets/logo.png");
+    this.load.atlas("enemy", "assets/enemy.png", "assets/enemy.json");
+
+    // -- Projectiles --
+    this.load.atlas("bullets", "assets/bullets.png", "assets/bullets.json");
+
+    // -- Pickup icons --
+    this.load.image("coin", "assets/coin.png");
+    this.load.image("heart", "assets/heart.png");
+
+    // -- Splash --
+    this.load.image("title", "assets/title.png");
+
+    // -- Tileset (shared by all room tilemaps) --
     this.load.image("tilemap", "assets/tilemap.png");
 
-    // Per-room tilemaps.
+    // -- Per-room tilemaps --
     for (let i = 1; i <= ROOM_COUNT; i++) {
       this.load.tilemapTiledJSON(`room-${i}`, `assets/rooms/room-${i}.json`);
     }
@@ -65,31 +99,25 @@ export class Preloader extends Phaser.Scene {
 
     this.add
       .text(cx, cy - 60, "Loading...", {
-        fontFamily: "monospace",
-        fontSize: "24px",
-        color: "#ffffff",
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_SECTION,
+        color: hex(TEXT_PRIMARY),
       })
       .setOrigin(0.5);
 
     this.progressFrame = this.add
       .rectangle(cx, cy, 468, 32)
-      .setStrokeStyle(1, 0xffffff)
-      .setFillStyle(0x000000, 0);
+      .setStrokeStyle(1, SKY_BLUE)
+      .setFillStyle(DEEP_NAVY, 0.6);
 
-    this.progressBar = this.add.rectangle(
-      cx - 230,
-      cy,
-      4,
-      28,
-      0xffffff,
-    );
+    this.progressBar = this.add.rectangle(cx - 230, cy, 4, 28, MID_BLUE);
     this.progressBar.setOrigin(0, 0.5);
 
     this.percentText = this.add
       .text(cx, cy + 40, "0%", {
-        fontFamily: "monospace",
-        fontSize: "18px",
-        color: "#cccccc",
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_BODY,
+        color: hex(TEXT_SECONDARY),
       })
       .setOrigin(0.5);
   }
