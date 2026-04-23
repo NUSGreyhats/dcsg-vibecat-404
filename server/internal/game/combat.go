@@ -129,7 +129,8 @@ func AdvanceProjectiles(r *RoomState, dt float32, now time.Time) []collisionHit 
 		age := now.Sub(pr.SpawnedAt).Seconds()
 		if age > float64(ProjectileLifeSec) ||
 			pr.X < 0 || pr.X > RoomWidth ||
-			pr.Y < 0 || pr.Y > RoomHeight {
+			pr.Y < 0 || pr.Y > RoomHeight ||
+			IsWallAt(r.RoomIndex, pr.X, pr.Y) {
 			delete(r.Projectiles, id)
 			continue
 		}
