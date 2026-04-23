@@ -1,28 +1,33 @@
 import Phaser from "phaser";
 import { getSync, resetSync } from "../net/runContext";
 import type { LeaderboardEntry, SplitData } from "../../net/packet";
-
-function formatTime(ms: number): string {
-  const totalMs = Math.max(0, Math.floor(ms));
-  const minutes = Math.floor(totalMs / 60000);
-  const seconds = Math.floor((totalMs % 60000) / 1000);
-  const millis = totalMs % 1000;
-  const mm = String(minutes).padStart(2, "0");
-  const ss = String(seconds).padStart(2, "0");
-  const mmm = String(millis).padStart(3, "0");
-  return `${mm}:${ss}.${mmm}`;
-}
+import { formatTime } from "../ui/formatters";
+import {
+  ACCENT_PRIMARY,
+  BUTTON_HOVER_COLOR,
+  BUTTON_IDLE_COLOR,
+  BUTTON_TEXT_STYLE,
+  FONT_FAMILY,
+  FONT_SIZE_BODY_EM,
+  FONT_SIZE_SECTION,
+  FONT_SIZE_SMALL,
+  FONT_SIZE_SUBTITLE,
+  FONT_SIZE_TITLE,
+  TEXT_PRIMARY,
+  TEXT_SECONDARY,
+  hex,
+} from "../ui/tokens";
 
 const HEADER_STYLE: Phaser.Types.GameObjects.Text.TextStyle = {
-  fontFamily: "monospace",
-  fontSize: "20px",
-  color: "#ffcc33",
+  fontFamily: FONT_FAMILY,
+  fontSize: FONT_SIZE_BODY_EM,
+  color: hex(ACCENT_PRIMARY),
 };
 
 const ROW_STYLE: Phaser.Types.GameObjects.Text.TextStyle = {
-  fontFamily: "monospace",
-  fontSize: "16px",
-  color: "#ffffff",
+  fontFamily: FONT_FAMILY,
+  fontSize: FONT_SIZE_SMALL,
+  color: hex(TEXT_PRIMARY),
 };
 
 /**
@@ -43,9 +48,9 @@ export class WinScreen extends Phaser.Scene {
 
     this.add
       .text(cx, 60, "Run Complete", {
-        fontFamily: "monospace",
-        fontSize: "48px",
-        color: "#ffcc33",
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_TITLE,
+        color: hex(ACCENT_PRIMARY),
       })
       .setOrigin(0.5);
 
@@ -57,24 +62,22 @@ export class WinScreen extends Phaser.Scene {
 
     this.add
       .text(cx, 130, `Total time:  ${formatTime(totalMs)}`, {
-        fontFamily: "monospace",
-        fontSize: "26px",
-        color: "#ffffff",
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_SUBTITLE,
+        color: hex(TEXT_PRIMARY),
       })
       .setOrigin(0.5);
 
     this.add
       .text(cx, 170, `Rank:  #${rank}`, {
-        fontFamily: "monospace",
-        fontSize: "22px",
-        color: "#cccccc",
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_SECTION,
+        color: hex(TEXT_SECONDARY),
       })
       .setOrigin(0.5);
 
     // Splits table (left column)
-    this.add
-      .text(120, 220, "Splits", HEADER_STYLE)
-      .setOrigin(0, 0);
+    this.add.text(120, 220, "Splits", HEADER_STYLE).setOrigin(0, 0);
     this.add
       .text(120, 250, "Room   Time        Kills", ROW_STYLE)
       .setOrigin(0, 0);
@@ -96,23 +99,16 @@ export class WinScreen extends Phaser.Scene {
 
     this.renderLeaderboard(state.leaderboard ?? []);
 
-    // Play again button
     this.playAgainButton = this.add
-      .text(cx, this.scale.height - 70, "[ Play Again ]", {
-        fontFamily: "monospace",
-        fontSize: "28px",
-        color: "#ffffff",
-        backgroundColor: "#333333",
-        padding: { left: 16, right: 16, top: 8, bottom: 8 },
-      })
+      .text(cx, this.scale.height - 70, "[ Play Again ]", BUTTON_TEXT_STYLE)
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
 
     this.playAgainButton.on("pointerover", () =>
-      this.playAgainButton?.setColor("#ffcc33"),
+      this.playAgainButton?.setColor(BUTTON_HOVER_COLOR),
     );
     this.playAgainButton.on("pointerout", () =>
-      this.playAgainButton?.setColor("#ffffff"),
+      this.playAgainButton?.setColor(BUTTON_IDLE_COLOR),
     );
     this.playAgainButton.on("pointerdown", () => this.onPlayAgain());
 

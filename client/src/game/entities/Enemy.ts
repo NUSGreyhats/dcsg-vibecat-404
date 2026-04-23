@@ -1,11 +1,14 @@
 import Phaser from "phaser";
 
 import type { EntitySnapshot } from "../../net/packet";
+import { directionFromVector, type Direction8 } from "../ui/anims";
+import { BONE_WHITE, HP_AMBER, HP_GREEN, HP_RED } from "../ui/tokens";
 
 const LERP_FACTOR = 0.3;
 const HP_BAR_WIDTH = 28;
 const HP_BAR_HEIGHT = 3;
-const HP_BAR_OFFSET_Y = -18;
+const HP_BAR_OFFSET_Y = -24;
+const IDLE_EPSILON = 0.4;
 
 const ENEMY_TYPE = {
   GRUNT: 1,
@@ -15,20 +18,26 @@ const ENEMY_TYPE = {
   BOSS: 5,
 } as const;
 
-function colorForType(type: number): number {
+/**
+ * Archetype tint — the enemy atlas ships a single white-cat silhouette
+ * with red markings. Per-archetype visual variation comes from a
+ * multiplicative tint. Tints push white into red/blue/yellow hues
+ * without losing the red blood markings.
+ */
+function tintForType(type: number): number {
   switch (type) {
     case ENEMY_TYPE.GRUNT:
-      return 0x6b8e23;
+      return 0xffffff; // stock white
     case ENEMY_TYPE.RUNNER:
-      return 0xff8c00;
+      return 0xffc080; // warm amber — runner
     case ENEMY_TYPE.TANK:
-      return 0x4169e1;
+      return 0x9eb8ff; // steely blue — armored
     case ENEMY_TYPE.KAMIKAZE:
-      return 0xdc143c;
+      return 0xff8080; // pink-red — volatile
     case ENEMY_TYPE.BOSS:
-      return 0x8b0000;
+      return 0xffd0d0; // pale blood — boss
     default:
-      return 0x808080;
+      return 0xcccccc;
   }
 }
 
@@ -36,20 +45,18 @@ function sizeForType(type: number): number {
   switch (type) {
     case ENEMY_TYPE.TANK:
     case ENEMY_TYPE.BOSS:
-      return 36;
+      return 44;
     case ENEMY_TYPE.KAMIKAZE:
-      return 14;
+      return 20;
     default:
-      return 24;
+      return 32;
   }
 }
 
 /**
- * Server-driven AI actor.
- *
- * Constructed from the initial {@link EntitySnapshot}; subsequent
- * snapshots update the target position + HP via {@link applySnapshot}.
- * {@link markDead} plays a brief flash/tween then destroys.
+ * Server-driven AI actor. Rendered as a masked-kitsune-cat from
+ * `enemy.json`; tinted and scaled per archetype. Direction and
+ * walk/idle state derive from the lerp delta each tick.
  */
 export class Enemy extends Phaser.GameObjects.Container {
   readonly entityId: number;
@@ -61,6 +68,8 @@ export class Enemy extends Phaser.GameObjects.Container {
   private targetX: number;
   private targetY: number;
   private dying = false;
+  private facing: Direction8 = "down";
+  private moving = false;
 
   constructor(scene: Phaser.Scene, snap: EntitySnapshot) {
     super(scene, snap.x, snap.y);
@@ -72,14 +81,14 @@ export class Enemy extends Phaser.GameObjects.Container {
     this.targetY = snap.y;
 
     const size = sizeForType(snap.type);
-    const tint = colorForType(snap.type);
+    const tint = tintForType(snap.type);
 
     if (scene.textures.exists("enemy")) {
-      const frame = Number.isFinite(snap.type) ? snap.type : 0;
-      const sprite = scene.add.sprite(0, 0, "enemy", frame);
+      const sprite = scene.add.sprite(0, 0, "enemy");
       sprite.setDisplaySize(size, size);
       sprite.setTint(tint);
       this.sprite = sprite;
+      this.playAnim("idle");
     } else {
       this.sprite = scene.add.rectangle(0, 0, size, size, tint);
     }
@@ -104,8 +113,26 @@ export class Enemy extends Phaser.GameObjects.Container {
 
   tick(_dt: number): void {
     if (this.dying) return;
+
+    const dx = this.targetX - this.x;
+    const dy = this.targetY - this.y;
     this.x = Phaser.Math.Linear(this.x, this.targetX, LERP_FACTOR);
     this.y = Phaser.Math.Linear(this.y, this.targetY, LERP_FACTOR);
+
+    const facing = directionFromVector(dx, dy, IDLE_EPSILON);
+    const moving = facing !== null;
+    if (facing !== null && facing !== this.facing) {
+      this.facing = facing;
+    }
+    if (moving !== this.moving) {
+      this.moving = moving;
+      this.playAnim(moving ? "walk" : "idle");
+    } else if (moving && this.sprite instanceof Phaser.GameObjects.Sprite) {
+      const expected = `enemy-walk_${this.facing}`;
+      if (this.sprite.anims?.currentAnim?.key !== expected) {
+        this.playAnim("walk");
+      }
+    }
   }
 
   markDead(): void {
@@ -132,13 +159,20 @@ export class Enemy extends Phaser.GameObjects.Container {
     });
   }
 
+  private playAnim(kind: "idle" | "walk"): void {
+    if (!(this.sprite instanceof Phaser.GameObjects.Sprite)) return;
+    const key = `enemy-${kind}_${this.facing}`;
+    if (!this.scene?.anims?.exists(key)) return;
+    if (this.sprite.anims.currentAnim?.key === key) return;
+    this.sprite.play(key);
+  }
+
   private drawHpBar(): void {
     const ratio = Phaser.Math.Clamp(this.currentHp / this.maxHp, 0, 1);
     const filled = Math.floor(HP_BAR_WIDTH * ratio);
 
     this.hpBar.clear();
     if (ratio >= 1 || this.currentHp <= 0) {
-      // hide bar at full or dead
       return;
     }
     this.hpBar.fillStyle(0x200000, 1);
@@ -148,8 +182,15 @@ export class Enemy extends Phaser.GameObjects.Container {
       HP_BAR_WIDTH,
       HP_BAR_HEIGHT,
     );
-    const color = ratio > 0.5 ? 0x3ddc3d : ratio > 0.25 ? 0xe0c020 : 0xdc3d3d;
+    const color = ratio > 0.5 ? HP_GREEN : ratio > 0.25 ? HP_AMBER : HP_RED;
     this.hpBar.fillStyle(color, 1);
     this.hpBar.fillRect(-HP_BAR_WIDTH / 2, HP_BAR_OFFSET_Y, filled, HP_BAR_HEIGHT);
+    this.hpBar.lineStyle(1, BONE_WHITE, 0.5);
+    this.hpBar.strokeRect(
+      -HP_BAR_WIDTH / 2,
+      HP_BAR_OFFSET_Y,
+      HP_BAR_WIDTH,
+      HP_BAR_HEIGHT,
+    );
   }
 }

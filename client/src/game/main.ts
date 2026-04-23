@@ -7,6 +7,7 @@ import { Game as MainGame } from "./scenes/Game";
 import { GameHUD } from "./scenes/GameHUD";
 import { InventoryMenu } from "./scenes/InventoryMenu";
 import { WinScreen } from "./scenes/WinScreen";
+import { hex, CANVAS_BG } from "./ui/tokens";
 
 export function startGame(parentId: string): Phaser.Game {
   const config: Phaser.Types.Core.GameConfig = {
@@ -14,7 +15,9 @@ export function startGame(parentId: string): Phaser.Game {
     width: ROOM_WIDTH,
     height: ROOM_HEIGHT,
     parent: parentId,
-    backgroundColor: "#0d0d10",
+    backgroundColor: hex(CANVAS_BG),
+    pixelArt: true,
+    roundPixels: true,
     physics: {
       default: "arcade",
       arcade: {

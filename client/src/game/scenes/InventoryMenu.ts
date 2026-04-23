@@ -1,5 +1,22 @@
 import Phaser from "phaser";
 import { getSync } from "../net/runContext";
+import {
+  ACCENT_PRIMARY,
+  DEPTH_HUD_BG,
+  DEPTH_HUD_FILL,
+  DEPTH_MODAL_TEXT,
+  FONT_FAMILY,
+  FONT_SIZE_BODY_EM,
+  FONT_SIZE_CAPTION,
+  FONT_SIZE_HEADING,
+  MID_BLUE,
+  MIDNIGHT,
+  PANEL_FILL,
+  TEXT_DIM,
+  TEXT_MUTED,
+  TEXT_PRIMARY,
+  hex,
+} from "../ui/tokens";
 
 /**
  * Modal inventory overlay. Pauses the Game scene while active.
@@ -33,22 +50,22 @@ export class InventoryMenu extends Phaser.Scene {
     const cy = this.scale.height / 2;
 
     this.add
-      .rectangle(cx, cy, this.scale.width, this.scale.height, 0x000000, 0.55)
-      .setDepth(1000);
+      .rectangle(cx, cy, this.scale.width, this.scale.height, MIDNIGHT, 0.55)
+      .setDepth(DEPTH_HUD_BG);
 
     this.panel = this.add
-      .rectangle(cx, cy, 480, 360, 0x111111, 0.95)
-      .setStrokeStyle(2, 0xffffff)
-      .setDepth(1001);
+      .rectangle(cx, cy, 480, 360, PANEL_FILL, 0.95)
+      .setStrokeStyle(2, MID_BLUE)
+      .setDepth(DEPTH_HUD_FILL);
 
     this.title = this.add
       .text(cx, cy - 150, "Inventory", {
-        fontFamily: "monospace",
-        fontSize: "28px",
-        color: "#ffcc33",
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_HEADING,
+        color: hex(ACCENT_PRIMARY),
       })
       .setOrigin(0.5)
-      .setDepth(1002);
+      .setDepth(DEPTH_MODAL_TEXT);
 
     this.hint = this.add
       .text(
@@ -56,25 +73,25 @@ export class InventoryMenu extends Phaser.Scene {
         cy + 150,
         "[Up/Down] select   [Enter] use   [Esc/I] close",
         {
-          fontFamily: "monospace",
-          fontSize: "14px",
-          color: "#aaaaaa",
+          fontFamily: FONT_FAMILY,
+          fontSize: FONT_SIZE_CAPTION,
+          color: hex(TEXT_MUTED),
         },
       )
       .setOrigin(0.5)
-      .setDepth(1002);
+      .setDepth(DEPTH_MODAL_TEXT);
 
     this.items = getSync().state.player?.inventory?.slice() ?? [];
 
     if (this.items.length === 0) {
       this.emptyText = this.add
         .text(cx, cy, "(empty)", {
-          fontFamily: "monospace",
-          fontSize: "18px",
-          color: "#888888",
+          fontFamily: FONT_FAMILY,
+          fontSize: FONT_SIZE_BODY_EM,
+          color: hex(TEXT_DIM),
         })
         .setOrigin(0.5)
-        .setDepth(1002);
+        .setDepth(DEPTH_MODAL_TEXT);
     } else {
       this.renderItems(cx, cy);
     }
@@ -107,12 +124,12 @@ export class InventoryMenu extends Phaser.Scene {
       const prefix = isSel ? "> " : "  ";
       const txt = this.add
         .text(cx, startY + i * 28, `${prefix}${this.items[i]}`, {
-          fontFamily: "monospace",
-          fontSize: "20px",
-          color: isSel ? "#ffcc33" : "#ffffff",
+          fontFamily: FONT_FAMILY,
+          fontSize: FONT_SIZE_BODY_EM,
+          color: hex(isSel ? ACCENT_PRIMARY : TEXT_PRIMARY),
         })
         .setOrigin(0.5)
-        .setDepth(1002);
+        .setDepth(DEPTH_MODAL_TEXT);
       this.itemTexts.push(txt);
     }
   }

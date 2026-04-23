@@ -5,6 +5,16 @@ import { ROOM_HEIGHT, ROOM_WIDTH } from "../constants";
 import { Door } from "../entities/Door";
 import { Enemy } from "../entities/Enemy";
 import { Pickup } from "../entities/Pickup";
+import {
+  DEPTH_BADGE,
+  DEPTH_BG_FALLBACK,
+  DEPTH_TILEMAP,
+  DEPTH_WALL_FALLBACK,
+  FONT_FAMILY,
+  FONT_SIZE_MICRO,
+  hex,
+  TEXT_PRIMARY,
+} from "../ui/tokens";
 
 export type RoomObjects = {
   enemies: Map<number, Enemy>;
@@ -15,18 +25,20 @@ export type RoomObjects = {
 export type BuiltRoom = RoomObjects;
 
 // Palette of background tints — rooms pick one by tilemap id so they
-// visually differ without needing the tileset to load.
+// visually differ without needing the tileset to load. Sequence walks
+// from cool alley-blue through warm interrogation-brown and lands on
+// bloodroom for the boss.
 const ROOM_TINTS: number[] = [
-  0x1a1a2e, // twilight purple
-  0x16213e, // navy
-  0x0f3460, // deep blue
-  0x2d2d44, // charcoal purple
-  0x3b2417, // brown cavern
-  0x1f4529, // mossy green
-  0x402020, // dim red
-  0x254741, // teal crypt
-  0x3a1f5c, // arcane purple
-  0x202020, // basalt
+  0x1a2338, // deep navy (foyer)
+  0x16213e, // shadow navy
+  0x0f3460, // neon alley
+  0x2d2d44, // rainslick grey
+  0x3b2417, // precinct oak
+  0x1f4529, // back-lot moss
+  0x402020, // back-alley bloom
+  0x254741, // pier teal
+  0x3a1f5c, // neon parlour
+  0x202020, // basalt rooftop
   0x502020, // bloodroom (boss)
 ];
 
@@ -82,7 +94,7 @@ export function paintRoomBackground(
           for (const layerData of map.layers) {
             const layer = map.createLayer(layerData.name, tileset, 0, 0);
             if (layer) {
-              layer.setDepth(-30); // below entities + player
+              layer.setDepth(DEPTH_TILEMAP);
               created.push(layer);
             }
           }
@@ -103,7 +115,7 @@ export function paintRoomBackground(
     ROOM_HEIGHT,
     tint,
   );
-  bg.setDepth(-100);
+  bg.setDepth(DEPTH_BG_FALLBACK);
   created.push(bg);
 
   const top = scene.add.rectangle(
@@ -135,7 +147,7 @@ export function paintRoomBackground(
     WALL_COLOR,
   );
   for (const w of [top, bottom, left, right]) {
-    w.setDepth(-50);
+    w.setDepth(DEPTH_WALL_FALLBACK);
     created.push(w);
   }
 
@@ -145,14 +157,14 @@ export function paintRoomBackground(
     WALL_THICKNESS + 6,
     data.tilemap_id,
     {
-      fontFamily: "monospace",
-      fontSize: "12px",
-      color: "#ffffff",
+      fontFamily: FONT_FAMILY,
+      fontSize: FONT_SIZE_MICRO,
+      color: hex(TEXT_PRIMARY),
     },
   );
   label.setAlpha(0.35);
   label.setOrigin(1, 0);
-  label.setDepth(-40);
+  label.setDepth(DEPTH_BADGE);
   created.push(label);
 
   return created;
