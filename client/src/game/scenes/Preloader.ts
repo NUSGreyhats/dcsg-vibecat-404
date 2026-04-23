@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { ROOM_COUNT } from "../constants";
 import { registerCatAnims } from "../ui/anims";
+import { ALL_WEAPON_IDS, WEAPON_STATS } from "../weapons";
 import {
   CANVAS_BG,
   DEEP_NAVY,
@@ -41,7 +42,50 @@ export class Preloader extends Phaser.Scene {
       registerCatAnims(this, "enemy", "enemy", { withAttack: true });
     }
 
+    this.registerWeaponAnims();
+
     this.scene.start("MainMenu");
+  }
+
+  /**
+   * Each weapon atlas ships Aseprite tags `idle` + `shoot`. Register
+   * `${spriteKey}_idle` / `${spriteKey}_shoot` anims so the Player can
+   * play them on its weapon sprite. `idle` loops; `shoot` plays once.
+   */
+  private registerWeaponAnims(): void {
+    for (const id of ALL_WEAPON_IDS) {
+      const spriteKey = WEAPON_STATS[id].spriteKey;
+      if (!this.textures.exists(spriteKey)) continue;
+
+      const texture = this.textures.get(spriteKey);
+      const meta = (texture.customData ?? {}) as {
+        frameTags?: { name: string; from: number; to: number }[];
+      };
+      const frameTags = meta.frameTags;
+      if (!frameTags) continue;
+
+      const cooldownMs = WEAPON_STATS[id].cooldownMs;
+      for (const tag of frameTags) {
+        const animKey = `${spriteKey}_${tag.name}`;
+        if (this.anims.exists(animKey)) continue;
+
+        const frames: Phaser.Types.Animations.AnimationFrame[] = [];
+        for (let f = tag.from; f <= tag.to; f++) {
+          frames.push({ key: spriteKey, frame: String(f) });
+        }
+        const frameCount = Math.max(1, tag.to - tag.from + 1);
+        // shoot anim fills the cooldown window so the weapon is visually
+        // "cocked back" for the same duration the server enforces.
+        const frameRate =
+          tag.name === "idle" ? 6 : frameCount / (cooldownMs / 1000);
+        this.anims.create({
+          key: animKey,
+          frames,
+          frameRate,
+          repeat: tag.name === "idle" ? -1 : 0,
+        });
+      }
+    }
   }
 
   preload(): void {
@@ -73,6 +117,16 @@ export class Preloader extends Phaser.Scene {
     // -- Cast atlases (player, enemy) --
     this.load.atlas("player", "assets/player.png", "assets/player.json");
     this.load.atlas("enemy", "assets/enemy.png", "assets/enemy.json");
+
+    // -- Weapons (one atlas per weapon; idle + shoot tags) --
+    for (const id of ALL_WEAPON_IDS) {
+      const spriteKey = WEAPON_STATS[id].spriteKey;
+      this.load.atlas(
+        spriteKey,
+        `assets/${spriteKey}.png`,
+        `assets/${spriteKey}.json`,
+      );
+    }
 
     // -- Projectiles --
     this.load.atlas("bullets", "assets/bullets.png", "assets/bullets.json");
