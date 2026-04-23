@@ -1,38 +1,41 @@
+import Phaser from "phaser";
+import { ROOM_WIDTH, ROOM_HEIGHT } from "./constants";
 import { Boot } from "./scenes/Boot";
+import { Preloader } from "./scenes/Preloader";
+import { MainMenu } from "./scenes/MainMenu";
 import { Game as MainGame } from "./scenes/Game";
 import { GameHUD } from "./scenes/GameHUD";
-import { MainMenu } from "./scenes/MainMenu";
-import { PauseMenu } from "./scenes/PauseMenu";
-import { WinScreen } from "./scenes/WinScreen";
 import { InventoryMenu } from "./scenes/InventoryMenu";
-import { ShopMenu } from "./scenes/ShopMenu";
-import { AUTO, Game } from "phaser";
-import { Preloader } from "./scenes/Preloader";
+import { WinScreen } from "./scenes/WinScreen";
 
-const config: Phaser.Types.Core.GameConfig = {
-  type: AUTO,
-  width: 1280,
-  height: 768,
-  parent: "game-container",
-  physics: {
-    default: "arcade",
-  },
-  backgroundColor: "#028af8",
-  scene: [
-    Boot,
-    Preloader,
-    MainMenu,
-    MainGame,
-    GameHUD,
-    PauseMenu,
-    WinScreen,
-    InventoryMenu,
-    ShopMenu,
-  ],
-};
+export function startGame(parentId: string): Phaser.Game {
+  const config: Phaser.Types.Core.GameConfig = {
+    type: Phaser.AUTO,
+    width: ROOM_WIDTH,
+    height: ROOM_HEIGHT,
+    parent: parentId,
+    backgroundColor: "#0d0d10",
+    physics: {
+      default: "arcade",
+      arcade: {
+        gravity: { x: 0, y: 0 },
+        debug: false,
+      },
+    },
+    scale: {
+      mode: Phaser.Scale.FIT,
+      autoCenter: Phaser.Scale.CENTER_BOTH,
+    },
+    scene: [
+      Boot,
+      Preloader,
+      MainMenu,
+      MainGame,
+      GameHUD,
+      InventoryMenu,
+      WinScreen,
+    ],
+  };
 
-const StartGame = (parent: string) => {
-  return new Game({ ...config, parent });
-};
-
-export default StartGame;
+  return new Phaser.Game(config);
+}

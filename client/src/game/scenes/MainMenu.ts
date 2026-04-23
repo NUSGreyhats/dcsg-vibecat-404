@@ -1,103 +1,214 @@
-import { Scene, GameObjects } from "phaser";
+import Phaser from "phaser";
+import { getSync } from "../net/runContext";
+import { WS_URL } from "../constants";
 
-let savedPlayerName = "";
-
-export function getPlayerName(): string {
-  return savedPlayerName;
-}
-
-export class MainMenu extends Scene {
-  background: GameObjects.Image;
-  titleImage: GameObjects.Image;
-  private nameInput: HTMLInputElement | null = null;
+/**
+ * Title screen. Connects to the game server, takes a player_id via an HTML
+ * <input> overlay (Phaser has no native text input), then triggers auth +
+ * start-run and hands off to the Game scene.
+ */
+export class MainMenu extends Phaser.Scene {
+  private overlayInput?: HTMLInputElement;
+  private statusText?: Phaser.GameObjects.Text;
+  private startButton?: Phaser.GameObjects.Text;
+  private connected = false;
+  private resizeHandler?: () => void;
 
   constructor() {
-    super("MainMenu");
+    super({ key: "MainMenu" });
   }
 
-  create() {
-    this.titleImage = this.add.image(640, 384, "title");
-    this.titleImage.setDisplaySize(1280, 768);
+  create(): void {
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2;
+
+    if (this.textures.exists("bg")) {
+      this.add
+        .image(cx, cy, "bg")
+        .setDisplaySize(this.scale.width, this.scale.height);
+    }
 
     this.add
-      .text(640+1280/4+100, 530, "Enter your name:", {
-        fontFamily: "Arial Black",
-        fontSize: "32px",
-        color: "#66ff99",
-        stroke: "#000000",
-        strokeThickness: 4,
+      .text(cx, cy - 200, "DEFCON", {
+        fontFamily: "monospace",
+        fontSize: "72px",
+        color: "#ffcc33",
       })
       .setOrigin(0.5);
 
-    this.createNameInput();
+    this.add
+      .text(cx, cy - 130, "Dungeon Speedrun", {
+        fontFamily: "monospace",
+        fontSize: "20px",
+        color: "#cccccc",
+      })
+      .setOrigin(0.5);
 
-    const playBtn = this.add
-      .text(640+1280/4+100, 610, "[ PLAY ]", {
-        fontFamily: "Arial Black",
-        fontSize: "32px",
-        color: "#66ff99",
-        stroke: "#000000",
-        strokeThickness: 4,
+    this.add
+      .text(cx, cy - 40, "Player ID", {
+        fontFamily: "monospace",
+        fontSize: "18px",
+        color: "#ffffff",
+      })
+      .setOrigin(0.5);
+
+    this.mountTextInput(cx, cy);
+
+    this.startButton = this.add
+      .text(cx, cy + 80, "[ Start Run ]", {
+        fontFamily: "monospace",
+        fontSize: "28px",
+        color: "#ffffff",
+        backgroundColor: "#333333",
+        padding: { left: 16, right: 16, top: 8, bottom: 8 },
       })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
 
-    playBtn.on("pointerover", () => playBtn.setColor("#ffffff"));
-    playBtn.on("pointerout", () => playBtn.setColor("#66ff99"));
-    playBtn.on("pointerdown", () => this.startGame());
+    this.startButton.on("pointerover", () => {
+      this.startButton?.setColor("#ffcc33");
+    });
+    this.startButton.on("pointerout", () => {
+      this.startButton?.setColor("#ffffff");
+    });
+    this.startButton.on("pointerdown", () => this.onStart());
 
-    this.events.once("shutdown", () => this.removeNameInput());
+    this.statusText = this.add
+      .text(cx, cy + 150, "Connecting...", {
+        fontFamily: "monospace",
+        fontSize: "16px",
+        color: "#aaaaaa",
+      })
+      .setOrigin(0.5);
+
+    this.connect();
+
+    const sync = getSync();
+    sync.state.on("authOk", this.onAuthOk, this);
+    sync.state.on("runStarted", this.onRunStarted, this);
+    sync.state.on("error", this.onError, this);
+
+    this.events.on("shutdown", this.cleanup, this);
   }
 
-  private createNameInput() {
-    const canvas = this.game.canvas;
-    const rect = canvas.getBoundingClientRect();
+  private connect(): void {
+    const sync = getSync();
+    sync
+      .connect(WS_URL)
+      .then(() => {
+        this.connected = true;
+        this.statusText?.setText(
+          "Connected. Enter a player ID and press Start.",
+        );
+        this.statusText?.setColor("#88ff88");
+      })
+      .catch((err) => {
+        console.error("[MainMenu] connect failed", err);
+        this.statusText?.setText(
+          "Could not connect to the game server. Refresh to retry.",
+        );
+        this.statusText?.setColor("#ff6666");
+      });
+  }
 
+  private mountTextInput(cx: number, cy: number): void {
+    const canvas = this.game.canvas;
+    const parent = canvas.parentElement ?? document.body;
     const input = document.createElement("input");
     input.type = "text";
-    input.maxLength = 24;
-    input.placeholder = "Player";
-    input.value = savedPlayerName;
+    input.maxLength = 64;
+    input.placeholder = "player_id";
+    input.autocomplete = "off";
+    input.spellcheck = false;
     input.style.position = "absolute";
-    input.style.width = "220px";
-    input.style.padding = "8px 12px";
+    input.style.zIndex = "20";
+    input.style.fontFamily = "monospace";
     input.style.fontSize = "18px";
-    input.style.fontFamily = "Arial, sans-serif";
-    input.style.textAlign = "center";
+    input.style.padding = "6px 10px";
+    input.style.border = "1px solid #888";
     input.style.background = "#111";
     input.style.color = "#fff";
-    input.style.border = "2px solid #555";
-    input.style.borderRadius = "6px";
+    input.style.textAlign = "center";
+    input.style.width = "280px";
     input.style.outline = "none";
-    input.style.zIndex = "10";
+    input.style.boxSizing = "border-box";
 
-    const scaleX = rect.width / 1280;
-    const scaleY = rect.height / 768;
-    const left = rect.left + rect.width / 2 - 122 * scaleX + (1280/4+100)*scaleX;
-    const top = rect.top + 550 * scaleY;
-    input.style.left = `${left}px`;
-    input.style.top = `${top}px`;
+    if (!parent.style.position) parent.style.position = "relative";
+    parent.appendChild(input);
 
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") this.startGame();
+    const place = () => {
+      const rect = canvas.getBoundingClientRect();
+      const parentRect = parent.getBoundingClientRect();
+      const scaleX = rect.width / this.scale.width;
+      const scaleY = rect.height / this.scale.height;
+      const leftInCanvas = cx * scaleX - 140;
+      const topInCanvas = cy * scaleY - 16;
+      input.style.left = `${rect.left - parentRect.left + leftInCanvas}px`;
+      input.style.top = `${rect.top - parentRect.top + topInCanvas}px`;
+    };
+    place();
+    this.resizeHandler = place;
+    window.addEventListener("resize", this.resizeHandler);
+    this.scale.on("resize", this.resizeHandler);
+
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") this.onStart();
     });
 
-    document.body.appendChild(input);
-    this.nameInput = input;
-    input.focus();
+    this.overlayInput = input;
+    // Focus after a tick so it doesn't fight with Phaser bootstrap.
+    setTimeout(() => input.focus(), 50);
   }
 
-  private removeNameInput() {
-    if (this.nameInput) {
-      this.nameInput.remove();
-      this.nameInput = null;
+  private onStart(): void {
+    if (!this.connected) {
+      this.statusText?.setText("Still connecting — hang on.");
+      this.statusText?.setColor("#ffaa33");
+      return;
+    }
+    const value = this.overlayInput?.value.trim() ?? "";
+    if (!value) {
+      this.statusText?.setText("Enter a player ID first.");
+      this.statusText?.setColor("#ff6666");
+      return;
+    }
+    this.statusText?.setText("Authenticating...");
+    this.statusText?.setColor("#aaaaaa");
+    getSync().sendAuth(value);
+  }
+
+  private onAuthOk(_displayName: string): void {
+    this.statusText?.setText("Starting run...");
+    getSync().sendStartRun();
+  }
+
+  private onRunStarted(): void {
+    this.scene.start("Game");
+    this.scene.launch("GameHUD");
+  }
+
+  private onError(err: { code: string; message: string }): void {
+    this.statusText?.setText(`Error: ${err.message}`);
+    this.statusText?.setColor("#ff6666");
+  }
+
+  private cleanup(): void {
+    const sync = getSync();
+    sync.state.off("authOk", this.onAuthOk, this);
+    sync.state.off("runStarted", this.onRunStarted, this);
+    sync.state.off("error", this.onError, this);
+
+    if (this.resizeHandler) {
+      window.removeEventListener("resize", this.resizeHandler);
+      this.scale.off("resize", this.resizeHandler);
+      this.resizeHandler = undefined;
+    }
+
+    if (this.overlayInput) {
+      this.overlayInput.remove();
+      this.overlayInput = undefined;
     }
   }
-
-  private startGame() {
-    const raw = this.nameInput?.value.trim() ?? "";
-    savedPlayerName = raw || "Player";
-    this.removeNameInput();
-    this.scene.start("Game");
-  }
 }
+
+export default MainMenu;

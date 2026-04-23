@@ -1,50 +1,41 @@
 import Phaser from "phaser";
-import { BULLET_SPEED, BULLET_LIFESPAN } from "../constants";
 
-export type BulletOptions = {
-  speed?: number;
-  damage?: number;
-  textureKey?: string;
-  bodyRadius?: number;
-};
+import type { ProjSnapshot } from "../../net/packet";
 
-export default class Bullet extends Phaser.Physics.Arcade.Sprite {
-  readonly damage: number;
-  private lifespan: number;
+const LERP_FACTOR = 0.4;
+const WIDTH = 6;
+const HEIGHT = 3;
+const COLOR = 0xfff23d;
 
-  constructor(
-    scene: Phaser.Scene,
-    x: number,
-    y: number,
-    angle: number,
-    opts?: BulletOptions,
-  ) {
-    const textureKey = opts?.textureKey ?? "bullet";
-    super(scene, x, y, textureKey);
+/**
+ * Projectile sprite. Server-authoritative — we just lerp toward the
+ * last reported target position and rotate by the reported angle.
+ */
+export class Bullet extends Phaser.GameObjects.Rectangle {
+  readonly projId: number;
+  readonly ownerId: number;
+  targetX: number;
+  targetY: number;
 
+  constructor(scene: Phaser.Scene, snap: ProjSnapshot) {
+    super(scene, snap.x, snap.y, WIDTH, HEIGHT, COLOR);
+    this.projId = snap.proj_id;
+    this.ownerId = snap.owner;
+    this.targetX = snap.x;
+    this.targetY = snap.y;
+    this.setRotation(snap.angle);
+    this.setOrigin(0.5, 0.5);
     scene.add.existing(this);
-    scene.physics.add.existing(this);
-
-    this.setDepth(9);
-
-    const speed = opts?.speed ?? BULLET_SPEED;
-    this.damage = opts?.damage ?? 1;
-
-    const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setCircle(opts?.bodyRadius ?? 4);
-
-    this.setVelocity(
-      Math.cos(angle) * speed,
-      Math.sin(angle) * speed,
-    );
-
-    this.lifespan = BULLET_LIFESPAN;
   }
 
-  update(_time: number, delta: number) {
-    this.lifespan -= delta;
-    if (this.lifespan <= 0) {
-      this.destroy();
-    }
+  applySnapshot(snap: ProjSnapshot): void {
+    this.targetX = snap.x;
+    this.targetY = snap.y;
+    this.setRotation(snap.angle);
+  }
+
+  tick(_dt: number): void {
+    this.x = Phaser.Math.Linear(this.x, this.targetX, LERP_FACTOR);
+    this.y = Phaser.Math.Linear(this.y, this.targetY, LERP_FACTOR);
   }
 }
