@@ -25,7 +25,7 @@ Player {
 ```mermaid
 sequenceDiagram
     participant P as Player
-    participant Q as Queue Admin :3000
+    participant Q as Lobby :3000
     participant G as Game Server :8080
 
     P->>Q: POST /api/register<br/>{ display_name, contact, password }
@@ -55,9 +55,9 @@ sequenceDiagram
 | Mode    | Environment | Behavior                                                                       |
 | ------- | ----------- | ------------------------------------------------------------------------------ |
 | `open`  | dev / test  | Game server accepts any `C2S_AUTH`. Records whatever `player_id` is supplied. |
-| `token` | prod        | Game server validates `player_id` against `allowlist.json` (written by queue admin). Rejects with `S2C_ERROR` if absent. |
+| `token` | prod        | Game server validates `player_id` against `allowlist.json` (written by lobby). Rejects with `S2C_ERROR` if absent. |
 
-The allowlist is read from disk per-connection (or with a short TTL cache). See [04-queue-service.md](./04-queue-service.md) for the producer side.
+The allowlist is read from disk per-connection (or with a short TTL cache). See [04-lobby.md](./04-lobby.md) for the producer side.
 
 ## Player-facing experience
 
@@ -69,8 +69,8 @@ The allowlist is read from disk per-connection (or with a short TTL cache). See 
 
 ## Data flow
 
-- **Register:** HTTP POST → queue admin → SQLite `players` table → returns `player_id`.
-- **Verify (queue join):** HTTP POST `{ player_id, password }` → bcrypt compare vs stored hash. On match, queue admin enqueues the player.
+- **Register:** HTTP POST → lobby → SQLite `players` table → returns `player_id`.
+- **Verify (queue join):** HTTP POST `{ player_id, password }` → bcrypt compare vs stored hash. On match, lobby enqueues the player.
 - **Game auth:** WS connect → `C2S_AUTH { player_id }` → game server looks up `player_id` in `allowlist.json` (token mode) or accepts unconditionally (open mode) → responds with `S2C_AUTH_OK { display_name }`.
 
 ## Implementation notes
@@ -95,7 +95,7 @@ The allowlist is read from disk per-connection (or with a short TTL cache). See 
 
 ## Implementation status
 
-**Implemented** in `server/identity.go` (currently hosted inside the game server repo, not a separate queue admin service):
+**Implemented** in `server/identity.go` (currently hosted inside the game server repo, not a separate lobby service):
 
 - `POST /api/register` — accepts `display_name`, `contact`, `password`; returns `player_id`.
 - `POST /api/verify` — accepts `player_id` + `password`; bcrypt compare.
@@ -107,7 +107,7 @@ The allowlist is read from disk per-connection (or with a short TTL cache). See 
 **Not yet implemented:**
 - `AUTH_MODE` gate on the WebSocket handler (current game WS accepts anyone).
 - `allowlist.json` reader.
-- Migration of identity endpoints into the separate queue-admin service.
+- Migration of identity endpoints into the separate lobby service.
 
 ## Intentional bugs in this area
 
@@ -116,5 +116,5 @@ None — identity and auth are anticheat-adjacent and must remain correct. Tampe
 ## Cross-references
 
 - [02-protocol.md](./02-protocol.md) — `C2S_AUTH` envelope.
-- [04-queue-service.md](./04-queue-service.md) — allowlist producer, queue endpoints.
+- [04-lobby.md](./04-lobby.md) — allowlist producer, queue endpoints.
 - [01-architecture.md](./01-architecture.md) — where this service sits in topology.

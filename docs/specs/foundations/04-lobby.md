@@ -1,8 +1,8 @@
-# 04 — Queue Admin Service
+# 04 — Lobby Service
 
 ## Purpose
 
-Separate service (Repo B) that manages FIFO turn-taking in production, serves the public leaderboard + queue webapp, owns player registration, and drives the `allowlist.json` that gates the game server's WebSocket under `AUTH_MODE=token`.
+Separate service (Repo B) that manages FIFO turn-taking in production, serves the public leaderboard + queue webapp, **serves the stripped game-server source tree to players**, owns player registration, and drives the `allowlist.json` that gates the game server's WebSocket under `AUTH_MODE=token`.
 
 ## Public endpoints
 
@@ -14,6 +14,7 @@ Separate service (Repo B) that manages FIFO turn-taking in production, serves th
 | `/api/queue/:player_id`        | DELETE | `{ password }` — leave queue                            |
 | `/api/leaderboard`             | GET    | Rankings from `game.db`                                 |
 | `/api/replay/:replay_id`       | GET    | Replay data from `game.db`                              |
+| `/source/*`                    | GET    | Static file serving of the stripped game-server source tree under `/data/stripped-source/`. Read-only; no traversal outside the tree. See [09-ci-cd-deploy.md](./09-ci-cd-deploy.md#source-code-publishing-served-by-lobby). |
 | `/api/health`                  | GET    | Service health                                          |
 
 See [03-identity-auth.md](./03-identity-auth.md) for the registration / verification semantics shared with this service.
@@ -25,11 +26,11 @@ See [03-identity-auth.md](./03-identity-auth.md) for the registration / verifica
 - `/admin/winners` — decrypt + export contact info.
 - `/admin/slot` — force-free slot, adjust `MAX_CONCURRENT`.
 
-Admin auth: basic auth or IP whitelist (TBD — see open questions in [../../SPECIFICATIONS.md](../../SPECIFICATIONS.md)).
+Admin auth: basic auth or IP whitelist (TBD — see open questions in [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md)).
 
 ## Queue ↔ game server handoff
 
-Queue admin polls `GET /internal/slot-status` on the game server every 2 s. When a slot is free **and** a player is at the front of the queue, queue admin writes that `player_id` into the shared `allowlist.json`. The game server reads `allowlist.json` when a new WebSocket connection sends `C2S_AUTH` under `AUTH_MODE=token`.
+Lobby polls `GET /internal/slot-status` on the game server every 2 s. When a slot is free **and** a player is at the front of the queue, lobby writes that `player_id` into the shared `allowlist.json`. The game server reads `allowlist.json` when a new WebSocket connection sends `C2S_AUTH` under `AUTH_MODE=token`.
 
 ## Queue rules
 
@@ -43,27 +44,27 @@ Queue admin polls `GET /internal/slot-status` on the game server every 2 s. When
 
 ## Data flow
 
-- **Join:** `POST /api/queue/join { player_id, password }` → bcrypt verify → append to queue (FIFO in `queue.db`).
+- **Join:** `POST /api/queue/join { player_id, password }` → bcrypt verify → append to queue (FIFO in `lobby.db`).
 - **Advance:** every 2 s tick — poll `/internal/slot-status`. If free + queue non-empty: pop head → write to `allowlist.json` → notify front-of-queue client.
 - **Play:** player's WS connects to game server; game server reads `allowlist.json` to validate `player_id`.
 - **Leaderboard display:** webapp reads `game.db` (read-only) to render rankings.
 
-`queue.db` is owned by this service. `game.db` is read-only from here (it's owned by the game server). `allowlist.json` is written here, read by game server.
+`lobby.db` is owned by this service. `game.db` is read-only from here (it's owned by the game server). `allowlist.json` is written here, read by game server. `/data/stripped-source/` is populated by CI/CD and served read-only from here.
 
 ## Implementation notes
 
 - Package layout (target): `cmd/admin/`, `internal/queue/`, `internal/identity/`, `internal/admin/`, `web/`.
-- Queue storage: SQLite `queue.db`, single `queue_entries` table: `(player_id, joined_at, position)`.
+- Queue storage: SQLite `lobby.db`, single `queue_entries` table: `(player_id, joined_at, position)`.
 - Notification to waiting clients: TBD — SSE, WebSocket, or short polling (see open questions).
-- `/internal/slot-status` is game server → queue admin only; not exposed on public interface (bind to loopback or require shared secret).
+- `/internal/slot-status` is game server → lobby only; not exposed on public interface (bind to loopback or require shared secret).
 
 ## Implementation status
 
-**Greenfield.** The queue admin service does not exist yet — the current repo is monolithic and hosts identity endpoints inside `server/main.go` + `server/identity.go`. Splitting into a separate service is later work.
+**Greenfield.** The lobby service does not exist yet — the current repo is monolithic and hosts identity endpoints inside `server/main.go` + `server/identity.go`. Splitting into a separate service is later work.
 
 ## Intentional bugs in this area
 
-None — queue semantics must remain correct. The queue admin is also the host of the public leaderboard webapp; bugs here affect trust in results.
+None — queue semantics must remain correct. The lobby is also the host of the public leaderboard webapp; bugs here affect trust in results.
 
 ## Cross-references
 

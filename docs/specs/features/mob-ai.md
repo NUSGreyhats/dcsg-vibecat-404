@@ -33,7 +33,7 @@ Enemy archetypes (per `Type`):
 | 4    | Kamikaze | 1  | 120   | 220         | N/A (explodes)  | One-shot kills self on contact; damages player. |
 | 5    | Boss     | 120 | 60   | 360         | 900 ms          | Room 11 only; armor + debuff ingress for BUG-08. |
 
-Exact numbers TBD — see open questions in [../../SPECIFICATIONS.md](../../SPECIFICATIONS.md). The table is the shape, not the final balance.
+Exact numbers TBD — see open questions in [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md). The table is the shape, not the final balance.
 
 ## Spawn pipeline (RNG-driven)
 

@@ -42,7 +42,7 @@ PickupState {
 | 4    | Damage boost      | Timed damage multiplier (KIV — see open questions).          |
 | 5    | Heart (large)     | `ApplyHeal(+30000)` — boss-room pickup; wraps past MaxHP and kills a high-HP player. The [BUG-08 "avoid if HP > 2767"](combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max) hazard. |
 
-Exact heal amounts and durations TBD — see open questions in [../../SPECIFICATIONS.md](../../SPECIFICATIONS.md).
+Exact heal amounts and durations TBD — see open questions in [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md).
 
 ## Interact handler
 

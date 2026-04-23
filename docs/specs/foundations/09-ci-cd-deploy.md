@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Build, test, and deploy pipeline for both services. Defines the environment matrix, the source-stripping step that publishes a redacted version of the game server to GitHub Pages, and the build-tag strategy that allows `go test -race` to pass in CI while [BUG-11](./05-server-runtime.md#bug-11-kill-log-append-race)'s deliberate race ships to production.
+Build, test, and deploy pipeline for both services. Defines the environment matrix, the source-stripping step that publishes a redacted version of the game server **through the lobby stack**, and the build-tag strategy that allows `go test -race` to pass in CI while [BUG-11](./05-server-runtime.md#bug-11-kill-log-append-race)'s deliberate race ships to production.
 
 ## Environment matrix
 
-| Env      | Game Server    | Queue Admin      | Concurrency        | Auth Mode         |
+| Env      | Game Server    | Lobby      | Concurrency        | Auth Mode         |
 | -------- | -------------- | ---------------- | ------------------ | ----------------- |
 | **dev**  | `:8080` on VPS | Not deployed     | Unlimited          | `open`            |
 | **test** | `:8080` on VPS | `:3000` optional | Unlimited          | `open` or `token` |
@@ -32,7 +32,7 @@ graph TD
         TEST_ENV[Deploy → test]
         BUNDLE[".tar.gz → GitHub Release"]
         PROD[Deploy → prod<br/>2-reviewer gate]
-        DOCS["Publish stripped source<br/>→ GitHub Pages"]
+        DOCS["Stripped source tarball<br/>→ lobby /data/stripped-source/"]
     end
 
     PR --> LINT
@@ -41,12 +41,13 @@ graph TD
     TAG --> LINT
     TAG -.->|after CI| TEST_ENV & BUNDLE & DOCS
     BUNDLE -.-> PROD
+    DOCS -.-> DEV & TEST_ENV & BUNDLE
 
     style STRIP fill:#f39c12,color:#fff
     style DOCS fill:#f39c12,color:#fff
 ```
 
-## Pipeline — queue admin (Repo B)
+## Pipeline — lobby (Repo B)
 
 Standard: lint → test → build → Docker. Tag triggers → test deploy + air-gapped bundle. Prod requires 2-reviewer gate.
 
@@ -63,9 +64,9 @@ This ensures:
 - The race remains in production.
 - An alternative compile-time-clean version of the buggy file can be provided under `//go:build norace` if needed for the test build.
 
-## Source code publishing (docs site)
+## Source code publishing (served by lobby)
 
-**Only the game server code is published.** Queue admin source is **never** published.
+**Only the game server code is published.** Lobby source is **never** published.
 
 | Stripped ❌                          | Kept ✅                               |
 | ----------------------------------- | ------------------------------------ |
@@ -77,7 +78,22 @@ This ensures:
 | `.github/`, Dockerfile, CI configs  | —                                    |
 | Build tags / race exclusion pragmas | —                                    |
 
-CI step: `go/ast`-based stripping tool → `gofmt` → push to `gh-pages` branch → GitHub Pages.
+### Pipeline
+
+1. CI runs a `go/ast`-based stripping tool → `gofmt` → emits `stripped-source.tar.gz` as a workflow artifact.
+2. On deploy, the tarball is extracted into the shared Docker volume at `/data/stripped-source/`.
+3. The lobby service mounts that path and serves it read-only at `http://:3000/source/` alongside the leaderboard webapp.
+4. Air-gapped prod: the tarball travels inside the `.tar.gz` GitHub Release bundle alongside the service images and is unpacked into `/data/stripped-source/` during on-LAN deploy.
+
+### Why lobby, not GitHub Pages
+
+One public webapp for players (queue, leaderboard, source browser) — no separate domain or hosting provider. Dev/test and prod serve the same source tree from the same route. The VPS that hosts the dev/test lobby is also the de facto source-hosting VPS.
+
+### Do-not-leak rules
+
+- Only `stripped-source.tar.gz` enters `/data/stripped-source/`. Never mount the raw `game-server/` repo into the volume.
+- Lobby's source handler is static file serving only — no directory traversal outside `/data/stripped-source/`.
+- Lobby must not serve its **own** source or any file from outside the stripped tree.
 
 **Note on build tag stripping:** the stripping tool also removes the `//go:build !norace` line from the published source — otherwise it would be a direct hint about the kill-log file. Stripped source must compile on its own but with the race intact.
 

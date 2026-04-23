@@ -79,7 +79,7 @@ graph LR
 
 - Bugs are bounded — none is a "win button". A skilled stack is required to reach top-1 time.
 - The leaderboard is server-authoritative with replay verification — see [foundations/08-leaderboard-replay.md](foundations/08-leaderboard-replay.md). Runs that can't be reproduced from `(seed, InputLog)` (within tolerance for non-deterministic bugs) are rejected.
-- The game server source is published (stripped) to GitHub Pages after every merge to `main`. See [foundations/09-ci-cd-deploy.md#source-code-publishing-docs-site](foundations/09-ci-cd-deploy.md#source-code-publishing-docs-site).
+- The game server source is published (stripped) through the lobby webapp at `/source/` after every merge to `main`. See [foundations/09-ci-cd-deploy.md#source-code-publishing-served-by-lobby](foundations/09-ci-cd-deploy.md#source-code-publishing-served-by-lobby).
 - Bugs in the identity / auth / leaderboard / replay subsystems are NOT intentional. If you find one, report it — the organizers will fix it.
 
 ## For implementers

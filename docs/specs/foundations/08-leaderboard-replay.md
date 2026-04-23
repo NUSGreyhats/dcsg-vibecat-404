@@ -32,7 +32,7 @@ Given `(seed, InputLog)`:
 2. Replay each `InputRecord` in order, running the same 20 Hz tick loop as live gameplay (see [05-server-runtime.md](./05-server-runtime.md)).
 3. Record the reproduced final `total_ms`. It must match `CompletedRun.TotalMs` to within replay tolerance (nanosecond-level — they should be exactly equal for deterministic bugs).
 
-**Non-deterministic bugs** (specifically [BUG-11](./05-server-runtime.md#bug-11-kill-log-append-race)) violate byte-exact reproduction. The replay engine accommodates this by accepting runs whose reproduced time is within a tolerance window derived from known race bounds. The exact tolerance is TBD — see open questions in [../../SPECIFICATIONS.md](../../SPECIFICATIONS.md).
+**Non-deterministic bugs** (specifically [BUG-11](./05-server-runtime.md#bug-11-kill-log-append-race)) violate byte-exact reproduction. The replay engine accommodates this by accepting runs whose reproduced time is within a tolerance window derived from known race bounds. The exact tolerance is TBD — see open questions in [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md).
 
 ## Data flow
 
@@ -52,7 +52,7 @@ game.db (SQLite)
 S2C_LEADERBOARD to all connected players
 ```
 
-Queue admin reads `game.db` read-only for its public leaderboard and replay-download endpoints. See [04-queue-service.md](./04-queue-service.md).
+Lobby reads `game.db` read-only for its public leaderboard and replay-download endpoints. See [04-lobby.md](./04-lobby.md).
 
 ## `game.db` schema (target)
 
@@ -84,13 +84,13 @@ CREATE INDEX idx_runs_player   ON completed_runs(player_id);
 }
 ```
 
-Broadcast to connected players on every new submission that changes the top N. Full rankings also available via `/api/leaderboard` on the queue admin service.
+Broadcast to connected players on every new submission that changes the top N. Full rankings also available via `/api/leaderboard` on the lobby service.
 
 ## Implementation notes
 
 - Leaderboard goroutine is spawned once at server startup and owns `game.db`. All inserts go through `completedRunCh`.
 - Broadcast to connected players: the leaderboard goroutine holds a registry of per-player `outCh`s populated at `C2S_AUTH` time. Non-blocking sends (drop if `outCh` is full — it's OK, the next broadcast will catch up).
-- Replay endpoint (on queue admin) streams `InputLog` as-is. Optional: replay verification run on-demand from admin panel.
+- Replay endpoint (on lobby) streams `InputLog` as-is. Optional: replay verification run on-demand from admin panel.
 
 ## Implementation status
 
@@ -106,4 +106,4 @@ None — this is the anticheat backstop. Bugs found here (e.g., weak checksum, m
 - [05-server-runtime.md](./05-server-runtime.md) — `completedRunCh`, leaderboard goroutine.
 - [06-game-state-conventions.md](./06-game-state-conventions.md) — `InputLog`, `Splits`, `Seed`.
 - [07-determinism-seeding.md](./07-determinism-seeding.md) — RNG consumption invariant replay depends on.
-- [04-queue-service.md](./04-queue-service.md) — public `/api/leaderboard` + `/api/replay/:replay_id` endpoints.
+- [04-lobby.md](./04-lobby.md) — public `/api/leaderboard` + `/api/replay/:replay_id` endpoints.

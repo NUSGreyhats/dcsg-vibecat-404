@@ -12,7 +12,7 @@ specs/
 │   ├── 01-architecture.md            — service topology + deployment
 │   ├── 02-protocol.md                — WS envelope + packet registry + BUG-09 parser half
 │   ├── 03-identity-auth.md           — player_id, bcrypt, AES, token allowlist
-│   ├── 04-queue-service.md           — queue admin service
+│   ├── 04-lobby.md           — lobby service
 │   ├── 05-server-runtime.md          — goroutines, tick loop, BUG-02 / BUG-06 / BUG-11
 │   ├── 06-game-state-conventions.md  — state blocks + ownership rules
 │   ├── 07-determinism-seeding.md     — MobRNG + consumption invariant
@@ -32,7 +32,7 @@ specs/
 1. [foundations/01-architecture.md](foundations/01-architecture.md) — what the two services are.
 2. [foundations/02-protocol.md](foundations/02-protocol.md) — how they talk.
 3. [foundations/03-identity-auth.md](foundations/03-identity-auth.md) — how players authenticate.
-4. [foundations/04-queue-service.md](foundations/04-queue-service.md) — prod-only queue machinery.
+4. [foundations/04-lobby.md](foundations/04-lobby.md) — prod-only queue machinery.
 5. [foundations/05-server-runtime.md](foundations/05-server-runtime.md) — goroutine model + tick loop.
 6. [foundations/06-game-state-conventions.md](foundations/06-game-state-conventions.md) — the data the runtime owns.
 7. [foundations/07-determinism-seeding.md](foundations/07-determinism-seeding.md) — RNG + replay invariants.
