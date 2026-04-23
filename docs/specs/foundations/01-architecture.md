@@ -159,7 +159,7 @@ Player journey, prod mode:
 
 ### Browser client
 
-Both the in-game WebSocket client (`ws:// :8080`) and the leaderboard / queue / source-browser (`http:// :3000`) run in the player's browser. The in-game client is a Phaser 3 app — see [10-client-architecture.md](./10-client-architecture.md) for the scene graph, packet layer, and asset pipeline. The queue / leaderboard webapp is a separate frontend bundled inside the lobby service.
+Both the in-game WebSocket client (`ws:// :8080`) and the leaderboard / queue / source-browser (`http:// :3000`) run in the player's browser. The in-game client is a Phaser 3 app — see the [client/](../client/) tree (start with [client/01-architecture.md](../client/01-architecture.md)) for the scene graph, packet layer, and asset pipeline. The queue / leaderboard webapp is a separate frontend bundled inside the lobby service.
 
 ## Implementation status
 
@@ -182,4 +182,4 @@ None — architecture itself is invariant. Individual bugs surface inside the se
 - [04-lobby.md](./04-lobby.md) — lobby detail.
 - [05-server-runtime.md](./05-server-runtime.md) — game server goroutines and tick loop.
 - [09-ci-cd-deploy.md](./09-ci-cd-deploy.md) — Docker compose, env matrix, stripped-source publishing.
-- [10-client-architecture.md](./10-client-architecture.md) — the Phaser 3 in-game client.
+- [../client/01-architecture.md](../client/01-architecture.md) — the Phaser 3 in-game client (entry to the full `client/` tree).

@@ -8,17 +8,28 @@ A single-player dungeon-crawler speedrun with a shared leaderboard. Players clea
 specs/
 ├── README.md              ← you are here
 ├── bugs.md                ← central index of all 11 intentional bugs
-├── foundations/           ← cross-cutting invariants (rarely change)
+├── foundations/           ← server-side cross-cutting invariants
 │   ├── 01-architecture.md            — service topology + deployment
 │   ├── 02-protocol.md                — WS envelope + packet registry + BUG-09 parser half
 │   ├── 03-identity-auth.md           — player_id, bcrypt, AES, token allowlist
-│   ├── 04-lobby.md           — lobby service
+│   ├── 04-lobby.md                   — lobby service
 │   ├── 05-server-runtime.md          — goroutines, tick loop, BUG-02 / BUG-06 / BUG-11
 │   ├── 06-game-state-conventions.md  — state blocks + ownership rules
 │   ├── 07-determinism-seeding.md     — MobRNG + consumption invariant
 │   ├── 08-leaderboard-replay.md      — CompletedRun, checksum, replay engine
 │   ├── 09-ci-cd-deploy.md            — pipelines, source stripping, build tags
-│   └── 10-client-architecture.md     — Phaser scenes, net sync
+│   └── 10-client-architecture.md     — redirect stub → specs/client/
+├── client/                ← browser-side (Phaser 3) cross-cutting invariants
+│   ├── 01-architecture.md            — runtime topology, bootstrap chain, Phaser config
+│   ├── 02-net-sync.md                — WebSocket owner, C2S/S2C pipelines
+│   ├── 03-client-state.md            — GameState mirror + event bus
+│   ├── 04-scenes.md                  — scene table, lifecycle, transitions
+│   ├── 05-entities-rendering.md      — Player/Enemy/Bullet/Pickup/Door + interpolation
+│   ├── 06-world-rooms.md             — RoomData → Phaser world, tilemap + fallback
+│   ├── 07-input-controls.md          — Controls facade, input → C2S mapping
+│   ├── 08-assets-pipeline.md         — asset layout, Vite build, Preloader
+│   ├── 09-spectator-mode.md          — read-only viewer variant (greenfield)
+│   └── 10-ui-components.md           — visual/UX design tokens + component catalog
 └── features/              ← self-contained gameplay features
     ├── combat-weapons.md             — BUG-04, BUG-07, BUG-08
     ├── mob-ai.md                     — BUG-01
@@ -37,7 +48,17 @@ specs/
 6. [foundations/06-game-state-conventions.md](foundations/06-game-state-conventions.md) — the data the runtime owns.
 7. [foundations/07-determinism-seeding.md](foundations/07-determinism-seeding.md) — RNG + replay invariants.
 8. [foundations/08-leaderboard-replay.md](foundations/08-leaderboard-replay.md) — how runs are persisted + verified.
-9. [foundations/10-client-architecture.md](foundations/10-client-architecture.md) — the Phaser client.
+9. The `client/` tree — the Phaser browser client (mirrors the depth of the server foundations):
+   1. [client/01-architecture.md](client/01-architecture.md) — bootstrap + module layout.
+   2. [client/02-net-sync.md](client/02-net-sync.md) — WebSocket owner, packet pipelines.
+   3. [client/03-client-state.md](client/03-client-state.md) — passive state mirror + event bus.
+   4. [client/04-scenes.md](client/04-scenes.md) — scene graph and transitions.
+   5. [client/05-entities-rendering.md](client/05-entities-rendering.md) — entity classes + interpolation.
+   6. [client/06-world-rooms.md](client/06-world-rooms.md) — room rendering + tilemaps.
+   7. [client/07-input-controls.md](client/07-input-controls.md) — input → C2S mapping.
+   8. [client/08-assets-pipeline.md](client/08-assets-pipeline.md) — assets + Vite.
+   9. [client/09-spectator-mode.md](client/09-spectator-mode.md) — read-only viewer (greenfield).
+   10. [client/10-ui-components.md](client/10-ui-components.md) — visual design tokens + UI catalog.
 10. `features/*.md` — any order; each file is self-contained. See [combat-weapons.md](features/combat-weapons.md), [mob-ai.md](features/mob-ai.md), [rooms-doors.md](features/rooms-doors.md), [pickups.md](features/pickups.md), [inventory-items.md](features/inventory-items.md).
 11. [bugs.md](bugs.md) — the index that ties it all together.
 12. [foundations/09-ci-cd-deploy.md](foundations/09-ci-cd-deploy.md) — read last; understand the build-tag strategy that ships BUG-11.
@@ -99,7 +120,7 @@ Append one row to the C2S or S2C table in [foundations/02-protocol.md](foundatio
 
 ### 5. If the feature adds a Phaser scene
 
-Append one row to the scene table in [foundations/10-client-architecture.md](foundations/10-client-architecture.md) and register the scene in `client/src/game/main.ts`.
+Append one row to the scene table in [client/04-scenes.md](client/04-scenes.md) and register the scene in `client/src/game/main.ts`. If the scene introduces a new visual component, also update [client/10-ui-components.md](client/10-ui-components.md).
 
 ### 6. Cross-link from adjacent features
 
@@ -168,7 +189,7 @@ If the shop introduces a new intentional bug (e.g. price arithmetic underflow), 
 
 **Step 5 — scene:**
 
-Append to scene table in [foundations/10-client-architecture.md](foundations/10-client-architecture.md):
+Append to scene table in [client/04-scenes.md](client/04-scenes.md):
 
 | `ShopMenu` | `client/src/game/scenes/ShopMenu.ts` | Shop overlay between rooms |
 
