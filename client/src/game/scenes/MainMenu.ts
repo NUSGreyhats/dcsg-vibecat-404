@@ -12,6 +12,7 @@ import {
   FONT_FAMILY,
   FONT_SIZE_BODY,
   FONT_SIZE_CAPTION,
+  FONT_SIZE_MICRO,
   FONT_SIZE_SMALL,
   MID_BLUE,
   MIDNIGHT,
@@ -62,10 +63,11 @@ export class MainMenu extends Phaser.Scene {
   private static readonly PANEL_PADDING = 20;
   private static readonly INPUT_WIDTH =
     MainMenu.PANEL_WIDTH - MainMenu.PANEL_PADDING * 2;
-  private static readonly SPONSOR_PANEL_HEIGHT = 170;
-  private static readonly SPONSOR_PANEL_GAP = 14;
-  private static readonly SPONSOR_CARD_HEIGHT = 108;
-  private static readonly SPONSOR_CARD_GAP = 12;
+  private static readonly SPONSOR_PANEL_HEIGHT = 120;
+  private static readonly SPONSOR_PANEL_GAP = 12;
+  private static readonly SPONSOR_CARD_HEIGHT = 72;
+  private static readonly SPONSOR_CARD_GAP = 10;
+  private static readonly SPONSOR_ICON_SIZE = 28;
 
   constructor() {
     super({ key: "MainMenu" });
@@ -202,11 +204,11 @@ export class MainMenu extends Phaser.Scene {
 
     this.add.text(
       panelX + MainMenu.PANEL_PADDING,
-      panelTop + 14,
+      panelTop + 10,
       "// sponsors",
       {
         fontFamily: FONT_FAMILY,
-        fontSize: FONT_SIZE_SMALL,
+        fontSize: FONT_SIZE_CAPTION,
         color: hex(MID_BLUE),
       },
     );
@@ -215,7 +217,7 @@ export class MainMenu extends Phaser.Scene {
     const innerWidth = MainMenu.INPUT_WIDTH;
     const cardWidth =
       (innerWidth - MainMenu.SPONSOR_CARD_GAP * (count - 1)) / count;
-    const cardsY = panelTop + 44;
+    const cardsY = panelTop + 32;
     const cardsX = panelX + MainMenu.PANEL_PADDING;
     for (let i = 0; i < count; i++) {
       const cx = cardsX + i * (cardWidth + MainMenu.SPONSOR_CARD_GAP);
@@ -244,16 +246,16 @@ export class MainMenu extends Phaser.Scene {
 
     // Icon tile: slightly darker than the panel, bordered the same colour
     // as the card. Real sponsor logos replace the placeholder glyph.
-    const iconSize = 40;
+    const iconSize = MainMenu.SPONSOR_ICON_SIZE;
     const iconX = x + w / 2 - iconSize / 2;
-    const iconY = y + 12;
+    const iconY = y + 8;
     this.add
       .rectangle(iconX, iconY, iconSize, iconSize, MIDNIGHT, 1)
       .setStrokeStyle(1, MID_BLUE)
       .setOrigin(0, 0);
 
     if (sponsor.imageKey && this.textures.exists(sponsor.imageKey)) {
-      const pad = 4;
+      const pad = 3;
       this.add
         .image(iconX + iconSize / 2, iconY + iconSize / 2, sponsor.imageKey)
         .setDisplaySize(iconSize - pad * 2, iconSize - pad * 2);
@@ -265,7 +267,7 @@ export class MainMenu extends Phaser.Scene {
           sponsor.placeholder,
           {
             fontFamily: FONT_FAMILY,
-            fontSize: "18px",
+            fontSize: "14px",
             color: hex(TEXT_PRIMARY),
           },
         )
@@ -273,9 +275,9 @@ export class MainMenu extends Phaser.Scene {
     }
 
     this.add
-      .text(x + w / 2, iconY + iconSize + 10, sponsor.label, {
+      .text(x + w / 2, iconY + iconSize + 6, sponsor.label, {
         fontFamily: FONT_FAMILY,
-        fontSize: FONT_SIZE_CAPTION,
+        fontSize: FONT_SIZE_MICRO,
         color: hex(TEXT_PRIMARY),
         align: "center",
       })
