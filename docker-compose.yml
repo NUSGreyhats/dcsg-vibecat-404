@@ -3,7 +3,10 @@ services:
     build: ./server
     environment:
       LISTEN_ADDR: ":8080"
-      AUTH_MODE: "open"
+      # identity mode: WS C2S_AUTH requires the player_id to exist in
+      # identity.db. Players must register (username + password) before
+      # they can play.
+      AUTH_MODE: "identity"
       MAX_CONCURRENT: "64"
       GAME_DB: "/data/game.db"
       IDENTITY_DB: "/data/identity.db"

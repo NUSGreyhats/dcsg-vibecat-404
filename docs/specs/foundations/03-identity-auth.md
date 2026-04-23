@@ -2,25 +2,26 @@
 
 ## Purpose
 
-Player identity scheme (no accounts, no sessions, no JWTs — just a hex ID + password hash), registration and verification flows, contact-info encryption, and how `AUTH_MODE` gates WebSocket connections on the game server.
+Player identity scheme. Players register a `username` + `password` (plus a contact field used only for post-event prize-claim outreach) and log in with those credentials before each play session. The server maps `username → player_id` internally; the 32-char hex `player_id` is never shown to players. `AUTH_MODE` gates WebSocket connections on the game server so only registered players can reach the game loop.
 
 ## Model
 
 ```
 Player {
-    PlayerID        string      // 32-char hex, server-generated, crypto/rand
-    DisplayName     string      // plaintext, shown everywhere public
-    PasswordHash    []byte      // bcrypt(password), for identity proof
+    PlayerID        string      // 32-char hex, server-generated, crypto/rand (internal)
+    DisplayName     string      // player-chosen username; UNIQUE, shown everywhere public
+    PasswordHash    []byte      // bcrypt(password), required at login time
     Contact         string      // plaintext
     RegisteredAt    time.Time
 }
 ```
 
-- `PlayerID` is 16 random bytes from `crypto/rand`, hex-encoded → 32 chars.
-- `PasswordHash` is bcrypt over a password the player chose at registration. It exists solely to prove identity at prize claim / queue-join time — there are no logins.
+- `PlayerID` is 16 random bytes from `crypto/rand`, hex-encoded → 32 chars. **Internal use only** — it's the server-side session key; players never type it. The client obtains it from `/api/login` and passes it straight into `C2S_AUTH`.
+- `DisplayName` doubles as the player-facing username. A UNIQUE index enforces collision-free login. 1–32 chars.
+- `PasswordHash` is bcrypt(cost 12) over the password the player chose at registration. Verified at every login.
 - `Contact` is stored as plain text. The spec originally required AES-256-GCM at rest; the owner has opted out to skip key-management overhead. Treat `identity.db` as sensitive on disk and restrict filesystem access accordingly.
 
-## Registration + verify sequence
+## Registration + login sequence
 
 ```mermaid
 sequenceDiagram
@@ -29,54 +30,51 @@ sequenceDiagram
     participant G as Game Server :8080
 
     P->>Q: POST /api/register<br/>{ display_name, contact, password }
-    Q->>Q: Generate player_id = crypto/rand 16 bytes → hex (32 chars)<br/>Store bcrypt(password), store contact as plain text
-    Q->>P: { player_id: "a4f9c2e8..." }
+    Q->>Q: Check display_name unique<br/>Generate player_id = crypto/rand 16 bytes → hex (32 chars)<br/>Store bcrypt(password), plain contact
+    Q->>P: 200 { player_id } (not shown to user)<br/>or 409 { error: "that username is already taken" }
 
-    Note over P: Player writes down player_id
+    Note over P: Returns to the game and logs in
 
-    rect rgb(40, 40, 60)
-        Note over Q: PROD ONLY — Queue flow
-        P->>Q: POST /api/queue/join { player_id, password }
-        Q->>Q: Verify bcrypt(password) matches stored hash
-        Q->>P: { position: 3, est_wait_ms: ... }
-        Q-->>P: (polling/SSE) position updates
-        Note over Q: Front of queue + slot free
-        Q->>P: { status: "your_turn" }
-    end
+    P->>Q: POST /api/login<br/>{ username, password }
+    Q->>Q: Lookup by display_name<br/>bcrypt compare
+    Q->>P: 200 { player_id, display_name }<br/>or 401 { error: "invalid username or password" }
 
     P->>G: WebSocket connect
-    P->>G: C2S_AUTH { player_id: "a4f9c2e8..." }
-    G->>G: AUTH_MODE=open → accept anyone, record player_id<br/>AUTH_MODE=token → validate against allowlist
-    G->>P: S2C_AUTH_OK { display_name }
+    P->>G: C2S_AUTH { player_id }
+    G->>G: AUTH_MODE=identity → Lookup(player_id) in identity.db<br/>AUTH_MODE=token → validate against allowlist<br/>AUTH_MODE=open → accept anything (dev only)
+    G->>P: S2C_AUTH_OK { display_name }<br/>or S2C_ERROR { code: "auth_failed" } + WS close
 ```
 
 ## `AUTH_MODE`
 
-| Mode    | Environment | Behavior                                                                       |
-| ------- | ----------- | ------------------------------------------------------------------------------ |
-| `open`  | dev / test  | Game server accepts any `C2S_AUTH`. Records whatever `player_id` is supplied. |
-| `token` | prod        | Game server validates `player_id` against `allowlist.json` (written by lobby). Rejects with `S2C_ERROR` if absent. |
+| Mode       | Environment | Behavior                                                                                                                                   |
+| ---------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `open`     | unsafe, dev | Game server accepts any `C2S_AUTH`. Records whatever `player_id` is supplied. **Never use this in a shared environment.**                  |
+| `token`    | prod queue  | Game server validates `player_id` against `allowlist.json` (written by the lobby after queue admission). Rejects with `S2C_ERROR` if absent. |
+| `identity` | default     | Game server validates `player_id` against the `players` table in `identity.db`. Rejects unregistered players.                              |
 
-The allowlist is read from disk per-connection (or with a short TTL cache). See [04-lobby.md](./04-lobby.md) for the producer side.
+The allowlist is read from disk per-connection (with a short TTL cache). See [04-lobby.md](./04-lobby.md) for the producer side. Identity mode hits SQLite directly — it's fast (prepared statement, primary-key lookup) and always up-to-date.
 
 ## Player-facing experience
 
-1. **Walk up to kiosk / open phone browser** → go to `http://10.0.0.x:3000`.
-2. **Register:** Enter display name, contact (email/phone/discord), choose a password → get back a **32-char hex player ID** displayed prominently ("**Write this down. You need it to play and to claim prizes.**").
-3. **Join queue** (prod): Enter player_id + password → get position → wait.
-4. **Play** (when it's your turn or in dev/test anytime): Open game URL, enter player_id → play.
-5. **Claim prize** (post-event): Organizer contacts winners via decrypted contact info. Dispute → provide password matching bcrypt hash for that player_id.
+1. **Open the game** → go to `http://10.0.0.x:3000`. The splash shows a login panel (username + password).
+2. **First time?** Click "Register →" to open `/register`, enter username + contact (email/phone/discord) + password. Server returns success (or 409 if the username is taken).
+3. **Log in:** Back on the game splash, enter username + password. The client calls `/api/login`, gets the internal `player_id`, and uses it to authenticate the WebSocket — all transparent to the player.
+4. **Play.**
+5. **Claim prize** (post-event): Organizer looks up the registered contact, contacts the winner. Dispute → player provides password matching bcrypt hash for that username.
 
 ## Data flow
 
-- **Register:** HTTP POST → lobby → SQLite `players` table → returns `player_id`.
-- **Verify (queue join):** HTTP POST `{ player_id, password }` → bcrypt compare vs stored hash. On match, lobby enqueues the player.
-- **Game auth:** WS connect → `C2S_AUTH { player_id }` → game server looks up `player_id` in `allowlist.json` (token mode) or accepts unconditionally (open mode) → responds with `S2C_AUTH_OK { display_name }`.
+- **Register:** HTTP POST `/api/register` → identity service → SQLite `players` table → returns `player_id` (internal; not shown to the player).
+- **Login:** HTTP POST `/api/login { username, password }` → identity service → `LookupByDisplayName` → bcrypt compare → returns `{ player_id, display_name }`.
+- **Verify (queue join, future lobby):** HTTP POST `/api/verify { player_id, password }` → bcrypt compare. Kept for the queue flow; not used by the game-server login.
+- **Game auth:** WS connect → `C2S_AUTH { player_id }` → server runs the `AUTH_MODE` gate (identity = `players` table lookup, token = allowlist, open = no-op) → responds with `S2C_AUTH_OK { display_name }` or closes with `S2C_ERROR` `auth_failed`.
 
 ## Implementation notes
 
-- Registration rate-limited per IP (3 s cooldown). Verification rate-limited per IP (1 s cooldown).
-- Timing-leak mitigation: if `player_id` not found, still perform a dummy `bcrypt.CompareHashAndPassword` against a fixed hash so response time doesn't leak user existence.
+- Rate-limited per IP: 3 s register, 1 s login, 1 s verify.
+- Timing-leak mitigation: if `username` (login) or `player_id` (verify) is not found, still perform a dummy `bcrypt.CompareHashAndPassword` against a fixed hash so response time doesn't leak existence.
+- Same "invalid username or password" error for unknown-username and wrong-password paths, so a login probe can't enumerate registered names.
 - SQLite schema:
 
   ```sql
@@ -87,7 +85,7 @@ The allowlist is read from disk per-connection (or with a short TTL cache). See 
       contact        TEXT NOT NULL,
       registered_at  DATETIME NOT NULL
   );
-  CREATE INDEX idx_players_display_name ON players(display_name);
+  CREATE UNIQUE INDEX idx_players_display_name ON players(display_name);
   ```
 
 - SQLite opened with WAL mode, foreign keys enabled, 5 s busy timeout.
@@ -97,17 +95,17 @@ The allowlist is read from disk per-connection (or with a short TTL cache). See 
 
 **Implemented** in `server/internal/identity/` (currently hosted inside the game server repo, not a separate lobby service):
 
-- `POST /api/register` — accepts `display_name`, `contact`, `password`; returns `player_id`.
-- `POST /api/verify` — accepts `player_id` + `password`; bcrypt compare.
+- `POST /api/register` — accepts `display_name`, `contact`, `password`; returns `{ player_id }`. 409 on duplicate display_name.
+- `POST /api/login` — accepts `{ username, password }`; returns `{ player_id, display_name }` on success, 401 otherwise.
+- `POST /api/verify` — accepts `{ player_id, password }`; returns `{ display_name }`. Kept for the future queue flow.
 - `GET /register` — minimal HTML registration page on the game server (dev stand-in for the lobby UI).
-- SQLite `identity.db` with the schema above (WAL mode, foreign keys, 5 s busy timeout).
-- Per-IP rate limiting: 3 s register, 1 s verify.
-- Dummy bcrypt compare on missing `player_id` for timing-leak mitigation.
-- `AUTH_MODE` gate on the WebSocket handler (`auth.Check` in `server/internal/auth/` — open accepts any, token validates against allowlist).
-- `allowlist.json` reader (`server/internal/auth/allowlist.go`, 2 s TTL cache).
+- SQLite `identity.db` with the schema above (WAL mode, foreign keys, 5 s busy timeout). UNIQUE index on `display_name` enforces username collision-freeness.
+- Per-IP rate limiting (3 s / 1 s / 1 s) and dummy-bcrypt timing-leak mitigation on the lookup endpoints.
+- `AUTH_MODE` gate on the WebSocket handler. `identity` mode (default in `docker-compose.yml`) rejects any `player_id` not present in `identity.db` and populates `DisplayName` from the stored username so the leaderboard shows human-friendly names.
+- `allowlist.json` reader (`server/internal/auth/allowlist.go`, 2 s TTL cache) for `AUTH_MODE=token`.
 
 **Not yet implemented:**
-- Migration of identity endpoints into the separate lobby service (once lobby ships, move `/api/register`, `/api/verify`, `/register` there and drop from game server).
+- Migration of identity endpoints into the separate lobby service (once lobby ships, move `/api/register`, `/api/login`, `/api/verify`, `/register` there and drop from game server).
 - Allowlist producer side — lobby is spec'd to write `allowlist.json` after queue admission. Currently no process writes it, so `AUTH_MODE=token` rejects everyone.
 
 ## Intentional bugs in this area

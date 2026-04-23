@@ -98,64 +98,57 @@ const registerHTML = `<!doctype html>
   }
   .status.error { color: var(--error); }
   .status.success { color: var(--success); }
-  .player-id {
+  .done {
     margin-top: 18px;
     padding: 14px;
     background: var(--midnight);
     border: 1px dashed var(--accent);
-    word-break: break-all;
-    font-size: 18px;
-    color: var(--accent);
+    color: var(--bone);
+    font-size: 14px;
+    line-height: 1.6;
     display: none;
   }
-  .player-id.visible { display: block; }
-  .player-id .label {
-    display: block;
-    margin-bottom: 6px;
-    font-size: 12px;
-    color: var(--bone);
-    letter-spacing: 1px;
+  .done.visible { display: block; }
+  .done a {
+    color: var(--accent);
+    text-decoration: none;
   }
-  .warning {
-    margin-top: 10px;
-    font-size: 12px;
-    color: var(--bone);
-    line-height: 1.5;
-  }
+  .done a:hover { color: var(--bone); }
 </style>
 </head>
 <body>
 <main>
   <h1>Register</h1>
-  <p class="lead">Create a player identity. You'll get a 32-char hex Player ID — <strong>write it down</strong>. You need it to play and to claim prizes.</p>
+  <p class="lead">Create an account. After registering, return to the game and log in with your username and password.</p>
 
   <form id="f" autocomplete="off" novalidate>
-    <label for="display_name">Display name</label>
-    <input id="display_name" name="display_name" maxlength="32" required>
+    <label for="display_name">Username</label>
+    <input id="display_name" name="display_name" maxlength="32" required autocomplete="username">
 
     <label for="contact">Contact (email / phone / discord)</label>
     <input id="contact" name="contact" maxlength="256" required>
 
     <label for="password">Password</label>
-    <input id="password" name="password" type="password" minlength="6" maxlength="128" required>
+    <input id="password" name="password" type="password" minlength="6" maxlength="128" required autocomplete="new-password">
 
     <button type="submit" id="submit">[ Register ]</button>
   </form>
 
   <div class="status" id="status"></div>
 
-  <div class="player-id" id="pid-box">
-    <span class="label">Your Player ID</span>
-    <span id="pid"></span>
-    <div class="warning">Write this down. Losing it means losing access to your runs and prizes.</div>
+  <div class="done" id="done">
+    <strong>Registered.</strong> Open the game and log in as
+    <span id="done-username"></span> with the password you just set.
+    <br><br>
+    <a href="/">→ Return to the game</a>
   </div>
 </main>
 
 <script>
   const form = document.getElementById('f');
   const statusEl = document.getElementById('status');
-  const pidBox = document.getElementById('pid-box');
-  const pidEl = document.getElementById('pid');
+  const doneBox = document.getElementById('done');
+  const doneUser = document.getElementById('done-username');
   const submitBtn = document.getElementById('submit');
 
   function setStatus(text, kind) {
@@ -188,9 +181,9 @@ const registerHTML = `<!doctype html>
         submitBtn.disabled = false;
         return;
       }
-      setStatus('Registered. Save your Player ID.', 'success');
-      pidEl.textContent = data.player_id;
-      pidBox.classList.add('visible');
+      setStatus('Registered.', 'success');
+      doneUser.textContent = payload.display_name;
+      doneBox.classList.add('visible');
       form.password.value = '';
     } catch (err) {
       setStatus('Network error. Try again.', 'error');

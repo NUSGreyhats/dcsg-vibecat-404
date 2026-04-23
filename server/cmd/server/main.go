@@ -49,6 +49,8 @@ func main() {
 		log.Printf("auth mode: open")
 	case auth.ModeToken:
 		log.Printf("auth mode: token (allowlist=%s)", allowlistPath)
+	case auth.ModeIdentity:
+		log.Printf("auth mode: identity (db=%s)", identityDBPath)
 	}
 
 	lbSvc := leaderboard.NewService(db)
@@ -58,11 +60,32 @@ func main() {
 
 	allowlist := auth.NewAllowlist(allowlistPath)
 
+	// Build the auth gate once so the WS handler doesn't re-derive it per
+	// connection. Identity mode requires the player_id to be present in
+	// identity.db — i.e. the player must have registered — and returns
+	// the stored display_name so the leaderboard sees the human name
+	// rather than the raw hex ID.
+	authCheck := func(playerID string) (string, error) {
+		switch mode {
+		case auth.ModeIdentity:
+			p, err := identity.Lookup(identityDB, playerID)
+			if err != nil {
+				if errors.Is(err, identity.ErrNotFound) {
+					return "", errors.New("player not registered")
+				}
+				return "", err
+			}
+			return p.DisplayName, nil
+		default:
+			return "", auth.Check(mode, allowlist, playerID)
+		}
+	}
+
 	sem := make(chan struct{}, maxConcurrent)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handleWS(ctx, w, r, sem, mode, allowlist, lbSvc)
+		handleWS(ctx, w, r, sem, authCheck, lbSvc)
 	})
 	mux.HandleFunc("/internal/slot-status", func(w http.ResponseWriter, _ *http.Request) {
 		used := len(sem)
@@ -112,7 +135,7 @@ func main() {
 	_ = srv.Shutdown(shutdownCtx)
 }
 
-func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem chan struct{}, mode auth.Mode, allow *auth.Allowlist, lb *leaderboard.Service) {
+func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem chan struct{}, authCheck func(string) (string, error), lb *leaderboard.Service) {
 	select {
 	case sem <- struct{}{}:
 	default:
@@ -135,7 +158,6 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 	inCh := make(chan []byte, game.InChBuf)
 	outCh := make(chan protocol.S2CEnvelope, game.OutChBuf)
 
-	authCheck := func(playerID string) error { return auth.Check(mode, allow, playerID) }
 	engine := game.NewEngine(inCh, outCh, lb.Submit, authCheck)
 
 	go connReader(connCtx, conn, inCh, cancel)

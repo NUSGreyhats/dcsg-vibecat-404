@@ -22,19 +22,23 @@ import {
 
 /**
  * Title screen. Shows the art/title.png splash full-bleed behind a
- * compact bottom-right login panel: player_id text input → Start Run
- * button → status line. Connects on create; on Start fires
- * C2S_AUTH → C2S_START_RUN and hands off to the Game scene.
+ * compact bottom-right login panel: username + password → Log In. The
+ * server resolves the credentials to a player_id via /api/login, the
+ * scene then opens the WS, sends C2S_AUTH + C2S_START_RUN, and hands
+ * off to the Game scene. Players with no account click Register → to
+ * open the /register page in a new tab.
  */
 export class MainMenu extends Phaser.Scene {
-  private overlayInput?: HTMLInputElement;
+  private usernameInput?: HTMLInputElement;
+  private passwordInput?: HTMLInputElement;
   private statusText?: Phaser.GameObjects.Text;
   private startButton?: Phaser.GameObjects.Text;
   private connected = false;
-  private resizeHandler?: () => void;
+  private submitting = false;
+  private resizeHandlers: Array<() => void> = [];
 
   private static readonly PANEL_WIDTH = 460;
-  private static readonly PANEL_HEIGHT = 280;
+  private static readonly PANEL_HEIGHT = 340;
   private static readonly PANEL_MARGIN = 40;
   private static readonly PANEL_PADDING = 20;
   private static readonly INPUT_WIDTH =
@@ -48,7 +52,6 @@ export class MainMenu extends Phaser.Scene {
     const w = this.scale.width;
     const h = this.scale.height;
 
-    // -- Splash --
     if (this.textures.exists("title")) {
       this.add
         .image(w / 2, h / 2, "title")
@@ -56,9 +59,9 @@ export class MainMenu extends Phaser.Scene {
         .setDepth(DEPTH_SPLASH);
     }
 
-    // -- Login panel (bottom-right) --
     const panelX = w - MainMenu.PANEL_WIDTH - MainMenu.PANEL_MARGIN;
     const panelY = h - MainMenu.PANEL_HEIGHT - MainMenu.PANEL_MARGIN + 30;
+    const contentX = panelX + MainMenu.PANEL_PADDING;
 
     this.add
       .rectangle(
@@ -72,24 +75,34 @@ export class MainMenu extends Phaser.Scene {
       .setStrokeStyle(2, MID_BLUE)
       .setOrigin(0, 0);
 
-    this.add.text(panelX + MainMenu.PANEL_PADDING, panelY - 10, "Player ID", {
+    this.add.text(contentX, panelY - 10, "Username", {
       fontFamily: FONT_FAMILY,
       fontSize: FONT_SIZE_BODY,
       color: hex(TEXT_PRIMARY),
     });
+    this.usernameInput = this.mountTextInput(contentX, panelY + 20, {
+      type: "text",
+      placeholder: "username",
+      maxLength: 32,
+      autocomplete: "username",
+    });
 
-    this.mountTextInput(panelX + MainMenu.PANEL_PADDING, panelY + 20);
+    this.add.text(contentX, panelY + 65, "Password", {
+      fontFamily: FONT_FAMILY,
+      fontSize: FONT_SIZE_BODY,
+      color: hex(TEXT_PRIMARY),
+    });
+    this.passwordInput = this.mountTextInput(contentX, panelY + 95, {
+      type: "password",
+      placeholder: "password",
+      maxLength: 128,
+      autocomplete: "current-password",
+    });
 
     this.startButton = this.add
-      .text(
-        panelX + MainMenu.PANEL_PADDING,
-        panelY + 70,
-        "[ Start Run ]",
-        BUTTON_TEXT_STYLE,
-      )
+      .text(contentX, panelY + 145, "[ Log In ]", BUTTON_TEXT_STYLE)
       .setOrigin(0, 0)
       .setInteractive({ useHandCursor: true });
-
     this.startButton.on("pointerover", () =>
       this.startButton?.setColor(BUTTON_HOVER_COLOR),
     );
@@ -98,29 +111,19 @@ export class MainMenu extends Phaser.Scene {
     );
     this.startButton.on("pointerdown", () => this.onStart());
 
-    this.statusText = this.add.text(
-      panelX + MainMenu.PANEL_PADDING,
-      panelY + 135,
-      "Connecting...",
-      {
-        fontFamily: FONT_FAMILY,
-        fontSize: FONT_SIZE_SMALL,
-        color: hex(TEXT_MUTED),
-        wordWrap: { width: MainMenu.INPUT_WIDTH },
-      },
-    );
+    this.statusText = this.add.text(contentX, panelY + 210, "Connecting...", {
+      fontFamily: FONT_FAMILY,
+      fontSize: FONT_SIZE_SMALL,
+      color: hex(TEXT_MUTED),
+      wordWrap: { width: MainMenu.INPUT_WIDTH },
+    });
 
     const registerLink = this.add
-      .text(
-        panelX + MainMenu.PANEL_PADDING,
-        panelY + 195,
-        "No player ID? [ Register → ]",
-        {
-          fontFamily: FONT_FAMILY,
-          fontSize: FONT_SIZE_SMALL,
-          color: hex(ACCENT_PRIMARY),
-        },
-      )
+      .text(contentX, panelY + 260, "No account? [ Register → ]", {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_SMALL,
+        color: hex(ACCENT_PRIMARY),
+      })
       .setOrigin(0, 0)
       .setInteractive({ useHandCursor: true });
     registerLink.on("pointerover", () =>
@@ -141,6 +144,8 @@ export class MainMenu extends Phaser.Scene {
     sync.state.on("error", this.onError, this);
 
     this.events.on("shutdown", this.cleanup, this);
+
+    setTimeout(() => this.usernameInput?.focus(), 50);
   }
 
   private connect(): void {
@@ -149,9 +154,7 @@ export class MainMenu extends Phaser.Scene {
       .connect(WS_URL)
       .then(() => {
         this.connected = true;
-        this.statusText?.setText(
-          "Connected. Enter a player ID and press Start.",
-        );
+        this.statusText?.setText("Connected. Log in to play.");
         this.statusText?.setColor(hex(SUCCESS));
       })
       .catch((err) => {
@@ -163,14 +166,27 @@ export class MainMenu extends Phaser.Scene {
       });
   }
 
-  private mountTextInput(sceneX: number, sceneY: number): void {
+  /**
+   * Mount a DOM <input> overlaid on the Phaser canvas at the given scene
+   * coords, re-positioning on resize so the input tracks the panel.
+   */
+  private mountTextInput(
+    sceneX: number,
+    sceneY: number,
+    opts: {
+      type: "text" | "password";
+      placeholder: string;
+      maxLength: number;
+      autocomplete: string;
+    },
+  ): HTMLInputElement {
     const canvas = this.game.canvas;
     const parent = canvas.parentElement ?? document.body;
     const input = document.createElement("input");
-    input.type = "text";
-    input.maxLength = 64;
-    input.placeholder = "player_id";
-    input.autocomplete = "off";
+    input.type = opts.type;
+    input.maxLength = opts.maxLength;
+    input.placeholder = opts.placeholder;
+    input.autocomplete = opts.autocomplete;
     input.spellcheck = false;
     Object.assign(input.style, {
       position: "absolute",
@@ -200,43 +216,73 @@ export class MainMenu extends Phaser.Scene {
       const rect = canvas.getBoundingClientRect();
       const parentRect = parent.getBoundingClientRect();
       const scaleX = rect.width / this.scale.width;
-      const scaleY = rect.height / this.scale.height;
       const leftInCanvas = sceneX * scaleX;
-      const topInCanvas = sceneY * scaleY;
+      const topInCanvas = sceneY * scaleX;
       input.style.left = `${rect.left - parentRect.left + leftInCanvas}px`;
       input.style.top = `${rect.top - parentRect.top + topInCanvas}px`;
-      // Scale the input with the canvas so the panel lines up.
       const visualWidth = MainMenu.INPUT_WIDTH * scaleX;
       input.style.width = `${visualWidth}px`;
     };
     place();
-    this.resizeHandler = place;
-    window.addEventListener("resize", this.resizeHandler);
-    this.scale.on("resize", this.resizeHandler);
+    window.addEventListener("resize", place);
+    this.scale.on("resize", place);
+    this.resizeHandlers.push(place);
 
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") this.onStart();
     });
 
-    this.overlayInput = input;
-    setTimeout(() => input.focus(), 50);
+    return input;
   }
 
-  private onStart(): void {
+  private async onStart(): Promise<void> {
+    if (this.submitting) return;
     if (!this.connected) {
       this.statusText?.setText("Still connecting — hang on.");
       this.statusText?.setColor(hex(WARNING));
       return;
     }
-    const value = this.overlayInput?.value.trim() ?? "";
-    if (!value) {
-      this.statusText?.setText("Enter a player ID first.");
+    const username = this.usernameInput?.value.trim() ?? "";
+    const password = this.passwordInput?.value ?? "";
+    if (!username || !password) {
+      this.statusText?.setText("Enter your username and password.");
       this.statusText?.setColor(hex(ERROR));
       return;
     }
-    this.statusText?.setText("Authenticating...");
+
+    this.submitting = true;
+    this.statusText?.setText("Logging in...");
     this.statusText?.setColor(hex(TEXT_MUTED));
-    getSync().sendAuth(value);
+
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        this.statusText?.setText(
+          body.error ?? `Login failed (HTTP ${res.status}).`,
+        );
+        this.statusText?.setColor(hex(ERROR));
+        this.submitting = false;
+        return;
+      }
+      const body = (await res.json()) as {
+        player_id: string;
+        display_name: string;
+      };
+      this.statusText?.setText("Authenticating...");
+      getSync().sendAuth(body.player_id);
+    } catch (err) {
+      console.error("[MainMenu] login failed", err);
+      this.statusText?.setText("Network error. Try again.");
+      this.statusText?.setColor(hex(ERROR));
+      this.submitting = false;
+    }
   }
 
   private onAuthOk(_displayName: string): void {
@@ -252,6 +298,7 @@ export class MainMenu extends Phaser.Scene {
   private onError(err: { code: string; message: string }): void {
     this.statusText?.setText(`Error: ${err.message}`);
     this.statusText?.setColor(hex(ERROR));
+    this.submitting = false;
   }
 
   private cleanup(): void {
@@ -260,16 +307,16 @@ export class MainMenu extends Phaser.Scene {
     sync.state.off("runStarted", this.onRunStarted, this);
     sync.state.off("error", this.onError, this);
 
-    if (this.resizeHandler) {
-      window.removeEventListener("resize", this.resizeHandler);
-      this.scale.off("resize", this.resizeHandler);
-      this.resizeHandler = undefined;
+    for (const fn of this.resizeHandlers) {
+      window.removeEventListener("resize", fn);
+      this.scale.off("resize", fn);
     }
+    this.resizeHandlers = [];
 
-    if (this.overlayInput) {
-      this.overlayInput.remove();
-      this.overlayInput = undefined;
-    }
+    this.usernameInput?.remove();
+    this.usernameInput = undefined;
+    this.passwordInput?.remove();
+    this.passwordInput = undefined;
   }
 }
 

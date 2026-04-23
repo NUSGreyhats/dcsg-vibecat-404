@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -13,6 +14,10 @@ import (
 
 // ErrNotFound is returned when a player_id is not present in the store.
 var ErrNotFound = errors.New("identity: player not found")
+
+// ErrDuplicateName is returned when a registration collides with an existing
+// display_name. Enforced by a UNIQUE index on display_name.
+var ErrDuplicateName = errors.New("identity: display_name already registered")
 
 // Player is the stored identity record. See docs/specs/foundations/03-identity-auth.md.
 // Contact is stored as plain text — the spec originally required AES-256-GCM,
@@ -40,7 +45,7 @@ func OpenDB(path string) (*sql.DB, error) {
             contact        TEXT NOT NULL,
             registered_at  DATETIME NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_players_display_name ON players(display_name);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_players_display_name ON players(display_name);
     `); err != nil {
 		db.Close()
 		return nil, err
@@ -58,7 +63,8 @@ func NewPlayerID() (string, error) {
 }
 
 // Insert writes a new player row. The caller owns ID generation so the same
-// crypto/rand path can be reused across register and tests.
+// crypto/rand path can be reused across register and tests. Returns
+// ErrDuplicateName if display_name is already taken (UNIQUE constraint).
 func Insert(db *sql.DB, p *Player) error {
 	_, err := db.Exec(
 		`INSERT INTO players (player_id, display_name, password_hash, contact, registered_at)
@@ -66,6 +72,9 @@ func Insert(db *sql.DB, p *Player) error {
 		p.PlayerID, p.DisplayName, p.PasswordHash, p.Contact, p.RegisteredAt,
 	)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicateName
+		}
 		return fmt.Errorf("identity: insert: %w", err)
 	}
 	return nil
@@ -75,11 +84,26 @@ func Insert(db *sql.DB, p *Player) error {
 // handling verify must still run a dummy bcrypt compare on ErrNotFound to
 // avoid leaking existence via response time.
 func Lookup(db *sql.DB, playerID string) (*Player, error) {
-	row := db.QueryRow(
+	return scanOne(db.QueryRow(
 		`SELECT player_id, display_name, password_hash, contact, registered_at
            FROM players WHERE player_id = ?`,
 		playerID,
-	)
+	))
+}
+
+// LookupByDisplayName returns the player row for displayName, or ErrNotFound.
+// Used by the login endpoint (username → player_id). Same timing-leak
+// mitigation rule applies: callers must still run a dummy bcrypt compare on
+// ErrNotFound.
+func LookupByDisplayName(db *sql.DB, displayName string) (*Player, error) {
+	return scanOne(db.QueryRow(
+		`SELECT player_id, display_name, password_hash, contact, registered_at
+           FROM players WHERE display_name = ?`,
+		displayName,
+	))
+}
+
+func scanOne(row *sql.Row) (*Player, error) {
 	var p Player
 	if err := row.Scan(&p.PlayerID, &p.DisplayName, &p.PasswordHash, &p.Contact, &p.RegisteredAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -88,4 +112,16 @@ func Lookup(db *sql.DB, playerID string) (*Player, error) {
 		return nil, fmt.Errorf("identity: lookup: %w", err)
 	}
 	return &p, nil
+}
+
+// isUniqueViolation reports whether err is SQLite's UNIQUE-constraint
+// failure. modernc.org/sqlite wraps extended codes in the error string
+// rather than exposing a typed error, so we match on the message.
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed") ||
+		strings.Contains(msg, "constraint failed: UNIQUE")
 }
