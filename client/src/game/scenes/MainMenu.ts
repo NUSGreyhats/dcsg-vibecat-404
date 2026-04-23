@@ -31,13 +31,14 @@ import {
 interface SponsorSpec {
   readonly label: string; // two lines allowed via "\n"
   readonly placeholder: string;
+  readonly url: string;
   readonly imageKey?: string;
 }
 
 const SPONSORS: ReadonlyArray<SponsorSpec> = [
-  { label: "NUS\nGreyhats", placeholder: "N" },
-  { label: "OtterSec", placeholder: "◉" },
-  { label: "HTX", placeholder: "×" },
+  { label: "NUS\nGreyhats", placeholder: "N", url: "https://nusgreyhats.org/" },
+  { label: "OtterSec", placeholder: "◉", url: "https://osec.io/" },
+  { label: "HTX", placeholder: "×", url: "https://www.htx.gov.sg/" },
 ];
 
 /**
@@ -265,10 +266,24 @@ export class MainMenu extends Phaser.Scene {
     sponsor: SponsorSpec,
   ): void {
     // Card border — no fill so the sponsors panel shows through.
-    this.add
+    const border = this.add
       .rectangle(x, y, w, h)
       .setStrokeStyle(1, MID_BLUE)
       .setOrigin(0, 0);
+
+    // Hit area covers the whole card; clicking opens the sponsor URL in a
+    // new tab. Hover swaps the stroke to the accent colour for affordance.
+    border
+      .setInteractive({
+        hitArea: new Phaser.Geom.Rectangle(0, 0, w, h),
+        hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+        useHandCursor: true,
+      })
+      .on("pointerover", () => border.setStrokeStyle(1, ACCENT_PRIMARY))
+      .on("pointerout", () => border.setStrokeStyle(1, MID_BLUE))
+      .on("pointerdown", () => {
+        window.open(sponsor.url, "_blank", "noopener,noreferrer");
+      });
 
     // Icon tile: slightly darker than the panel, bordered the same colour
     // as the card. Real sponsor logos replace the placeholder glyph.
