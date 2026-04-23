@@ -11,7 +11,6 @@ import {
   ERROR,
   FONT_FAMILY,
   FONT_SIZE_BODY,
-  FONT_SIZE_BODY_EM,
   FONT_SIZE_CAPTION,
   FONT_SIZE_MICRO,
   FONT_SIZE_SMALL,
@@ -60,14 +59,17 @@ export class MainMenu extends Phaser.Scene {
   private resizeHandlers: Array<() => void> = [];
 
   private static readonly PANEL_WIDTH = 460;
-  private static readonly PANEL_HEIGHT = 190;
+  private static readonly PANEL_HEIGHT = 200;
   private static readonly PANEL_MARGIN = 40;
   private static readonly PANEL_PADDING = 20;
   private static readonly INPUT_WIDTH =
     MainMenu.PANEL_WIDTH - MainMenu.PANEL_PADDING * 2;
-  private static readonly INPUT_COLUMN_GAP = 16;
-  private static readonly INPUT_COLUMN_WIDTH =
-    (MainMenu.INPUT_WIDTH - MainMenu.INPUT_COLUMN_GAP) / 2;
+  // Inline label column: "Username:" / "Password:" sit to the left of
+  // each input, same row.
+  private static readonly LABEL_COLUMN_WIDTH = 110;
+  private static readonly LABEL_GAP = 8;
+  private static readonly ROW_INPUT_WIDTH =
+    MainMenu.INPUT_WIDTH - MainMenu.LABEL_COLUMN_WIDTH - MainMenu.LABEL_GAP;
   private static readonly SPONSOR_PANEL_HEIGHT = 120;
   private static readonly SPONSOR_PANEL_GAP = 12;
   private static readonly SPONSOR_CARD_HEIGHT = 72;
@@ -113,23 +115,21 @@ export class MainMenu extends Phaser.Scene {
       .setStrokeStyle(2, MID_BLUE)
       .setOrigin(0, 0);
 
-    const passwordColumnX =
-      contentX + MainMenu.INPUT_COLUMN_WIDTH + MainMenu.INPUT_COLUMN_GAP;
+    const inputX = contentX + MainMenu.LABEL_COLUMN_WIDTH + MainMenu.LABEL_GAP;
+    // Vertically-center the 18 px label against the 32 px input.
+    const labelOffsetY = 7;
+    const usernameRowY = panelY - 10;
+    const passwordRowY = usernameRowY + 42;
 
-    this.add.text(contentX, panelY - 10, "Username", {
-      fontFamily: FONT_FAMILY,
-      fontSize: FONT_SIZE_BODY,
-      color: hex(TEXT_PRIMARY),
-    });
-    this.add.text(passwordColumnX, panelY - 10, "Password", {
+    this.add.text(contentX, usernameRowY + labelOffsetY, "Username:", {
       fontFamily: FONT_FAMILY,
       fontSize: FONT_SIZE_BODY,
       color: hex(TEXT_PRIMARY),
     });
     this.usernameInput = this.mountTextInput(
-      contentX,
-      panelY + 20,
-      MainMenu.INPUT_COLUMN_WIDTH,
+      inputX,
+      usernameRowY,
+      MainMenu.ROW_INPUT_WIDTH,
       {
         type: "text",
         placeholder: "username",
@@ -137,10 +137,16 @@ export class MainMenu extends Phaser.Scene {
         autocomplete: "username",
       },
     );
+
+    this.add.text(contentX, passwordRowY + labelOffsetY, "Password:", {
+      fontFamily: FONT_FAMILY,
+      fontSize: FONT_SIZE_BODY,
+      color: hex(TEXT_PRIMARY),
+    });
     this.passwordInput = this.mountTextInput(
-      passwordColumnX,
-      panelY + 20,
-      MainMenu.INPUT_COLUMN_WIDTH,
+      inputX,
+      passwordRowY,
+      MainMenu.ROW_INPUT_WIDTH,
       {
         type: "password",
         placeholder: "password",
@@ -150,9 +156,9 @@ export class MainMenu extends Phaser.Scene {
     );
 
     this.startButton = this.add
-      .text(contentX, panelY + 62, "[ Log In ]", {
+      .text(contentX, panelY + 78, "[ Log In ]", {
         ...BUTTON_TEXT_STYLE,
-        fontSize: FONT_SIZE_BODY_EM,
+        fontSize: FONT_SIZE_SMALL,
       })
       .setOrigin(0, 0)
       .setInteractive({ useHandCursor: true });
@@ -164,7 +170,7 @@ export class MainMenu extends Phaser.Scene {
     );
     this.startButton.on("pointerdown", () => this.onStart());
 
-    this.statusText = this.add.text(contentX, panelY + 108, "Connecting...", {
+    this.statusText = this.add.text(contentX, panelY + 120, "Connecting...", {
       fontFamily: FONT_FAMILY,
       fontSize: FONT_SIZE_SMALL,
       color: hex(TEXT_MUTED),
@@ -172,7 +178,7 @@ export class MainMenu extends Phaser.Scene {
     });
 
     const registerLink = this.add
-      .text(contentX, panelY + 132, "No account? [ Register → ]", {
+      .text(contentX, panelY + 146, "No account? [ Register → ]", {
         fontFamily: FONT_FAMILY,
         fontSize: FONT_SIZE_SMALL,
         color: hex(ACCENT_PRIMARY),
