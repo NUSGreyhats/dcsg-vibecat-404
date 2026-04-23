@@ -6,9 +6,18 @@ services:
       AUTH_MODE: "open"
       MAX_CONCURRENT: "64"
       GAME_DB: "/data/game.db"
+      IDENTITY_DB: "/data/identity.db"
       ALLOWLIST_PATH: "/data/allowlist.json"
+      # Dev-only zeros key. For a real deploy set a 32-byte hex value.
+      CONTACT_ENCRYPTION_KEY: ""
     volumes:
       - game-data:/data
+    # Bind to loopback only: all browser traffic goes through the Caddy
+    # client container on :3000, which reverse-proxies /ws, /api/*, and
+    # /register here. Binding to 127.0.0.1 keeps the dev-only leaderboard
+    # JSON endpoint off the public internet on the DO droplet.
+    ports:
+      - "127.0.0.1:8080:8080"
     restart: unless-stopped
 
   client:
