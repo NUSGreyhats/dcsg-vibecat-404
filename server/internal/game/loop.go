@@ -18,10 +18,13 @@ import (
 // RoomState (sole-owner rule from docs/specs/foundations/06-game-state-conventions.md).
 // Lifecycle: one Engine per WebSocket connection, torn down on disconnect.
 type Engine struct {
-	InCh      <-chan []byte
-	OutCh     chan<- protocol.S2CEnvelope
-	Submit    func(*leaderboard.CompletedRun) bool
-	AuthCheck func(playerID string) error
+	InCh   <-chan []byte
+	OutCh  chan<- protocol.S2CEnvelope
+	Submit func(*leaderboard.CompletedRun) bool
+	// AuthCheck gates the WS auth handshake. It returns the player's
+	// display name (empty to fall back to the raw player_id) and an
+	// error to reject the connection.
+	AuthCheck func(playerID string) (string, error)
 
 	PlayerID    string
 	DisplayName string
@@ -37,7 +40,7 @@ type Engine struct {
 }
 
 // NewEngine constructs an engine bound to the per-connection channels.
-func NewEngine(in <-chan []byte, out chan<- protocol.S2CEnvelope, submit func(*leaderboard.CompletedRun) bool, authCheck func(string) error) *Engine {
+func NewEngine(in <-chan []byte, out chan<- protocol.S2CEnvelope, submit func(*leaderboard.CompletedRun) bool, authCheck func(string) (string, error)) *Engine {
 	return &Engine{
 		InCh:      in,
 		OutCh:     out,
@@ -105,14 +108,19 @@ func (e *Engine) awaitAuth(ctx context.Context) bool {
 				e.sendError("bad_auth", err.Error())
 				continue
 			}
+			displayName := ""
 			if e.AuthCheck != nil {
-				if err := e.AuthCheck(pkt.PlayerID); err != nil {
+				name, err := e.AuthCheck(pkt.PlayerID)
+				if err != nil {
 					e.sendError("auth_failed", err.Error())
 					return false
 				}
+				displayName = name
 			}
 			e.PlayerID = pkt.PlayerID
-			if e.DisplayName == "" {
+			if displayName != "" {
+				e.DisplayName = displayName
+			} else if e.DisplayName == "" {
 				e.DisplayName = pkt.PlayerID
 			}
 			e.send(protocol.S2CAuthOk, protocol.AuthOkData{DisplayName: e.DisplayName})
