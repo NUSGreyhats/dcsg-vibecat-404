@@ -1,0 +1,24 @@
+name: Deploy to DigitalOcean
+
+# Stub on main. The real workflow body lives on deploy branches
+# (e.g. ci/deploy-digitalocean). workflow_dispatch uses the file
+# content from the ref passed at dispatch time, not this stub —
+# we only need this file to exist on the default branch so the
+# REST dispatch endpoint can locate the workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy (branch / tag / SHA). Use a deploy branch for the real script."
+        required: false
+        default: main
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stub
+        run: |
+          echo "This is the stub deploy.yml on main."
+          echo "Re-run with ref=<deploy-branch> to execute the real deploy."
