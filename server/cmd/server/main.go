@@ -41,11 +41,7 @@ func main() {
 	}
 	defer identityDB.Close()
 
-	contactKey, err := identity.LoadContactKey()
-	if err != nil {
-		log.Fatalf("identity contact key: %v", err)
-	}
-	identitySvc := identity.NewService(identityDB, contactKey)
+	identitySvc := identity.NewService(identityDB)
 
 	mode := auth.ModeFromEnv()
 	switch mode {

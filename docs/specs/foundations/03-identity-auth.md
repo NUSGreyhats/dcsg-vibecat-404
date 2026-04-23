@@ -11,14 +11,14 @@ Player {
     PlayerID        string      // 32-char hex, server-generated, crypto/rand
     DisplayName     string      // plaintext, shown everywhere public
     PasswordHash    []byte      // bcrypt(password), for identity proof
-    ContactInfo     []byte      // AES-256-GCM encrypted at rest
+    Contact         string      // plaintext
     RegisteredAt    time.Time
 }
 ```
 
 - `PlayerID` is 16 random bytes from `crypto/rand`, hex-encoded → 32 chars.
 - `PasswordHash` is bcrypt over a password the player chose at registration. It exists solely to prove identity at prize claim / queue-join time — there are no logins.
-- `ContactInfo` is encrypted at rest using AES-256-GCM under a server-held key (`CONTACT_ENCRYPTION_KEY`). Organizers decrypt post-event to contact winners.
+- `Contact` is stored as plain text. The spec originally required AES-256-GCM at rest; the owner has opted out to skip key-management overhead. Treat `identity.db` as sensitive on disk and restrict filesystem access accordingly.
 
 ## Registration + verify sequence
 
@@ -29,7 +29,7 @@ sequenceDiagram
     participant G as Game Server :8080
 
     P->>Q: POST /api/register<br/>{ display_name, contact, password }
-    Q->>Q: Generate player_id = crypto/rand 16 bytes → hex (32 chars)<br/>Store bcrypt(password), encrypt(contact)
+    Q->>Q: Generate player_id = crypto/rand 16 bytes → hex (32 chars)<br/>Store bcrypt(password), store contact as plain text
     Q->>P: { player_id: "a4f9c2e8..." }
 
     Note over P: Player writes down player_id
@@ -84,14 +84,14 @@ The allowlist is read from disk per-connection (or with a short TTL cache). See 
       player_id      TEXT PRIMARY KEY,
       display_name   TEXT NOT NULL,
       password_hash  BLOB NOT NULL,
-      contact_enc    BLOB NOT NULL,
+      contact        TEXT NOT NULL,
       registered_at  DATETIME NOT NULL
   );
   CREATE INDEX idx_players_display_name ON players(display_name);
   ```
 
 - SQLite opened with WAL mode, foreign keys enabled, 5 s busy timeout.
-- `CONTACT_ENCRYPTION_KEY` comes from env var. Default to an all-zeros key in dev with a loud warning log — production must set a real 32-byte hex key.
+- Contact info is stored plain. There is no `CONTACT_ENCRYPTION_KEY` — the encryption-at-rest requirement was explicitly dropped by the project owner. Protect `identity.db` via filesystem permissions and backup hygiene instead.
 
 ## Implementation status
 
@@ -101,7 +101,6 @@ The allowlist is read from disk per-connection (or with a short TTL cache). See 
 - `POST /api/verify` — accepts `player_id` + `password`; bcrypt compare.
 - `GET /register` — minimal HTML registration page on the game server (dev stand-in for the lobby UI).
 - SQLite `identity.db` with the schema above (WAL mode, foreign keys, 5 s busy timeout).
-- AES-256-GCM contact encryption, `CONTACT_ENCRYPTION_KEY` env (zeros default with loud warning).
 - Per-IP rate limiting: 3 s register, 1 s verify.
 - Dummy bcrypt compare on missing `player_id` for timing-leak mitigation.
 - `AUTH_MODE` gate on the WebSocket handler (`auth.Check` in `server/internal/auth/` — open accepts any, token validates against allowlist).

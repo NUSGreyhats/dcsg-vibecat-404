@@ -10,19 +10,17 @@ import (
 	"time"
 )
 
-// Service wires the identity HTTP endpoints against a shared DB + contact key.
+// Service wires the identity HTTP endpoints against a shared DB.
 type Service struct {
-	DB             *sql.DB
-	ContactKey     []byte
-	RegisterLimit  *RateLimiter
-	VerifyLimit    *RateLimiter
+	DB            *sql.DB
+	RegisterLimit *RateLimiter
+	VerifyLimit   *RateLimiter
 }
 
 // NewService builds the service with the spec-mandated rate-limit cooldowns.
-func NewService(db *sql.DB, contactKey []byte) *Service {
+func NewService(db *sql.DB) *Service {
 	return &Service{
 		DB:            db,
-		ContactKey:    contactKey,
 		RegisterLimit: NewRateLimiter(3 * time.Second),
 		VerifyLimit:   NewRateLimiter(1 * time.Second),
 	}
@@ -88,12 +86,6 @@ func (s *Service) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errResp{Error: "server error"})
 		return
 	}
-	contactEnc, err := EncryptContact(s.ContactKey, req.Contact)
-	if err != nil {
-		log.Printf("identity: encrypt contact: %v", err)
-		writeJSON(w, http.StatusInternalServerError, errResp{Error: "server error"})
-		return
-	}
 	id, err := NewPlayerID()
 	if err != nil {
 		log.Printf("identity: new id: %v", err)
@@ -104,7 +96,7 @@ func (s *Service) handleRegister(w http.ResponseWriter, r *http.Request) {
 		PlayerID:     id,
 		DisplayName:  req.DisplayName,
 		PasswordHash: hash,
-		ContactEnc:   contactEnc,
+		Contact:      req.Contact,
 		RegisteredAt: time.Now().UTC(),
 	}); err != nil {
 		log.Printf("identity: insert: %v", err)

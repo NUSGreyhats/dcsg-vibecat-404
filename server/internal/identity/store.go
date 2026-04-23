@@ -15,11 +15,13 @@ import (
 var ErrNotFound = errors.New("identity: player not found")
 
 // Player is the stored identity record. See docs/specs/foundations/03-identity-auth.md.
+// Contact is stored as plain text — the spec originally required AES-256-GCM,
+// but per owner decision we keep it plain to avoid key-management overhead.
 type Player struct {
 	PlayerID     string
 	DisplayName  string
 	PasswordHash []byte
-	ContactEnc   []byte
+	Contact      string
 	RegisteredAt time.Time
 }
 
@@ -35,7 +37,7 @@ func OpenDB(path string) (*sql.DB, error) {
             player_id      TEXT PRIMARY KEY,
             display_name   TEXT NOT NULL,
             password_hash  BLOB NOT NULL,
-            contact_enc    BLOB NOT NULL,
+            contact        TEXT NOT NULL,
             registered_at  DATETIME NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_players_display_name ON players(display_name);
@@ -59,9 +61,9 @@ func NewPlayerID() (string, error) {
 // crypto/rand path can be reused across register and tests.
 func Insert(db *sql.DB, p *Player) error {
 	_, err := db.Exec(
-		`INSERT INTO players (player_id, display_name, password_hash, contact_enc, registered_at)
+		`INSERT INTO players (player_id, display_name, password_hash, contact, registered_at)
          VALUES (?, ?, ?, ?, ?)`,
-		p.PlayerID, p.DisplayName, p.PasswordHash, p.ContactEnc, p.RegisteredAt,
+		p.PlayerID, p.DisplayName, p.PasswordHash, p.Contact, p.RegisteredAt,
 	)
 	if err != nil {
 		return fmt.Errorf("identity: insert: %w", err)
@@ -74,12 +76,12 @@ func Insert(db *sql.DB, p *Player) error {
 // avoid leaking existence via response time.
 func Lookup(db *sql.DB, playerID string) (*Player, error) {
 	row := db.QueryRow(
-		`SELECT player_id, display_name, password_hash, contact_enc, registered_at
+		`SELECT player_id, display_name, password_hash, contact, registered_at
            FROM players WHERE player_id = ?`,
 		playerID,
 	)
 	var p Player
-	if err := row.Scan(&p.PlayerID, &p.DisplayName, &p.PasswordHash, &p.ContactEnc, &p.RegisteredAt); err != nil {
+	if err := row.Scan(&p.PlayerID, &p.DisplayName, &p.PasswordHash, &p.Contact, &p.RegisteredAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
