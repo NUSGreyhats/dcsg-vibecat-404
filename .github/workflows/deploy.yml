@@ -78,8 +78,9 @@ jobs:
             echo "==> Status"
             docker compose ps
 
-            # Smoke-check: /health should answer on the game-server and the
-            # Caddy front should answer on :3000.
+            # Smoke-check: Caddy front on :3000, game-server /health on
+            # loopback :8080, and the /register page + identity HTTP API
+            # reachable through the Caddy proxy.
             for i in 1 2 3 4 5; do
               if curl -fsS http://localhost:3000/ >/dev/null 2>&1; then
                 echo "==> client reachable on :3000"
@@ -88,5 +89,11 @@ jobs:
               echo "    waiting for client ($i/5)…"
               sleep 2
             done
+            curl -fsS http://127.0.0.1:8080/health >/dev/null \
+              && echo "==> game-server /health ok" \
+              || { echo "!! game-server /health failed" >&2; exit 1; }
+            curl -fsS http://localhost:3000/register >/dev/null \
+              && echo "==> /register reachable via Caddy" \
+              || { echo "!! /register unreachable via Caddy" >&2; exit 1; }
 
             echo "==> Deploy complete: ${REPO_SLUG}@${RESOLVED_SHA}"

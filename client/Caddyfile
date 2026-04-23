@@ -16,6 +16,13 @@
         reverse_proxy game-server:8080
     }
 
+    # Dev stand-in for the lobby registration page (see
+    # docs/specs/foundations/03-identity-auth.md § Implementation status).
+    @register path /register
+    handle @register {
+        reverse_proxy game-server:8080
+    }
+
     handle {
         root * /srv
         try_files {path} {path}.html /index.html
