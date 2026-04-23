@@ -134,6 +134,10 @@ export class Game extends Phaser.Scene {
 
     const seenEntityIds = new Set<number>();
     for (const snap of payload.entities) {
+      // state === 3 is AIDead on the server. The server already filters
+      // these out, but stay defensive: a dead snap for an enemy we've
+      // already torn down must not respawn it.
+      if (snap.state === 3) continue;
       seenEntityIds.add(snap.entity_id);
       let enemy = this.enemies.get(snap.entity_id);
       if (!enemy) {

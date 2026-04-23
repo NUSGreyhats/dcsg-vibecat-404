@@ -52,6 +52,11 @@ export class Player extends Phaser.GameObjects.Container {
     this.add(this.hpBar);
     this.drawHpBar(this.lastHp);
 
+    // Keep the player above tilemaps (depth 0) and entities (depth ≈ 0–5).
+    // Without this, a room tilemap loaded on C2S_ROOM_LOAD renders on top
+    // of the player and visually hides them.
+    this.setDepth(10);
+
     scene.add.existing(this);
   }
 

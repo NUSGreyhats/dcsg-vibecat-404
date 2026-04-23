@@ -471,6 +471,12 @@ func (e *Engine) finishRun(now time.Time, totalMs int64) {
 func (e *Engine) sendState(now time.Time) {
 	entities := make([]protocol.EntitySnapshot, 0, len(e.room.Enemies))
 	for _, en := range e.room.Enemies {
+		// Dead enemies stay in r.Enemies for BUG-11 / reconciliation math,
+		// but S2C_STATE only carries live ones — the entity_died event
+		// has already told the client to despawn.
+		if en.AIState == AIDead {
+			continue
+		}
 		entities = append(entities, protocol.EntitySnapshot{
 			EntityID: en.EntityID,
 			Type:     en.Type,
