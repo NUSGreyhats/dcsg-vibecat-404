@@ -34,7 +34,7 @@ export class MainMenu extends Phaser.Scene {
   private resizeHandler?: () => void;
 
   private static readonly PANEL_WIDTH = 460;
-  private static readonly PANEL_HEIGHT = 240;
+  private static readonly PANEL_HEIGHT = 280;
   private static readonly PANEL_MARGIN = 40;
   private static readonly PANEL_PADDING = 20;
   private static readonly INPUT_WIDTH =
@@ -109,6 +109,29 @@ export class MainMenu extends Phaser.Scene {
         wordWrap: { width: MainMenu.INPUT_WIDTH },
       },
     );
+
+    const registerLink = this.add
+      .text(
+        panelX + MainMenu.PANEL_PADDING,
+        panelY + 195,
+        "No player ID? [ Register → ]",
+        {
+          fontFamily: FONT_FAMILY,
+          fontSize: FONT_SIZE_SMALL,
+          color: hex(ACCENT_PRIMARY),
+        },
+      )
+      .setOrigin(0, 0)
+      .setInteractive({ useHandCursor: true });
+    registerLink.on("pointerover", () =>
+      registerLink.setColor(hex(TEXT_PRIMARY)),
+    );
+    registerLink.on("pointerout", () =>
+      registerLink.setColor(hex(ACCENT_PRIMARY)),
+    );
+    registerLink.on("pointerdown", () => {
+      window.open("/register", "_blank", "noopener,noreferrer");
+    });
 
     this.connect();
 
