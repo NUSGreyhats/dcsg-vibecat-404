@@ -64,8 +64,9 @@ func SpawnEnemy(rng *rand.Rand, baseID uint32, etype uint8, baseX, baseY float32
 }
 
 // UpdateEnemy runs one tick of AI. No RNG is consumed here — all randomness
-// was baked in at spawn time (determinism invariant).
-func UpdateEnemy(e *EnemyState, p *PlayerState, dt float32, now time.Time) (didAttack bool) {
+// was baked in at spawn time (determinism invariant). roomIndex is used to
+// look up the wall grid so enemies don't walk through tilemap walls.
+func UpdateEnemy(e *EnemyState, p *PlayerState, roomIndex uint8, dt float32, now time.Time) (didAttack bool) {
 	if e.AIState == AIDead {
 		return false
 	}
@@ -86,14 +87,14 @@ func UpdateEnemy(e *EnemyState, p *PlayerState, dt float32, now time.Time) (didA
 			return false
 		}
 		tgt := e.PatrolPath[e.PatrolIndex]
-		moveToward(e, tgt.X, tgt.Y, dt)
+		moveTowardWithWalls(e, tgt.X, tgt.Y, dt, roomIndex)
 		if near(e.X, e.Y, tgt.X, tgt.Y, 8) {
 			e.PatrolIndex = (e.PatrolIndex + 1) % uint8(len(e.PatrolPath))
 		}
 	case AIAggro:
 		aimX := p.X + (e.JitterX-0.5)*20
 		aimY := p.Y + (e.JitterY-0.5)*20
-		moveToward(e, aimX, aimY, dt)
+		moveTowardWithWalls(e, aimX, aimY, dt, roomIndex)
 
 		if dist < 34 && now.After(e.AttackCooldown) {
 			didAttack = true
@@ -114,6 +115,28 @@ func moveToward(e *EnemyState, tx, ty, dt float32) {
 	step := e.Speed * dt
 	e.X += dx / mag * step
 	e.Y += dy / mag * step
+}
+
+// moveTowardWithWalls is moveToward with axis-separated wall checks so
+// enemies slide along walls instead of tunneling through them.
+func moveTowardWithWalls(e *EnemyState, tx, ty, dt float32, roomIndex uint8) {
+	dx := tx - e.X
+	dy := ty - e.Y
+	mag := float32(math.Sqrt(float64(dx*dx + dy*dy)))
+	if mag < 0.001 {
+		return
+	}
+	step := e.Speed * dt
+	const hw float32 = 12
+	const hh float32 = 12
+	newX := e.X + dx/mag*step
+	if !BlockedAABB(roomIndex, newX, e.Y, hw, hh) {
+		e.X = newX
+	}
+	newY := e.Y + dy/mag*step
+	if !BlockedAABB(roomIndex, e.X, newY, hw, hh) {
+		e.Y = newY
+	}
 }
 
 func near(ax, ay, bx, by, eps float32) bool {

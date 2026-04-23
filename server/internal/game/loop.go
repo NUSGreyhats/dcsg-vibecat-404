@@ -374,6 +374,11 @@ func (e *Engine) transitionToRoom(nextRoom uint8, now time.Time) {
 	}
 	roomData := LoadRoom(e.room, e.run.MobRNG, tmpl, now)
 
+	// Place the player on a non-wall tile near the bottom-center of the
+	// new room. Without this, a player entering through a door flush
+	// against a wall could end up spawned inside geometry.
+	placePlayerSpawn(e.player, nextRoom)
+
 	e.send(protocol.S2CRoomLoad, protocol.RoomLoadData{
 		RoomIndex: nextRoom,
 		Room:      roomData,
@@ -391,15 +396,27 @@ func (e *Engine) advancePlayer(dt float32) {
 	if e.player.SpeedMult > 0 && time.Now().Before(e.player.SpeedMultUntil) {
 		speed *= e.player.SpeedMult
 	}
-	e.player.X += e.dirtyInput.dx * speed * dt
-	e.player.Y += e.dirtyInput.dy * speed * dt
-	e.player.X = clampFloat(e.player.X, 16, RoomWidth-16)
-	e.player.Y = clampFloat(e.player.Y, 16, RoomHeight-16)
+
+	const hw float32 = 10 // player half-width used for wall collision
+	const hh float32 = 10
+
+	// Axis-separated move so the player slides along walls.
+	newX := e.player.X + e.dirtyInput.dx*speed*dt
+	newX = clampFloat(newX, 16, RoomWidth-16)
+	if !BlockedAABB(e.run.CurrentRoom, newX, e.player.Y, hw, hh) {
+		e.player.X = newX
+	}
+
+	newY := e.player.Y + e.dirtyInput.dy*speed*dt
+	newY = clampFloat(newY, 16, RoomHeight-16)
+	if !BlockedAABB(e.run.CurrentRoom, e.player.X, newY, hw, hh) {
+		e.player.Y = newY
+	}
 }
 
 func (e *Engine) advanceEnemies(dt float32, now time.Time) {
 	for _, en := range e.room.Enemies {
-		if UpdateEnemy(en, e.player, dt, now) {
+		if UpdateEnemy(en, e.player, e.run.CurrentRoom, dt, now) {
 			// Enemy landed an attack: tiny damage. Shield halves it.
 			dmg := int16(5)
 			if now.Before(e.player.ShieldUntil) {
@@ -510,6 +527,36 @@ func (e *Engine) sendState(now time.Time) {
 		Projectiles: projs,
 	}
 	e.send(protocol.S2CState, data)
+}
+
+// placePlayerSpawn finds a non-wall tile in the target room and places the
+// player there. Prefers the bottom-center; falls back to a spiral search.
+func placePlayerSpawn(p *PlayerState, roomIndex uint8) {
+	const hw, hh float32 = 10, 10
+	candidates := [][2]float32{
+		{RoomWidth / 2, RoomHeight - 100},
+		{RoomWidth / 2, RoomHeight / 2},
+		{64, RoomHeight - 64},
+		{RoomWidth - 64, RoomHeight - 64},
+	}
+	for _, c := range candidates {
+		if !BlockedAABB(roomIndex, c[0], c[1], hw, hh) {
+			p.X, p.Y = c[0], c[1]
+			return
+		}
+	}
+	// Spiral search over tile centers if every preset is blocked.
+	for ty := 1; ty < GridRows-1; ty++ {
+		for tx := 1; tx < GridCols-1; tx++ {
+			cx := float32(tx)*TileSize + TileSize/2
+			cy := float32(ty)*TileSize + TileSize/2
+			if !BlockedAABB(roomIndex, cx, cy, hw, hh) {
+				p.X, p.Y = cx, cy
+				return
+			}
+		}
+	}
+	// Nothing worked — leave where they are.
 }
 
 func clampInput(v float32) float32 {
