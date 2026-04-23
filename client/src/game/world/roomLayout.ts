@@ -81,7 +81,10 @@ export function paintRoomBackground(
         if (tileset) {
           for (const layerData of map.layers) {
             const layer = map.createLayer(layerData.name, tileset, 0, 0);
-            if (layer) created.push(layer);
+            if (layer) {
+              layer.setDepth(-30); // below entities + player
+              created.push(layer);
+            }
           }
           return created;
         }
