@@ -1,0 +1,19 @@
+{
+    auto_https off
+    admin off
+}
+
+:3000 {
+    encode gzip
+
+    @ws path /ws
+    handle @ws {
+        reverse_proxy game-server:8080
+    }
+
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+}

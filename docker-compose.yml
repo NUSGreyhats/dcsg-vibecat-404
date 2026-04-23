@@ -1,0 +1,23 @@
+services:
+  game-server:
+    build: ./server
+    environment:
+      LISTEN_ADDR: ":8080"
+      AUTH_MODE: "open"
+      MAX_CONCURRENT: "64"
+      GAME_DB: "/data/game.db"
+      ALLOWLIST_PATH: "/data/allowlist.json"
+    volumes:
+      - game-data:/data
+    restart: unless-stopped
+
+  client:
+    build: ./client
+    ports:
+      - "3000:3000"
+    depends_on:
+      - game-server
+    restart: unless-stopped
+
+volumes:
+  game-data:
