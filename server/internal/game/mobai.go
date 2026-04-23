@@ -26,7 +26,11 @@ var Archetypes = map[uint8]ArchetypeSpec{
 // SpawnEnemy consumes MobRNG in the exact order mandated by
 // docs/specs/foundations/07-determinism-seeding.md. Any change to the order
 // invalidates every pre-computed seed — do not reorder.
-func SpawnEnemy(rng *rand.Rand, baseID uint32, etype uint8, baseX, baseY float32, now time.Time) *EnemyState {
+//
+// After the RNG block completes, spawn and waypoint positions are nudged to
+// the nearest non-wall tile via NearestNonWall. That step consumes no RNG,
+// so the invariant holds.
+func SpawnEnemy(rng *rand.Rand, roomIndex uint8, baseID uint32, etype uint8, baseX, baseY float32, now time.Time) *EnemyState {
 	spec := Archetypes[etype]
 
 	offsetX := float32(rng.Intn(100) - 50)
@@ -45,11 +49,19 @@ func SpawnEnemy(rng *rand.Rand, baseID uint32, etype uint8, baseX, baseY float32
 
 	firstAttackDelay := rng.Intn(500)
 
+	// --- RNG block complete. Post-processing with the wall grid below. ---
+
+	spawnX, spawnY := NearestNonWall(roomIndex, baseX+offsetX, baseY+offsetY)
+	for i, wp := range path {
+		nx, ny := NearestNonWall(roomIndex, wp.X, wp.Y)
+		path[i] = Vec2{X: nx, Y: ny}
+	}
+
 	return &EnemyState{
 		EntityID:       baseID,
 		Type:           etype,
-		X:              baseX + offsetX,
-		Y:              baseY + offsetY,
+		X:              spawnX,
+		Y:              spawnY,
 		HP:             spec.HP,
 		MaxHP:          spec.HP,
 		AIState:        AIPatrol,

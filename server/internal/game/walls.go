@@ -105,6 +105,50 @@ func IsWallAt(roomIndex uint8, x, y float32) bool {
 	return g[r][c]
 }
 
+// NearestNonWall returns a (non-wall) world-space point close to (x, y),
+// searching outward in a deterministic spiral. Consumes no RNG so it is
+// safe to call after the RNG-consumption invariant in spec 07 has run.
+// Returns the original point if it is already free, or if no non-wall
+// tile is found within the search radius (caller should treat this as a
+// stuck enemy — rare in practice for hand-authored maps).
+func NearestNonWall(roomIndex uint8, x, y float32) (float32, float32) {
+	const hw, hh float32 = 12, 12
+	if !BlockedAABB(roomIndex, x, y, hw, hh) {
+		return x, y
+	}
+	// Deterministic spiral over tile centers, increasing chebyshev radius.
+	startC := int(x / TileSize)
+	startR := int(y / TileSize)
+	for radius := 1; radius <= 12; radius++ {
+		for dr := -radius; dr <= radius; dr++ {
+			for dc := -radius; dc <= radius; dc++ {
+				// Only probe the ring at this radius.
+				if abs(dr) != radius && abs(dc) != radius {
+					continue
+				}
+				r := startR + dr
+				c := startC + dc
+				if r < 0 || r >= GridRows || c < 0 || c >= GridCols {
+					continue
+				}
+				cx := float32(c)*TileSize + TileSize/2
+				cy := float32(r)*TileSize + TileSize/2
+				if !BlockedAABB(roomIndex, cx, cy, hw, hh) {
+					return cx, cy
+				}
+			}
+		}
+	}
+	return x, y
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
 // BlockedAABB reports whether an axis-aligned bounding box centered on
 // (cx, cy) with half-extent hw/hh overlaps any wall tile. Sample the four
 // corners — sufficient for tile-sized bodies.

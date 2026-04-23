@@ -10,7 +10,7 @@ Build, test, and deploy pipeline for both services. Defines the environment matr
 | -------- | -------------- | ---------------- | ------------------ | ----------------- |
 | **dev**  | `:8080` on VPS | Not deployed     | Unlimited          | `open`            |
 | **test** | `:8080` on VPS | `:3000` optional | Unlimited          | `open` or `token` |
-| **prod** | `:8080` on LAN | `:3000` on LAN   | `MAX_CONCURRENT=1` | `token`           |
+| **prod** | `:8080` on LAN | `:3000` on LAN   | `MAX_CONCURRENT=4` | `token`           |
 
 ## Pipeline — game server (Repo A)
 

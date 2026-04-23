@@ -55,7 +55,7 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 | 0x84 | `S2C_ROOM_LOAD`     | `{ room_index, room: RoomData, split_ms }`                              |
 | 0x85 | `S2C_RUN_COMPLETE`  | `{ total_ms, rank, splits: [] }`                                        |
 | 0x86 | `S2C_LEADERBOARD`   | `{ entries: [] }`                                                       |
-| 0x87 | `S2C_ERROR`         | `{ code, message }`                                                     |
+| 0x87 | `S2C_ERROR`         | `{ code, message }` — codes include `SPECTATOR_READ_ONLY` (closes conn). |
 | 0x88 | `S2C_DOOR_UNLOCKED` | `{ door_id }`                                                           |
 | 0x89 | `S2C_ENTITY_DIED`   | `{ entity_id }`                                                         |
 
@@ -103,6 +103,54 @@ Go's `encoding/json`:
 Source: [Trail of Bits — Unexpected security footguns in Go's parsers](https://blog.trailofbits.com/2025/06/17/unexpected-security-footguns-in-gos-parsers/).
 
 Both behaviors must be preserved — they are the parser half of BUG-09.
+
+## Spectator protocol
+
+Spectators connect to the game server on a **separate WS path** from players. The envelope is identical to the player S2C envelope — same `type` codes, same `data` shapes — but the connection is read-only and omits the auth handshake.
+
+### Connection
+
+- **Path:** `/ws/spectate?player_id=<hex>`
+- **Handshake:** none. The accept loop inspects the query param; if the target player is actively running (and caps allow — see [04-lobby.md#caps-and-abuse-resistance](./04-lobby.md#caps-and-abuse-resistance) and [05-server-runtime.md#accept-path](./05-server-runtime.md#accept-path)), the upgrade succeeds. Otherwise HTTP `503` with `Retry-After`.
+- **Auth:** none. Live spectating is intentionally public; the `player_id` is effectively public once the run is listed on `/api/live`.
+- **No `C2S_AUTH` / `C2S_START_RUN`** — those are player-only.
+
+### Packet flow to spectators
+
+Spectators receive the player's S2C stream with the following filter:
+
+| S2C packet          | Sent to spectator? | Notes                                       |
+| ------------------- | ------------------ | ------------------------------------------- |
+| `S2C_AUTH_OK`       | **No**             | Auth is scoped to the player connection.    |
+| `S2C_RUN_STARTED`   | Yes — as catchup   | Sent on spectator attach if run is mid-flight (so the viewer has the seed + starting room). |
+| `S2C_STATE`         | Yes                | Every tick. This is the main feed. Drop-on-full at spectator outCh. |
+| `S2C_ROOM_LOAD`     | Yes                | Including the latest one on attach, as catchup. |
+| `S2C_RUN_COMPLETE`  | Yes                | Triggers spectator WS close after `SPECTATOR_CATCHUP_MS`. |
+| `S2C_LEADERBOARD`   | Yes                | Spectators see leaderboard updates the same as the player. |
+| `S2C_ERROR`         | Yes                | If the player errors out, spectators see it and are closed. |
+| `S2C_DOOR_UNLOCKED` | Yes                | Rendering depends on it.                    |
+| `S2C_ENTITY_DIED`   | Yes                | Rendering depends on it.                    |
+
+The `seq` field on spectator-bound packets is **reset per-spectator** (starts at 1 on attach) — spectators cannot see the player's `seq` because they may attach mid-run.
+
+### Read-only enforcement
+
+Any WebSocket frame received from a spectator (binary or text of any type code) causes the server to:
+
+1. Send an `S2C_ERROR` with code `SPECTATOR_READ_ONLY`, `message: "spectator connections are read-only"`.
+2. Close the WebSocket with code `1008` (policy violation).
+
+No spectator frames are parsed beyond the WS control layer; we don't dispatch them into the gameLoop's drain phase, so there is no attack surface from malformed spectator JSON.
+
+### Catchup snapshot on attach
+
+Because spectators can attach at any point during a run, on register the gameLoop sends an immediate catchup sequence to the new spectator's outCh **before** the next regular `S2C_STATE`:
+
+1. `S2C_RUN_STARTED` with the run's `seed` and initial `room`.
+2. The most recent `S2C_ROOM_LOAD` (so the viewer has the current room's layout, not the first room's).
+3. The most recent `S2C_STATE` (so player/enemy/projectile positions are current).
+
+This gives the viewer everything it needs to render from the first frame without waiting for the next tick.
 
 ## Implementation notes
 
