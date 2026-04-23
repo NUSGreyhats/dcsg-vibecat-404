@@ -22,7 +22,7 @@ import {
 
 /**
  * Title screen. Shows the art/title.png splash full-bleed behind a
- * compact bottom-left login panel: player_id text input → Start Run
+ * compact bottom-right login panel: player_id text input → Start Run
  * button → status line. Connects on create; on Start fires
  * C2S_AUTH → C2S_START_RUN and hands off to the Game scene.
  */
@@ -32,6 +32,13 @@ export class MainMenu extends Phaser.Scene {
   private startButton?: Phaser.GameObjects.Text;
   private connected = false;
   private resizeHandler?: () => void;
+
+  private static readonly PANEL_WIDTH = 460;
+  private static readonly PANEL_HEIGHT = 240;
+  private static readonly PANEL_MARGIN = 40;
+  private static readonly PANEL_PADDING = 20;
+  private static readonly INPUT_WIDTH =
+    MainMenu.PANEL_WIDTH - MainMenu.PANEL_PADDING * 2;
 
   constructor() {
     super({ key: "MainMenu" });
@@ -49,25 +56,37 @@ export class MainMenu extends Phaser.Scene {
         .setDepth(DEPTH_SPLASH);
     }
 
-    // -- Login panel (bottom-left) --
-    const panelX = 40;
-    const panelY = h - 200;
+    // -- Login panel (bottom-right) --
+    const panelX = w - MainMenu.PANEL_WIDTH - MainMenu.PANEL_MARGIN;
+    const panelY = h - MainMenu.PANEL_HEIGHT - MainMenu.PANEL_MARGIN + 30;
 
     this.add
-      .rectangle(panelX, panelY - 30, 360, 220, DEEP_NAVY, 0.85)
+      .rectangle(
+        panelX,
+        panelY - 30,
+        MainMenu.PANEL_WIDTH,
+        MainMenu.PANEL_HEIGHT,
+        DEEP_NAVY,
+        0.85,
+      )
       .setStrokeStyle(2, MID_BLUE)
       .setOrigin(0, 0);
 
-    this.add.text(panelX + 20, panelY - 10, "Player ID", {
+    this.add.text(panelX + MainMenu.PANEL_PADDING, panelY - 10, "Player ID", {
       fontFamily: FONT_FAMILY,
       fontSize: FONT_SIZE_BODY,
       color: hex(TEXT_PRIMARY),
     });
 
-    this.mountTextInput(panelX + 20, panelY + 20);
+    this.mountTextInput(panelX + MainMenu.PANEL_PADDING, panelY + 20);
 
     this.startButton = this.add
-      .text(panelX + 20, panelY + 70, "[ Start Run ]", BUTTON_TEXT_STYLE)
+      .text(
+        panelX + MainMenu.PANEL_PADDING,
+        panelY + 70,
+        "[ Start Run ]",
+        BUTTON_TEXT_STYLE,
+      )
       .setOrigin(0, 0)
       .setInteractive({ useHandCursor: true });
 
@@ -79,11 +98,17 @@ export class MainMenu extends Phaser.Scene {
     );
     this.startButton.on("pointerdown", () => this.onStart());
 
-    this.statusText = this.add.text(panelX + 20, panelY + 135, "Connecting...", {
-      fontFamily: FONT_FAMILY,
-      fontSize: FONT_SIZE_SMALL,
-      color: hex(TEXT_MUTED),
-    });
+    this.statusText = this.add.text(
+      panelX + MainMenu.PANEL_PADDING,
+      panelY + 135,
+      "Connecting...",
+      {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_SMALL,
+        color: hex(TEXT_MUTED),
+        wordWrap: { width: MainMenu.INPUT_WIDTH },
+      },
+    );
 
     this.connect();
 
@@ -133,7 +158,7 @@ export class MainMenu extends Phaser.Scene {
       border: `1px solid ${hex(MID_BLUE)}`,
       background: hex(DEEP_NAVY),
       color: hex(TEXT_PRIMARY),
-      width: "280px",
+      width: `${MainMenu.INPUT_WIDTH}px`,
       outline: "none",
       boxSizing: "border-box",
     } as Partial<CSSStyleDeclaration>);
@@ -158,7 +183,7 @@ export class MainMenu extends Phaser.Scene {
       input.style.left = `${rect.left - parentRect.left + leftInCanvas}px`;
       input.style.top = `${rect.top - parentRect.top + topInCanvas}px`;
       // Scale the input with the canvas so the panel lines up.
-      const visualWidth = 280 * scaleX;
+      const visualWidth = MainMenu.INPUT_WIDTH * scaleX;
       input.style.width = `${visualWidth}px`;
     };
     place();
