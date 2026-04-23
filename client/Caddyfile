@@ -11,6 +11,11 @@
         reverse_proxy game-server:8080
     }
 
+    @lb path /leaderboard /leaderboard/*
+    handle @lb {
+        reverse_proxy game-server:8080
+    }
+
     handle {
         root * /srv
         try_files {path} /index.html
