@@ -11,6 +11,7 @@ import {
   ERROR,
   FONT_FAMILY,
   FONT_SIZE_BODY,
+  FONT_SIZE_BODY_EM,
   FONT_SIZE_CAPTION,
   FONT_SIZE_MICRO,
   FONT_SIZE_SMALL,
@@ -42,11 +43,12 @@ const SPONSORS: ReadonlyArray<SponsorSpec> = [
 
 /**
  * Title screen. Shows the art/title.png splash full-bleed behind a
- * compact bottom-right login panel: username + password → Log In. The
- * server resolves the credentials to a player_id via /api/login, the
- * scene then opens the WS, sends C2S_AUTH + C2S_START_RUN, and hands
- * off to the Game scene. Players with no account click Register → to
- * open the /register page in a new tab.
+ * compact bottom-right login panel: inline username + password row →
+ * Log In. The server resolves the credentials to a player_id via
+ * /api/login, the scene then opens the WS, sends C2S_AUTH +
+ * C2S_START_RUN, and hands off to the Game scene. Players with no
+ * account click Register → to open the /register page in a new tab.
+ * A small sponsors panel sits directly below the login panel.
  */
 export class MainMenu extends Phaser.Scene {
   private usernameInput?: HTMLInputElement;
@@ -58,11 +60,14 @@ export class MainMenu extends Phaser.Scene {
   private resizeHandlers: Array<() => void> = [];
 
   private static readonly PANEL_WIDTH = 460;
-  private static readonly PANEL_HEIGHT = 340;
+  private static readonly PANEL_HEIGHT = 190;
   private static readonly PANEL_MARGIN = 40;
   private static readonly PANEL_PADDING = 20;
   private static readonly INPUT_WIDTH =
     MainMenu.PANEL_WIDTH - MainMenu.PANEL_PADDING * 2;
+  private static readonly INPUT_COLUMN_GAP = 16;
+  private static readonly INPUT_COLUMN_WIDTH =
+    (MainMenu.INPUT_WIDTH - MainMenu.INPUT_COLUMN_GAP) / 2;
   private static readonly SPONSOR_PANEL_HEIGHT = 120;
   private static readonly SPONSOR_PANEL_GAP = 12;
   private static readonly SPONSOR_CARD_HEIGHT = 72;
@@ -108,32 +113,47 @@ export class MainMenu extends Phaser.Scene {
       .setStrokeStyle(2, MID_BLUE)
       .setOrigin(0, 0);
 
+    const passwordColumnX =
+      contentX + MainMenu.INPUT_COLUMN_WIDTH + MainMenu.INPUT_COLUMN_GAP;
+
     this.add.text(contentX, panelY - 10, "Username", {
       fontFamily: FONT_FAMILY,
       fontSize: FONT_SIZE_BODY,
       color: hex(TEXT_PRIMARY),
     });
-    this.usernameInput = this.mountTextInput(contentX, panelY + 20, {
-      type: "text",
-      placeholder: "username",
-      maxLength: 32,
-      autocomplete: "username",
-    });
-
-    this.add.text(contentX, panelY + 65, "Password", {
+    this.add.text(passwordColumnX, panelY - 10, "Password", {
       fontFamily: FONT_FAMILY,
       fontSize: FONT_SIZE_BODY,
       color: hex(TEXT_PRIMARY),
     });
-    this.passwordInput = this.mountTextInput(contentX, panelY + 95, {
-      type: "password",
-      placeholder: "password",
-      maxLength: 128,
-      autocomplete: "current-password",
-    });
+    this.usernameInput = this.mountTextInput(
+      contentX,
+      panelY + 20,
+      MainMenu.INPUT_COLUMN_WIDTH,
+      {
+        type: "text",
+        placeholder: "username",
+        maxLength: 32,
+        autocomplete: "username",
+      },
+    );
+    this.passwordInput = this.mountTextInput(
+      passwordColumnX,
+      panelY + 20,
+      MainMenu.INPUT_COLUMN_WIDTH,
+      {
+        type: "password",
+        placeholder: "password",
+        maxLength: 128,
+        autocomplete: "current-password",
+      },
+    );
 
     this.startButton = this.add
-      .text(contentX, panelY + 145, "[ Log In ]", BUTTON_TEXT_STYLE)
+      .text(contentX, panelY + 62, "[ Log In ]", {
+        ...BUTTON_TEXT_STYLE,
+        fontSize: FONT_SIZE_BODY_EM,
+      })
       .setOrigin(0, 0)
       .setInteractive({ useHandCursor: true });
     this.startButton.on("pointerover", () =>
@@ -144,7 +164,7 @@ export class MainMenu extends Phaser.Scene {
     );
     this.startButton.on("pointerdown", () => this.onStart());
 
-    this.statusText = this.add.text(contentX, panelY + 210, "Connecting...", {
+    this.statusText = this.add.text(contentX, panelY + 108, "Connecting...", {
       fontFamily: FONT_FAMILY,
       fontSize: FONT_SIZE_SMALL,
       color: hex(TEXT_MUTED),
@@ -152,7 +172,7 @@ export class MainMenu extends Phaser.Scene {
     });
 
     const registerLink = this.add
-      .text(contentX, panelY + 260, "No account? [ Register → ]", {
+      .text(contentX, panelY + 132, "No account? [ Register → ]", {
         fontFamily: FONT_FAMILY,
         fontSize: FONT_SIZE_SMALL,
         color: hex(ACCENT_PRIMARY),
@@ -309,6 +329,7 @@ export class MainMenu extends Phaser.Scene {
   private mountTextInput(
     sceneX: number,
     sceneY: number,
+    widthPx: number,
     opts: {
       type: "text" | "password";
       placeholder: string;
@@ -333,7 +354,7 @@ export class MainMenu extends Phaser.Scene {
       border: `1px solid ${hex(MID_BLUE)}`,
       background: hex(DEEP_NAVY),
       color: hex(TEXT_PRIMARY),
-      width: `${MainMenu.INPUT_WIDTH}px`,
+      width: `${widthPx}px`,
       outline: "none",
       boxSizing: "border-box",
     } as Partial<CSSStyleDeclaration>);
@@ -356,7 +377,7 @@ export class MainMenu extends Phaser.Scene {
       const topInCanvas = sceneY * scaleX;
       input.style.left = `${rect.left - parentRect.left + leftInCanvas}px`;
       input.style.top = `${rect.top - parentRect.top + topInCanvas}px`;
-      const visualWidth = MainMenu.INPUT_WIDTH * scaleX;
+      const visualWidth = widthPx * scaleX;
       input.style.width = `${visualWidth}px`;
     };
     place();
