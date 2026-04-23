@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leaderboard — DEFCON Dungeon Speedrun</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <style>
+    :root {
+      --bg: #0d0d10;
+      --fg: #e8e8ea;
+      --dim: #8b8b90;
+      --line: #1e1e24;
+      --card: #15151a;
+      --gold: #f0c040;
+      --silver: #c0c0c8;
+      --bronze: #c08040;
+      --accent: #6be7c8;
+      --danger: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.4;
+    }
+    .wrap {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 24px 96px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+    }
+    h1 {
+      font-size: 24px;
+      margin: 0;
+      letter-spacing: 0.5px;
+    }
+    h1 .sub {
+      color: var(--dim);
+      font-weight: normal;
+      font-size: 15px;
+      margin-left: 8px;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--dim);
+    }
+    .pulse {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    .pulse.stale { background: var(--danger); box-shadow: 0 0 8px var(--danger); animation: none; }
+    @keyframes pulse { 50% { opacity: 0.25; } }
+
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      text-align: left;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--dim);
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      font-weight: 600;
+    }
+    tbody tr {
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    tbody tr:hover { background: #1a1a20; }
+    tbody td {
+      padding: 14px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    .rank {
+      font-weight: bold;
+      font-size: 18px;
+      width: 56px;
+    }
+    .rank-1 { color: var(--gold); }
+    .rank-2 { color: var(--silver); }
+    .rank-3 { color: var(--bronze); }
+    .name { font-size: 16px; font-weight: 500; }
+    .time {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--fg);
+      font-variant-numeric: tabular-nums;
+    }
+    .meta { color: var(--dim); font-size: 12px; }
+    .seed {
+      font-size: 11px;
+      color: var(--dim);
+      font-family: ui-monospace, monospace;
+    }
+    .expand-indicator {
+      color: var(--dim);
+      font-size: 12px;
+      transition: transform 0.15s;
+      display: inline-block;
+    }
+    tr.open .expand-indicator { transform: rotate(90deg); }
+
+    .splits {
+      display: none;
+      padding: 0 12px 18px;
+      background: var(--card);
+    }
+    tr.open + tr .splits { display: block; }
+    .splits-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 8px 16px;
+      font-size: 13px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+    .split-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+    }
+    .split-item .room { color: var(--dim); }
+    .split-item .split-time { color: var(--fg); font-variant-numeric: tabular-nums; }
+    .split-item.boss .room { color: var(--danger); font-weight: 600; }
+    .replay {
+      margin-top: 10px;
+      font-size: 11px;
+      color: var(--dim);
+    }
+    .replay code {
+      background: #1a1a20;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+
+    .empty, .error {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--dim);
+    }
+    .error { color: var(--danger); }
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    a:hover { text-decoration: underline; }
+    footer {
+      margin-top: 32px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+      color: var(--dim);
+      font-size: 12px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Leaderboard <span class="sub">DEFCON Dungeon Speedrun</span></h1>
+      <div class="status">
+        <span id="status-dot" class="pulse"></span>
+        <span id="status-text">connecting…</span>
+        <span>·</span>
+        <a href="/">← Back to game</a>
+      </div>
+    </header>
+
+    <div id="content">
+      <div class="empty">Loading…</div>
+    </div>
+
+    <footer>
+      Auto-refreshes every 5 seconds. Seed is the run's <code>start_time</code>; anyone can study a top run's seed to replan the route.
+    </footer>
+  </div>
+
+  <script>
+    const API = "/api/leaderboard?limit=50";
+    const REFRESH_MS = 5000;
+
+    function formatTime(ms) {
+      if (typeof ms !== "number" || Number.isNaN(ms)) return "—";
+      const neg = ms < 0;
+      let n = Math.abs(ms);
+      const mins = Math.floor(n / 60000);
+      n -= mins * 60000;
+      const secs = Math.floor(n / 1000);
+      const millis = n - secs * 1000;
+      return `${neg ? "-" : ""}${String(mins).padStart(1, "0")}:${String(secs).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[c]));
+    }
+
+    function truncateId(s) {
+      const str = String(s ?? "");
+      if (str.length <= 12) return str;
+      return str.slice(0, 6) + "…" + str.slice(-4);
+    }
+
+    function renderSplits(splits) {
+      if (!Array.isArray(splits) || splits.length === 0) {
+        return `<div class="splits-grid"><div class="split-item"><span class="room">no splits recorded</span></div></div>`;
+      }
+      const items = splits.map((s) => {
+        const isBoss = s.room_index === 11;
+        return `<div class="split-item${isBoss ? " boss" : ""}">
+          <span class="room">Room ${s.room_index}${isBoss ? " · boss" : ""}</span>
+          <span class="split-time">${formatTime(s.time_ms)}${s.kills ? ` <span class="meta">(${s.kills} kills)</span>` : ""}</span>
+        </div>`;
+      }).join("");
+      return `<div class="splits-grid">${items}</div>`;
+    }
+
+    function render(entries) {
+      if (!entries || entries.length === 0) {
+        return `<div class="empty">No completed runs yet. <a href="/">Be the first</a>.</div>`;
+      }
+      const rows = entries.map((e) => {
+        const rankClass = e.rank <= 3 ? ` rank-${e.rank}` : "";
+        return `
+          <tr class="row" data-rank="${e.rank}">
+            <td class="rank${rankClass}">#${e.rank}</td>
+            <td>
+              <div class="name">${escapeHtml(e.display_name)}</div>
+              <div class="seed">seed ${e.seed}</div>
+            </td>
+            <td class="time">${formatTime(e.total_ms)}</td>
+            <td class="meta">
+              <span class="expand-indicator">▸</span> splits
+            </td>
+          </tr>
+          <tr class="splits-row">
+            <td colspan="4" style="padding: 0; border: none;">
+              <div class="splits">
+                ${renderSplits(e.splits)}
+                <div class="replay">replay <code>${escapeHtml(truncateId(e.replay_id))}</code></div>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join("");
+      return `
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Player</th>
+              <th>Time</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+
+    const content = document.getElementById("content");
+    const dot = document.getElementById("status-dot");
+    const statusText = document.getElementById("status-text");
+
+    function setStatus(state, text) {
+      dot.className = state === "stale" ? "pulse stale" : "pulse";
+      statusText.textContent = text;
+    }
+
+    function attachHandlers() {
+      content.querySelectorAll("tr.row").forEach((row) => {
+        row.addEventListener("click", () => row.classList.toggle("open"));
+      });
+    }
+
+    async function fetchOnce() {
+      try {
+        const res = await fetch(API, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const entries = Array.isArray(data.entries) ? data.entries : [];
+        content.innerHTML = render(entries);
+        attachHandlers();
+        setStatus("live", `live · ${entries.length} ${entries.length === 1 ? "run" : "runs"} · updated ${new Date().toLocaleTimeString()}`);
+      } catch (err) {
+        content.innerHTML = `<div class="error">Failed to load: ${escapeHtml(err.message || err)}</div>`;
+        setStatus("stale", "disconnected — retrying…");
+      }
+    }
+
+    fetchOnce();
+    setInterval(fetchOnce, REFRESH_MS);
+  </script>
+</body>
+</html>

@@ -65,7 +65,7 @@ func main() {
 	// Dev-only: the lobby service is spec'd to host /api/leaderboard, but
 	// it doesn't exist yet. Expose a read-through here so local testers
 	// can view results without finishing a run.
-	mux.HandleFunc("/leaderboard", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/leaderboard", func(w http.ResponseWriter, r *http.Request) {
 		limit := 10
 		if v := r.URL.Query().Get("limit"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
