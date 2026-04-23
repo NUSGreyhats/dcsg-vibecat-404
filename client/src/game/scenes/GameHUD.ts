@@ -1,216 +1,139 @@
-import { Scene } from "phaser";
-import { PLAYER_MAX_HEALTH } from "../constants";
-import { getWeaponStats } from "../weapons";
-import type { Game } from "./Game";
+import Phaser from "phaser";
+import { getSync } from "../net/runContext";
+import { PLAYER_MAX_HEALTH, ROOM_COUNT } from "../constants";
+import { WEAPON_STATS, ALL_WEAPON_IDS } from "../weapons";
 
-const BAR_X = 56;
-const BAR_Y = 20;
-const BAR_WIDTH = 160;
-const BAR_HEIGHT = 18;
+const HP_BAR_WIDTH = 200;
+const HP_BAR_HEIGHT = 16;
 
-const W = 1280;
-const H = 768;
+function formatTime(ms: number): string {
+  const totalMs = Math.max(0, Math.floor(ms));
+  const minutes = Math.floor(totalMs / 60000);
+  const seconds = Math.floor((totalMs % 60000) / 1000);
+  const millis = totalMs % 1000;
+  const mm = String(minutes).padStart(2, "0");
+  const ss = String(seconds).padStart(2, "0");
+  const mmm = String(millis).padStart(3, "0");
+  return `${mm}:${ss}.${mmm}`;
+}
 
-export class GameHUD extends Scene {
-  private healthBarFill: Phaser.GameObjects.Graphics;
-  private healthText: Phaser.GameObjects.Text;
-  private killText: Phaser.GameObjects.Text;
-  private coinText: Phaser.GameObjects.Text;
-  private weaponText: Phaser.GameObjects.Text;
-  private roomText: Phaser.GameObjects.Text;
-  private connBanner: Phaser.GameObjects.Text;
+/**
+ * Heads-up display overlay. Launched alongside the Game scene. Reads state
+ * directly from the sync on every tick — no input handling here.
+ */
+export class GameHUD extends Phaser.Scene {
+  private timeText?: Phaser.GameObjects.Text;
+  private roomText?: Phaser.GameObjects.Text;
+  private hpText?: Phaser.GameObjects.Text;
+  private hpBarBg?: Phaser.GameObjects.Rectangle;
+  private hpBarFill?: Phaser.GameObjects.Rectangle;
+  private weaponText?: Phaser.GameObjects.Text;
 
   constructor() {
-    super("GameHUD");
+    super({ key: "GameHUD" });
   }
 
-  create() {
-    const panel = this.add.graphics();
-    panel.fillStyle(0x000000, 0.55);
-    panel.fillRoundedRect(10, 8, 260, 58, 8);
-    panel.lineStyle(1, 0x555555, 0.6);
-    panel.strokeRoundedRect(10, 8, 260, 58, 8);
+  create(): void {
+    const w = this.scale.width;
+    const h = this.scale.height;
 
-    this.add.text(18, 15, "HP", {
-      fontFamily: "Arial Black",
-      fontSize: "18px",
-      color: "#ffffff",
-      stroke: "#000000",
-      strokeThickness: 2,
-    });
-
-    const barBg = this.add.graphics();
-    barBg.fillStyle(0x222222);
-    barBg.fillRoundedRect(BAR_X, BAR_Y, BAR_WIDTH, BAR_HEIGHT, 4);
-    barBg.lineStyle(1, 0x444444);
-    barBg.strokeRoundedRect(BAR_X, BAR_Y, BAR_WIDTH, BAR_HEIGHT, 4);
-
-    this.healthBarFill = this.add.graphics();
-
-    this.healthText = this.add.text(222, 16, "", {
-      fontFamily: "Arial",
-      fontSize: "16px",
-      color: "#ffffff",
-      stroke: "#000000",
-      strokeThickness: 2,
-    });
-
-    this.weaponText = this.add.text(18, 44, "", {
-      fontFamily: "Arial",
-      fontSize: "13px",
-      color: "#b8d4ff",
-      stroke: "#000000",
-      strokeThickness: 2,
-    });
-
-    const coinPanel = this.add.graphics();
-    coinPanel.fillStyle(0x000000, 0.55);
-    coinPanel.fillRoundedRect(W - 278, 8, 130, 40, 8);
-    coinPanel.lineStyle(1, 0x555555, 0.6);
-    coinPanel.strokeRoundedRect(W - 278, 8, 130, 40, 8);
-
-    this.coinText = this.add.text(W - 268, 16, "Coins: 0", {
-      fontFamily: "Arial Black",
-      fontSize: "16px",
-      color: "#ffcc33",
-      stroke: "#000000",
-      strokeThickness: 2,
-    });
-
-    const killPanel = this.add.graphics();
-    killPanel.fillStyle(0x000000, 0.55);
-    killPanel.fillRoundedRect(W - 140, 8, 130, 40, 8);
-    killPanel.lineStyle(1, 0x555555, 0.6);
-    killPanel.strokeRoundedRect(W - 140, 8, 130, 40, 8);
-
-    this.killText = this.add.text(W - 130, 16, "Kills: 0", {
-      fontFamily: "Arial Black",
-      fontSize: "16px",
-      color: "#ffcc00",
-      stroke: "#000000",
-      strokeThickness: 2,
-    });
-
-    this.roomText = this.add.text(W / 2, 22, "Room 1", {
-      fontFamily: "Arial Black",
+    const textStyle: Phaser.Types.GameObjects.Text.TextStyle = {
+      fontFamily: "monospace",
       fontSize: "20px",
-      color: "#aaddff",
+      color: "#ffffff",
       stroke: "#000000",
-      strokeThickness: 4,
-    }).setOrigin(0.5, 0.5);
+      strokeThickness: 3,
+    };
 
-    this.connBanner = this.add
-      .text(W / 2, H - 20, "", {
-        fontFamily: "Arial",
-        fontSize: "14px",
-        color: "#ff4444",
-        backgroundColor: "#000000cc",
-        padding: { left: 12, right: 12, top: 6, bottom: 6 },
-      })
-      .setOrigin(0.5, 1)
-      .setVisible(false);
+    this.timeText = this.add
+      .text(12, 10, "00:00.000", textStyle)
+      .setScrollFactor(0)
+      .setDepth(1000);
 
-    const gameScene = this.scene.get("Game");
-    gameScene.events.on(
-      "player-health-changed",
-      this.updateHealthBar,
-      this,
-    );
-    gameScene.events.on("kill-count-changed", this.updateKillCount, this);
-    gameScene.events.on("coin-count-changed", this.updateCoinCount, this);
-    gameScene.events.on("weapon-changed", this.updateWeaponLabel, this);
-    gameScene.events.on("room-changed", this.updateRoomLabel, this);
-    gameScene.events.on("ws-status", this.updateConnectionStatus, this);
-    gameScene.events.once("shutdown", () => {
-      gameScene.events.off(
-        "player-health-changed",
-        this.updateHealthBar,
-        this,
-      );
-      gameScene.events.off(
-        "kill-count-changed",
-        this.updateKillCount,
-        this,
-      );
-      gameScene.events.off("room-changed", this.updateRoomLabel, this);
-      gameScene.events.off(
-        "coin-count-changed",
-        this.updateCoinCount,
-        this,
-      );
-      gameScene.events.off(
-        "weapon-changed",
-        this.updateWeaponLabel,
-        this,
-      );
-      gameScene.events.off(
-        "ws-status",
-        this.updateConnectionStatus,
-        this,
-      );
-    });
+    this.roomText = this.add
+      .text(w - 12, 10, `Room 1/${ROOM_COUNT}`, textStyle)
+      .setOrigin(1, 0)
+      .setScrollFactor(0)
+      .setDepth(1000);
 
-    this.updateHealthBar(PLAYER_MAX_HEALTH, PLAYER_MAX_HEALTH);
+    this.hpText = this.add
+      .text(12, h - 44, "HP 100/100", textStyle)
+      .setScrollFactor(0)
+      .setDepth(1000);
 
-    const mainGame = gameScene as Game;
-    if (mainGame.player) {
-      this.updateWeaponLabel(
-        getWeaponStats(mainGame.player.equippedWeaponId).displayName,
-      );
+    this.hpBarBg = this.add
+      .rectangle(12, h - 20, HP_BAR_WIDTH, HP_BAR_HEIGHT, 0x000000, 0.6)
+      .setOrigin(0, 0.5)
+      .setStrokeStyle(1, 0xffffff)
+      .setScrollFactor(0)
+      .setDepth(1000);
+
+    this.hpBarFill = this.add
+      .rectangle(12, h - 20, HP_BAR_WIDTH, HP_BAR_HEIGHT - 4, 0x44cc44)
+      .setOrigin(0, 0.5)
+      .setScrollFactor(0)
+      .setDepth(1001);
+
+    this.weaponText = this.add
+      .text(w - 12, h - 24, "Pistol  —", textStyle)
+      .setOrigin(1, 0.5)
+      .setScrollFactor(0)
+      .setDepth(1000);
+
+    this.events.on("shutdown", this.cleanup, this);
+  }
+
+  update(): void {
+    const state = getSync().state;
+
+    // Time
+    if (this.timeText) {
+      this.timeText.setText(formatTime(state.elapsedMs ?? 0));
+    }
+
+    // Room
+    if (this.roomText) {
+      const cur = state.currentRoom ?? 1;
+      this.roomText.setText(`Room ${cur}/${ROOM_COUNT}`);
+    }
+
+    // HP
+    const hp = Math.max(0, state.player?.hp ?? 0);
+    const maxHp = PLAYER_MAX_HEALTH;
+    if (this.hpText) this.hpText.setText(`HP ${hp}/${maxHp}`);
+    if (this.hpBarFill) {
+      const pct = Phaser.Math.Clamp(hp / maxHp, 0, 1);
+      this.hpBarFill.width = (HP_BAR_WIDTH - 4) * pct;
+      // shift colour as health drops
+      const colour = pct > 0.6 ? 0x44cc44 : pct > 0.3 ? 0xddaa22 : 0xcc3333;
+      this.hpBarFill.fillColor = colour;
+    }
+
+    // Weapon + ammo
+    if (this.weaponText) {
+      const weaponId = state.player?.weapon_id ?? 0;
+      const idx = Phaser.Math.Clamp(weaponId, 0, ALL_WEAPON_IDS.length - 1);
+      const id = ALL_WEAPON_IDS[idx];
+      const name = id ? WEAPON_STATS[id].displayName : "—";
+      const ammo = state.player?.ammo ?? 0;
+      this.weaponText.setText(`${name}  ${ammo}`);
     }
   }
 
-  private updateRoomLabel(room: number) {
-    this.roomText.setText(`Room ${room}`);
-  }
-
-  private updateHealthBar(health: number, maxHealth: number) {
-    this.healthBarFill.clear();
-
-    const ratio = Math.max(0, health / maxHealth);
-    const fillWidth = BAR_WIDTH * ratio;
-
-    if (fillWidth > 0) {
-      this.healthBarFill.fillStyle(this.getHealthColor(ratio));
-      this.healthBarFill.fillRoundedRect(
-        BAR_X,
-        BAR_Y,
-        fillWidth,
-        BAR_HEIGHT,
-        4,
-      );
-    }
-
-    this.healthText.setText(`${health}/${maxHealth}`);
-  }
-
-  private updateKillCount(kills: number) {
-    this.killText.setText(`Kills: ${kills}`);
-  }
-
-  private updateCoinCount(coins: number) {
-    this.coinText.setText(`Coins: ${coins}`);
-  }
-
-  private updateWeaponLabel(displayName: string) {
-    this.weaponText.setText(`Weapon: ${displayName}`);
-  }
-
-  private updateConnectionStatus(connected: boolean, failCount?: number) {
-    if (connected) {
-      this.connBanner.setVisible(false);
-    } else {
-      const retries = failCount ?? 0;
-      const suffix = retries > 1 ? ` (attempt ${retries})` : "";
-      this.connBanner
-        .setText(`Server disconnected — retrying${suffix}`)
-        .setVisible(true);
-    }
-  }
-
-  private getHealthColor(ratio: number): number {
-    if (ratio > 0.6) return 0x00cc44;
-    if (ratio > 0.3) return 0xccaa00;
-    return 0xcc2222;
+  private cleanup(): void {
+    this.timeText?.destroy();
+    this.roomText?.destroy();
+    this.hpText?.destroy();
+    this.hpBarBg?.destroy();
+    this.hpBarFill?.destroy();
+    this.weaponText?.destroy();
+    this.timeText = undefined;
+    this.roomText = undefined;
+    this.hpText = undefined;
+    this.hpBarBg = undefined;
+    this.hpBarFill = undefined;
+    this.weaponText = undefined;
   }
 }
+
+export default GameHUD;

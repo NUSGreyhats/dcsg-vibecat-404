@@ -1,112 +1,138 @@
-import { type Game } from "../scenes/Game";
-import { GameState, type GameStateJSON } from "./GameState";
+import { GameState } from "./GameState";
+import {
+  C2SType,
+  type C2SEnvelope,
+  type C2SDataFor,
+  type S2CEnvelope,
+} from "../../net/packet";
 
-export interface ServerResponse {
-  ok: boolean;
-  message?: string;
-  rollback?: GameStateJSON;
-}
-
-export default class GameStateSync {
-  private ws: WebSocket | null = null;
-  private url: string;
-  private intervalMs: number;
-  private timer: number | null = null;
-  private game: Game;
+export class GameStateSync {
+  state = new GameState();
+  private ws?: WebSocket;
+  private seq = 0;
   private connected = false;
-  private stopped = false;
-  private failCount = 0;
+  private queued: string[] = [];
 
-  constructor(game: Game, url: string, intervalMs: number) {
-    this.game = game;
-    this.url = url;
-    this.intervalMs = intervalMs;
-  }
-
-  start() {
-    this.stopped = false;
-    this.connect();
-    this.timer = window.setInterval(() => this.sendState(), this.intervalMs);
-  }
-
-  stop() {
-    this.stopped = true;
-    if (this.timer !== null) {
-      window.clearInterval(this.timer);
-      this.timer = null;
-    }
-    if (this.ws) {
-      this.ws.close(1000, "client shutdown");
-      this.ws = null;
-    }
-    this.connected = false;
-  }
-
-  setIntervalMs(ms: number) {
-    this.intervalMs = ms;
-    if (this.timer !== null) {
-      window.clearInterval(this.timer);
-      this.timer = window.setInterval(() => this.sendState(), this.intervalMs);
-    }
-  }
-
-  private connect() {
-    if (this.ws || this.stopped) return;
-
-    this.ws = new WebSocket(this.url);
-
-    this.ws.onopen = () => {
-      this.connected = true;
-      this.failCount = 0;
-      this.game.events.emit("ws-status", true);
-      console.log("[sync] connected to server");
-    };
-
-    this.ws.onmessage = (ev) => {
+  connect(url: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let ws: WebSocket;
       try {
-        const res: ServerResponse = JSON.parse(ev.data);
-        if (!res.ok) {
-          console.warn(`[sync] server violation: ${res.message}`);
-          if (res.rollback) {
-            this.applyRollback(GameState.fromJSON(res.rollback));
-          }
-        }
-      } catch {
-        console.warn("[sync] bad server message", ev.data);
+        ws = new WebSocket(url);
+      } catch (err) {
+        reject(err);
+        return;
       }
-    };
+      this.ws = ws;
 
-    this.ws.onclose = () => {
-      this.connected = false;
-      this.ws = null;
-      if (this.stopped) return;
-      this.failCount++;
-      this.game.events.emit("ws-status", false, this.failCount);
-      console.log("[sync] disconnected, retrying in 3s");
-      setTimeout(() => this.connect(), 3000);
-    };
+      ws.onopen = () => {
+        this.connected = true;
+        // Flush any messages that were queued while we were still connecting.
+        if (this.queued.length > 0) {
+          for (const msg of this.queued) {
+            ws.send(msg);
+          }
+          this.queued = [];
+        }
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      };
 
-    this.ws.onerror = () => {
-      this.ws?.close();
-    };
+      ws.onerror = (ev) => {
+        if (!settled) {
+          settled = true;
+          reject(ev);
+        }
+      };
+
+      ws.onmessage = (ev: MessageEvent) => {
+        this.onMessage(typeof ev.data === "string" ? ev.data : String(ev.data));
+      };
+
+      ws.onclose = () => {
+        this.connected = false;
+        const err = { code: "disconnected", message: "ws closed" };
+        this.state.lastError = err;
+        this.state.emit("error", err);
+      };
+    });
   }
 
-  private applyRollback(rb: GameState) {
-    console.warn(
-      `[sync] rolling back to pos=(${rb.x}, ${rb.y}) room=${rb.currentRoom} enemies=${rb.enemies?.length ?? 0}`,
-    );
-    rb.applyToGame(this.game);
+  close(): void {
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch {
+        // ignore
+      }
+    }
+    this.ws = undefined;
+    this.connected = false;
+    this.queued = [];
   }
 
-  sendStateNow() {
-    this.sendState();
+  isConnected(): boolean {
+    return this.connected && this.ws?.readyState === WebSocket.OPEN;
   }
 
-  private sendState() {
-    if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+  sendAuth(playerId: string): void {
+    this.send(C2SType.AUTH, { player_id: playerId });
+  }
 
-    if (!this.game.player) return;
-    const state = GameState.fromGame(this.game);
-    this.ws.send(JSON.stringify(state.toJSON()));
+  sendStartRun(startTime?: number): void {
+    this.send(C2SType.START_RUN, { start_time: startTime ?? Date.now() });
+  }
+
+  sendInput(dx: number, dy: number): void {
+    this.send(C2SType.INPUT, { dx, dy });
+  }
+
+  sendShoot(aimAngle: number): void {
+    this.send(C2SType.SHOOT, { aim_angle: aimAngle });
+  }
+
+  sendSwitchWeapon(weaponId: number): void {
+    this.send(C2SType.SWITCH_WEAPON, { weapon_id: weaponId });
+  }
+
+  sendInteract(targetId: number): void {
+    this.send(C2SType.INTERACT, { target_id: targetId });
+  }
+
+  sendEnterDoor(doorId: number): void {
+    this.send(C2SType.ENTER_DOOR, { door_id: doorId });
+  }
+
+  sendUseItem(itemName: string): void {
+    this.send(C2SType.USE_ITEM, { item_name: itemName });
+  }
+
+  private send<T extends C2SType>(type: T, data: C2SDataFor<T>): void {
+    const envelope: C2SEnvelope<T> = {
+      type,
+      seq: ++this.seq,
+      ts: Date.now(),
+      data,
+    };
+    const payload = JSON.stringify(envelope);
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(payload);
+    } else {
+      this.queued.push(payload);
+    }
+  }
+
+  private onMessage(raw: string): void {
+    let env: S2CEnvelope;
+    try {
+      env = JSON.parse(raw) as S2CEnvelope;
+    } catch {
+      // Malformed frame — drop it. The server is authoritative; we just
+      // wait for the next well-formed snapshot.
+      return;
+    }
+    this.state.apply(env);
   }
 }

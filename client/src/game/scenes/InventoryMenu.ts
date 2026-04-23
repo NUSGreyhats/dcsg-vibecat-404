@@ -1,121 +1,167 @@
-import { Scene } from "phaser";
-import { ALL_WEAPON_IDS, getWeaponStats } from "../weapons";
-import type { Game } from "./Game";
+import Phaser from "phaser";
+import { getSync } from "../net/runContext";
 
-const CX = 640;
-const CY = 384;
+/**
+ * Modal inventory overlay. Pauses the Game scene while active.
+ *
+ * - Arrow keys: move selection.
+ * - Enter: use the selected item (sendUseItem), then close.
+ * - Esc / I: cancel, close.
+ */
+export class InventoryMenu extends Phaser.Scene {
+  private panel?: Phaser.GameObjects.Rectangle;
+  private title?: Phaser.GameObjects.Text;
+  private hint?: Phaser.GameObjects.Text;
+  private emptyText?: Phaser.GameObjects.Text;
+  private itemTexts: Phaser.GameObjects.Text[] = [];
+  private items: string[] = [];
+  private selected = 0;
+  private keys?: {
+    up: Phaser.Input.Keyboard.Key;
+    down: Phaser.Input.Keyboard.Key;
+    enter: Phaser.Input.Keyboard.Key;
+    esc: Phaser.Input.Keyboard.Key;
+    i: Phaser.Input.Keyboard.Key;
+  };
 
-export class InventoryMenu extends Scene {
   constructor() {
-    super("InventoryMenu");
+    super({ key: "InventoryMenu" });
   }
 
-  create() {
-    this.add.rectangle(CX, CY, 1280, 768, 0x000000, 0.78);
+  create(): void {
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2;
 
     this.add
-      .rectangle(CX, CY, 520, 440, 0x161b26, 0.96)
-      .setStrokeStyle(2, 0x5a8fc4);
+      .rectangle(cx, cy, this.scale.width, this.scale.height, 0x000000, 0.55)
+      .setDepth(1000);
 
-    this.add
-      .text(CX, CY - 220, "WEAPONS", {
-        fontFamily: "Arial Black",
-        fontSize: "36px",
-        color: "#e8f0ff",
-        stroke: "#000000",
-        strokeThickness: 4,
-      })
-      .setOrigin(0.5);
+    this.panel = this.add
+      .rectangle(cx, cy, 480, 360, 0x111111, 0.95)
+      .setStrokeStyle(2, 0xffffff)
+      .setDepth(1001);
 
-    this.add
-      .text(CX, CY - 170, "Click a weapon to equip    ·    I, Tab, or ESC to close", {
-        fontFamily: "Arial",
-        fontSize: "15px",
-        color: "#8899aa",
-      })
-      .setOrigin(0.5);
-
-    const game = this.scene.get("Game") as Game;
-    const player = game.player;
-
-    let y = CY - 120;
-    for (const id of ALL_WEAPON_IDS) {
-      const def = getWeaponStats(id);
-      const owned = player.ownsWeapon(id);
-      const equipped = player.equippedWeaponId === id;
-
-      let line = def.displayName;
-      if (equipped) line += "   [Equipped]";
-      if (!owned) line += "   (Locked)";
-
-      const baseColor = !owned ? "#555566" : equipped ? "#7dffb3" : "#f0f4ff";
-
-      const row = this.add
-        .text(CX, y, line, {
-          fontFamily: "Arial",
-          fontSize: "22px",
-          color: baseColor,
-          stroke: "#000000",
-          strokeThickness: 3,
-        })
-        .setOrigin(0.5);
-
-      if (owned) {
-        row
-          .setInteractive({ useHandCursor: true })
-          .on("pointerover", () => {
-            if (!equipped) row.setColor("#ffdd66");
-          })
-          .on("pointerout", () => row.setColor(baseColor))
-          .on("pointerdown", () => {
-            game.playerEquipWeapon(id);
-            this.closeInventory();
-          });
-      }
-
-      y += 48;
-    }
-
-    const resume = this.add
-      .text(CX, CY + 130, "Resume", {
-        fontFamily: "Arial",
-        fontSize: "22px",
-        color: "#88bbff",
-        stroke: "#000000",
-        strokeThickness: 2,
+    this.title = this.add
+      .text(cx, cy - 150, "Inventory", {
+        fontFamily: "monospace",
+        fontSize: "28px",
+        color: "#ffcc33",
       })
       .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true });
+      .setDepth(1002);
 
-    resume.on("pointerover", () => resume.setColor("#ffffff"));
-    resume.on("pointerout", () => resume.setColor("#88bbff"));
-    resume.on("pointerdown", () => this.closeInventory());
+    this.hint = this.add
+      .text(
+        cx,
+        cy + 150,
+        "[Up/Down] select   [Enter] use   [Esc/I] close",
+        {
+          fontFamily: "monospace",
+          fontSize: "14px",
+          color: "#aaaaaa",
+        },
+      )
+      .setOrigin(0.5)
+      .setDepth(1002);
+
+    this.items = getSync().state.player?.inventory?.slice() ?? [];
+
+    if (this.items.length === 0) {
+      this.emptyText = this.add
+        .text(cx, cy, "(empty)", {
+          fontFamily: "monospace",
+          fontSize: "18px",
+          color: "#888888",
+        })
+        .setOrigin(0.5)
+        .setDepth(1002);
+    } else {
+      this.renderItems(cx, cy);
+    }
 
     const kb = this.input.keyboard!;
-    const K = Phaser.Input.Keyboard.KeyCodes;
-    const keyI = kb.addKey(K.I);
-    const keyTab = kb.addKey(K.TAB);
-    const keyEsc = kb.addKey(K.ESC);
+    this.keys = {
+      up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+      down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
+      enter: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER),
+      esc: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
+      i: kb.addKey(Phaser.Input.Keyboard.KeyCodes.I),
+    };
 
-    const onCloseKey = () => this.closeInventory();
-    keyI.on("down", onCloseKey);
-    keyTab.on("down", onCloseKey);
-    keyEsc.on("down", onCloseKey);
+    this.keys.up.on("down", () => this.move(-1));
+    this.keys.down.on("down", () => this.move(1));
+    this.keys.enter.on("down", () => this.useSelected());
+    this.keys.esc.on("down", () => this.close());
+    this.keys.i.on("down", () => this.close());
 
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      keyI.removeAllListeners();
-      keyTab.removeAllListeners();
-      keyEsc.removeAllListeners();
-      const g = this.scene.manager.getScene("Game") as Game | undefined;
-      if (g) {
-        g.inventoryOpen = false;
-        g.input.keyboard!.enabled = true;
-      }
-    });
+    this.events.on("shutdown", this.cleanup, this);
   }
 
-  private closeInventory() {
+  private renderItems(cx: number, cy: number): void {
+    for (const t of this.itemTexts) t.destroy();
+    this.itemTexts = [];
+
+    const startY = cy - 70;
+    for (let i = 0; i < this.items.length; i++) {
+      const isSel = i === this.selected;
+      const prefix = isSel ? "> " : "  ";
+      const txt = this.add
+        .text(cx, startY + i * 28, `${prefix}${this.items[i]}`, {
+          fontFamily: "monospace",
+          fontSize: "20px",
+          color: isSel ? "#ffcc33" : "#ffffff",
+        })
+        .setOrigin(0.5)
+        .setDepth(1002);
+      this.itemTexts.push(txt);
+    }
+  }
+
+  private move(delta: number): void {
+    if (this.items.length === 0) return;
+    this.selected =
+      (this.selected + delta + this.items.length) % this.items.length;
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2;
+    this.renderItems(cx, cy);
+  }
+
+  private useSelected(): void {
+    if (this.items.length === 0) {
+      this.close();
+      return;
+    }
+    const name = this.items[this.selected];
+    getSync().sendUseItem(name);
+    this.close();
+  }
+
+  private close(): void {
     this.scene.resume("Game");
     this.scene.stop();
   }
+
+  private cleanup(): void {
+    for (const t of this.itemTexts) t.destroy();
+    this.itemTexts = [];
+    this.panel?.destroy();
+    this.title?.destroy();
+    this.hint?.destroy();
+    this.emptyText?.destroy();
+    this.panel = undefined;
+    this.title = undefined;
+    this.hint = undefined;
+    this.emptyText = undefined;
+
+    if (this.keys) {
+      this.keys.up.removeAllListeners();
+      this.keys.down.removeAllListeners();
+      this.keys.enter.removeAllListeners();
+      this.keys.esc.removeAllListeners();
+      this.keys.i.removeAllListeners();
+      this.keys = undefined;
+    }
+  }
 }
+
+export default InventoryMenu;

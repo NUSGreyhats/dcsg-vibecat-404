@@ -1,111 +1,142 @@
-import type { Game } from "../scenes/Game";
-import { type WeaponId, getWeaponStats } from "../weapons";
+import Phaser from "phaser";
+import {
+  S2CType,
+  type S2CEnvelope,
+  type RoomData,
+  type PlayerSnapshot,
+  type EntitySnapshot,
+  type ProjSnapshot,
+  type SplitData,
+  type LeaderboardEntry,
+} from "../../net/packet";
 
-export interface EnemyStateData {
-  id: number;
-  x: number;
-  y: number;
-  hp: number;
-  type: string;
-}
+export type GameStateError = { code: string; message: string };
 
-export interface GameStateJSON {
-  x: number;
-  y: number;
-  health: number;
-  currentRoom: number;
-  kills: number;
-  coins: number;
-  ownedWeapons: string[];
-  equippedWeapon: string;
-  playerName: string;
-  enemies: EnemyStateData[];
-  timestamp: number;
-}
+export class GameState extends Phaser.Events.EventEmitter {
+  displayName?: string;
+  seed?: number;
+  runStarted = false;
+  runFinished = false;
+  elapsedMs = 0;
+  currentRoom?: number;
+  roomData?: RoomData;
+  player?: PlayerSnapshot;
+  entities: EntitySnapshot[] = [];
+  projectiles: ProjSnapshot[] = [];
+  unlockedDoors = new Set<number>();
+  deadEntities = new Set<number>();
+  totalMs?: number;
+  rank?: number;
+  splits: SplitData[] = [];
+  leaderboard: LeaderboardEntry[] = [];
+  lastError?: GameStateError;
 
-export class GameState {
-  x: number;
-  y: number;
-  health: number;
-  currentRoom: number;
-  kills: number;
-  coins: number;
-  ownedWeapons: string[];
-  equippedWeapon: string;
-  playerName: string;
-  enemies: EnemyStateData[];
-  timestamp: number;
-
-  constructor(data: GameStateJSON) {
-    this.x = data.x;
-    this.y = data.y;
-    this.health = data.health;
-    this.currentRoom = data.currentRoom;
-    this.kills = data.kills;
-    this.coins = data.coins;
-    this.ownedWeapons = [...data.ownedWeapons];
-    this.equippedWeapon = data.equippedWeapon;
-    this.playerName = data.playerName;
-    this.enemies = [...data.enemies];
-    this.timestamp = data.timestamp;
+  constructor() {
+    super();
   }
 
-  static fromGame(game: Game): GameState {
-    const p = game.player;
-    return new GameState({
-      x: Math.round(p.x * 100) / 100,
-      y: Math.round(p.y * 100) / 100,
-      health: p.health,
-      currentRoom: p.progress.currentRoom,
-      kills: game.getKillCount(),
-      coins: p.coins,
-      ownedWeapons: [...p.ownedWeaponIds],
-      equippedWeapon: p.equippedWeaponId,
-      playerName: game.playerName,
-      enemies: game.getEnemyStates(),
-      timestamp: Date.now(),
-    });
-  }
-
-  static fromJSON(data: GameStateJSON): GameState {
-    return new GameState(data);
-  }
-
-  toJSON(): GameStateJSON {
-    return {
-      x: this.x,
-      y: this.y,
-      health: this.health,
-      currentRoom: this.currentRoom,
-      kills: this.kills,
-      coins: this.coins,
-      ownedWeapons: [...this.ownedWeapons],
-      equippedWeapon: this.equippedWeapon,
-      playerName: this.playerName,
-      enemies: [...this.enemies],
-      timestamp: this.timestamp,
-    };
-  }
-
-  applyToGame(game: Game) {
-    if (!game.player?.active) return;
-
-    game.applyRollbackState(this.currentRoom, this.kills, this.enemies);
-
-    const p = game.player;
-    p.setPosition(this.x, this.y);
-    p.setVelocity(0, 0);
-    p.health = this.health;
-    p.coins = this.coins;
-    p.ownedWeaponIds = this.ownedWeapons as WeaponId[];
-    p.equippedWeaponId = this.equippedWeapon as WeaponId;
-    game.playerName = this.playerName || game.playerName;
-
-    game.events.emit(
-      "weapon-changed",
-      getWeaponStats(p.equippedWeaponId).displayName,
-    );
-    game.events.emit("player-health-changed", p.health, p.maxHealth);
-    game.events.emit("coin-count-changed", p.coins);
+  /**
+   * Apply a server envelope. Mutates state and emits the appropriate event.
+   */
+  apply(envelope: S2CEnvelope): void {
+    switch (envelope.type) {
+      case S2CType.AUTH_OK: {
+        const data = envelope.data as { display_name: string };
+        this.displayName = data.display_name;
+        this.emit("authOk", data.display_name);
+        break;
+      }
+      case S2CType.RUN_STARTED: {
+        const data = envelope.data as { seed: number; room: RoomData };
+        this.seed = data.seed;
+        this.roomData = data.room;
+        this.currentRoom = data.room.room_index;
+        this.runStarted = true;
+        this.runFinished = false;
+        this.elapsedMs = 0;
+        this.entities = [];
+        this.projectiles = [];
+        this.unlockedDoors = new Set<number>();
+        this.deadEntities = new Set<number>();
+        this.splits = [];
+        this.totalMs = undefined;
+        this.rank = undefined;
+        this.emit("runStarted", data.seed, data.room);
+        break;
+      }
+      case S2CType.STATE: {
+        const data = envelope.data as {
+          elapsed_ms: number;
+          player: PlayerSnapshot;
+          entities: EntitySnapshot[];
+          projectiles: ProjSnapshot[];
+        };
+        this.elapsedMs = data.elapsed_ms;
+        this.player = data.player;
+        this.entities = data.entities;
+        this.projectiles = data.projectiles;
+        this.emit("state", data);
+        break;
+      }
+      case S2CType.ROOM_LOAD: {
+        const data = envelope.data as {
+          room_index: number;
+          room: RoomData;
+          split_ms: number;
+        };
+        this.currentRoom = data.room_index;
+        this.roomData = data.room;
+        this.entities = [];
+        this.projectiles = [];
+        this.unlockedDoors = new Set<number>();
+        this.deadEntities = new Set<number>();
+        this.emit("roomLoad", data.room_index, data.room, data.split_ms);
+        break;
+      }
+      case S2CType.DOOR_UNLOCKED: {
+        const data = envelope.data as { door_id: number };
+        this.unlockedDoors.add(data.door_id);
+        this.emit("doorUnlocked", data.door_id);
+        break;
+      }
+      case S2CType.ENTITY_DIED: {
+        const data = envelope.data as { entity_id: number };
+        this.deadEntities.add(data.entity_id);
+        this.emit("entityDied", data.entity_id);
+        break;
+      }
+      case S2CType.RUN_COMPLETE: {
+        const data = envelope.data as {
+          total_ms: number;
+          rank: number;
+          splits: SplitData[];
+          replay_id?: string;
+          seed?: number;
+        };
+        this.runFinished = true;
+        this.totalMs = data.total_ms;
+        this.rank = data.rank;
+        this.splits = data.splits;
+        this.emit("runComplete", data.total_ms, data.rank, data.splits);
+        break;
+      }
+      case S2CType.LEADERBOARD: {
+        const data = envelope.data as { entries: LeaderboardEntry[] };
+        this.leaderboard = data.entries;
+        this.emit("leaderboard", data.entries);
+        break;
+      }
+      case S2CType.ERROR: {
+        const data = envelope.data as { code: string; message: string };
+        this.lastError = { code: data.code, message: data.message };
+        this.emit("error", this.lastError);
+        break;
+      }
+      default: {
+        // Exhaustive: unknown envelope type. Swallow silently so a future
+        // server-side message doesn't crash the client.
+        break;
+      }
+    }
   }
 }
