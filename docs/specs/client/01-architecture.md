@@ -9,7 +9,7 @@ Defines the browser-side topology of the Phaser 3 client: the runtime bootstrap 
 ```mermaid
 graph TB
     subgraph "Browser tab"
-        HTML[index.html<br/>&lt;div id=\"game-container\"&gt;]
+        HTML["index.html<br/>&lt;div id='game-container'&gt;"]
         MAIN["src/main.ts<br/>startGame('game-container')"]
         PHASER["Phaser.Game instance<br/>1280 × 768, Scale.FIT"]
 
