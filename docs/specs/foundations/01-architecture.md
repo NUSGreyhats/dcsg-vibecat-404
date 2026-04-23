@@ -64,7 +64,7 @@ graph TB
 | Concern            | Game Server (Repo A)                                                                                             | Lobby Service (Repo B)                                                      |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | **Responsibility** | Game logic, WebSocket, leaderboard writes, replays                                                               | Queue FIFO, player identity, public webapp, admin tools, serves stripped game-server source |
-| **Concurrency**    | `MAX_CONCURRENT` env var. Unlimited in dev/test, `1` in prod                                                     | N/A — manages queue, doesn't run games                                            |
+| **Concurrency**    | `MAX_CONCURRENT` env var. Unlimited in dev/test, `4` in prod                                                     | N/A — manages queue, doesn't run games                                            |
 | **Database**       | `game.db` — leaderboard, completed runs, replay data                                                             | `lobby.db` — queue entries, identity. **Reads** `game.db` for leaderboard display |
 | **Auth**           | `AUTH_MODE=open` (dev/test): any connection. `AUTH_MODE=token` (prod): require valid hex player ID in `C2S_AUTH` | Issues hex player IDs, manages queue, provides admin panel                        |
 | **Repo**           | `defcon-dungeon/game-server`                                                                                     | `defcon-dungeon/lobby`                                                      |
@@ -76,7 +76,7 @@ graph TB
 graph LR
     subgraph "DEF CON LAN (10.0.0.x)"
         subgraph "Docker Compose"
-            GS["game-server :8080<br/>AUTH_MODE=token<br/>MAX_CONCURRENT=1"]
+            GS["game-server :8080<br/>AUTH_MODE=token<br/>MAX_CONCURRENT=4"]
             QA["lobby :3000"]
             VOL["/data/ shared volume"]
 
@@ -86,13 +86,14 @@ graph LR
             QA -->|writes| AL
             QA -->|reads| GDB
             GDB & QDB & AL --- VOL
-            QA -->|"polls /internal/slot-status"| GS
+            QA -->|"polls /internal/slot-status<br/>+ /internal/live-games"| GS
         end
 
-        PLAYER["Players"] -->|"ws:// :8080"| GS
+        PLAYER["Players"] -->|"ws:// :8080/ws"| GS
         PLAYER -->|"http:// :3000"| QA
         PLAYER -->|"http:// :3000/source"| QA
-        SPECTATOR["Spectators"] -->|"http:// :3000/leaderboard"| QA
+        SPECTATOR["Spectators"] -->|"http:// :3000/leaderboard<br/>http:// :3000/spectate"| QA
+        SPECTATOR -->|"ws:// :8080/ws/spectate"| GS
     end
 
     style GS fill:#2ecc71,color:#fff
@@ -107,7 +108,7 @@ The **lobby** is the only publicly-addressable service — it terminates all bro
 | Component                | Public? | Where                                                        |
 | ------------------------ | ------- | ------------------------------------------------------------ |
 | Lobby `:3000`            | **Yes** | Public VPS in dev/test. DEF CON LAN in prod. TLS terminated at a reverse proxy (Caddy or nginx) in front of the Docker Compose stack — the container itself serves plain HTTP. |
-| Game server `:8080` (WS) | **Yes** | Same host as lobby. WebSocket, upgraded from the same domain. Reverse proxy routes `/ws` → `:8080`, everything else → `:3000`. |
+| Game server `:8080` (WS) | **Yes** | Same host as lobby. WebSocket, upgraded from the same domain. Reverse proxy routes `/ws` (player) and `/ws/spectate` (read-only spectator) → `:8080`; everything else → `:3000`. See [04-lobby.md#live-spectating](./04-lobby.md#live-spectating) and [02-protocol.md#spectator-protocol](./02-protocol.md#spectator-protocol). |
 | Game server `/internal/slot-status` | No | Bound to loopback or a Docker-internal network. Lobby polls it; never exposed externally. |
 | Admin panel (`/admin/*`) | **No, in practice** | Lives on the lobby, but gated by basic auth / IP allowlist (TBD — see [04-lobby.md](./04-lobby.md#admin-panel-auth-protected)). |
 
@@ -168,6 +169,7 @@ Current repo is **monolithic** (`server/` and `client/` in one directory, no sep
 - Lobby service: **not yet implemented** — greenfield.
 - `game.db`: TBD. Current leaderboard uses `winners.csv`.
 - `allowlist.json`: TBD.
+- Live spectating (`/ws/spectate`, `/api/live`, `/spectate` selector): **not yet implemented** — greenfield. See [04-lobby.md#live-spectating](./04-lobby.md#live-spectating) and [05-server-runtime.md#spectator-fan-out](./05-server-runtime.md#spectator-fan-out).
 
 ## Intentional bugs in this area
 

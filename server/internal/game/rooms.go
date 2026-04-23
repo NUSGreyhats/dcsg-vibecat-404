@@ -109,7 +109,7 @@ func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, now time.Time) p
 
 	enemyOut := make([]protocol.EnemySpawn, 0, len(ordered))
 	for _, def := range ordered {
-		e := SpawnEnemy(rng, def.EntityID, def.Type, def.X, def.Y, now)
+		e := SpawnEnemy(rng, r.RoomIndex, def.EntityID, def.Type, def.X, def.Y, now)
 		r.Enemies[def.EntityID] = e
 		enemyOut = append(enemyOut, protocol.EnemySpawn{
 			EntityID: e.EntityID,

@@ -48,7 +48,7 @@ graph TD
 
 No shared game state between players. The only cross-player touchpoint is `completedRunCh` → leaderboard.
 
-The **semaphore** (`chan struct{}` sized `MAX_CONCURRENT`) gates the accept loop — unlimited in dev/test, `1` in prod.
+The **semaphore** (`chan struct{}` sized `MAX_CONCURRENT`) gates the accept loop — unlimited in dev/test, `4` in prod.
 
 ## Channels & sizes
 
@@ -57,6 +57,8 @@ The **semaphore** (`chan struct{}` sized `MAX_CONCURRENT`) gates the accept loop
 | `inCh`            | connReader → gameLoop        | 64   |
 | `outCh`           | gameLoop → connWriter        | 64   |
 | `completedRunCh`  | gameLoop(s) → leaderboard    | 128  |
+| `registerCh`      | spectator accept → gameLoop  | 8    |
+| `summaryCh`       | gameLoop(s) → live-games aggregator | `MAX_CONCURRENT` |
 
 ## Game loop tick (20 Hz)
 
@@ -86,6 +88,97 @@ Each incoming C2S packet has a `ts` field (client wallclock ms). The game server
 - **Does NOT track cumulative drift** — i.e., there's no rate-of-progression check that compares the sum of `deltaTime` values against wallclock.
 
 This is the design choice that enables BUG-02.
+
+## Spectator fan-out
+
+Live spectating (see [04-lobby.md#live-spectating](./04-lobby.md#live-spectating)) is served by the game server as a read-only WebSocket. Spectators attach to a specific player's gameLoop and receive a subset of the same S2C stream; they never send anything and never occupy a player slot.
+
+### Goroutines and channels
+
+```mermaid
+graph TD
+    subgraph "Player 1's gameLoop"
+        GL1[gameLoop 20Hz]
+        REG1[spectatorRegistry<br/>[]*outCh]
+        GL1 -.->|reads list each send| REG1
+    end
+
+    SPEC_ACC[Spectator Accept Loop<br/>/ws/spectate]
+    SPEC1[Spectator 1 connWriter] -->|WS frames| CLIENT1[Viewer browser]
+    SPECN[Spectator N connWriter] -->|WS frames| CLIENTN[Viewer browser]
+
+    SPEC_ACC -->|"registerCh (buf 8)<br/>per-game"| GL1
+    GL1 -->|"outCh (buf 64)"| SPEC1
+    GL1 -->|"outCh (buf 64)"| SPECN
+
+    style GL1 fill:#2ecc71,color:#fff
+    style REG1 fill:#9b59b6,color:#fff
+    style SPEC_ACC fill:#e67e22,color:#fff
+```
+
+- **`spectatorRegistry`** is a slice of `*outCh` owned **exclusively by the gameLoop goroutine** — same ownership rule as player/room state. No mutex.
+- Spectators are registered/deregistered via a per-game **`registerCh` (buffered 8)** that the gameLoop drains alongside `inCh` on each tick.
+- Each spectator gets its own `connWriter` goroutine reading from its own `outCh` (buffered 64, same as player).
+- Fan-out is a synchronous **non-blocking send** from gameLoop to every registered spectator outCh:
+  ```go
+  // Inside gameLoop, after building the S2C packet
+  outCh <- pkt                 // player — blocks if full (correct; it's their slot)
+  for _, sp := range spectators {
+      select {
+      case sp.outCh <- pkt:    // fast path
+      default:                 // drop — spectator is lagging
+      }
+  }
+  ```
+  **Drop-on-full is required.** A slow spectator must never stall the gameLoop, or every other spectator (and the player) pays. Dropped frames are acceptable — next tick (50 ms later) delivers a complete state.
+
+### Accept path
+
+- Upgrade endpoint: `/ws/spectate?player_id=<hex>`. No `C2S_AUTH` handshake — `player_id` comes from the URL.
+- Accept-loop checks:
+  1. Global spectator count `< SPECTATOR_GLOBAL` (default 200).
+  2. Target player is actively playing (there is a gameLoop for `player_id`).
+  3. That player's spectator count `< SPECTATOR_PER_GAME` (default 50).
+- On pass: send a `registerCh` message to the target gameLoop with the new spectator's `outCh`; gameLoop appends to its registry and immediately enqueues a **catchup packet** (current `S2C_STATE` + last `S2C_ROOM_LOAD`) so the viewer renders without waiting for the next tick.
+- On fail: HTTP `503` with `Retry-After: 5`, WS upgrade refused.
+
+### Deregister / lifecycle
+
+- Spectator disconnect (WS close, read error, or idle timeout) → `connWriter` exits → deregister message on `registerCh` with a "remove" sentinel → gameLoop removes it from the registry on the next drain.
+- Player run ends (`S2C_RUN_COMPLETE` or fatal error) → gameLoop enqueues `S2C_RUN_COMPLETE` (or `S2C_ERROR`) to every spectator outCh, then closes each outCh after a 500 ms flush window. `connWriter` closes the WS when the outCh drains.
+
+### Internal endpoint
+
+- `GET /internal/live-games` → returns the list consumed by the lobby's selector cache. Loopback-only / shared-secret-gated (same surface as `/internal/slot-status`).
+  ```jsonc
+  [
+    {
+      "player_id": "a3f9…",
+      "display_name": "aluminum-fox",
+      "room_index": 3,
+      "elapsed_ms": 42718,
+      "spectator_count": 7,
+      "started_at": 1745000000000
+    }
+  ]
+  ```
+- Populated by a **registry aggregator goroutine**. Each gameLoop writes a per-tick summary onto a shared `summaryCh` (buffered `MAX_CONCURRENT`, non-blocking); the aggregator maintains a map keyed by `player_id` and serves `/internal/live-games` reads off it. No direct cross-goroutine reads into any gameLoop's state.
+
+### Caps and configuration
+
+| Env var                 | Default | Meaning                                   |
+| ----------------------- | ------- | ----------------------------------------- |
+| `SPECTATOR_PER_GAME`    | 50      | Max spectators attached to any one gameLoop. |
+| `SPECTATOR_GLOBAL`      | 200     | Max spectators across the whole server.   |
+| `SPECTATOR_CATCHUP_MS`  | 500     | Grace window on run end; spectators receive a final `S2C_RUN_COMPLETE` within this window, then are closed. |
+
+Reverse-proxy-level connect-rate limiting is the lobby's concern, not the game server's — see [04-lobby.md#caps-and-abuse-resistance](./04-lobby.md#caps-and-abuse-resistance).
+
+### Interaction with intentional bugs
+
+Spectators receive the raw `S2C_STATE` stream, so they **see every intentional-bug artifact as it happens**: kill-log garbage (BUG-11), room-settle shots landing pre-visual-move (BUG-06), time-warp nudges (BUG-09). This is intentional — the show is the point. No bug's exploit path is altered by the presence of spectators, because spectators are a pure sink (no inputs enter the drain phase from them).
+
+Drop-on-full for spectators also means that a viewer's locally-reconstructed state may briefly diverge from the server's — a lost `S2C_ENTITY_DIED` is not re-sent, but the next `S2C_STATE` (50 ms later) carries the current entity list and resyncs the client. Viewers are not replay-grade; they're good-enough-for-watching.
 
 ## Post-door settle window
 
@@ -125,7 +218,7 @@ This is the design choice that enables BUG-11.
 - Accept loop in `cmd/server/main.go` performs `ws.Upgrade`, then `sem <- struct{}{}` to claim a slot; on disconnect releases.
 - Per-connection wiring: `go connReader(conn, inCh)` / `go connWriter(conn, outCh)` / `go gameLoop(inCh, outCh, completedRunCh)`.
 - Ticker: `time.NewTicker(50 * time.Millisecond)` in `gameLoop`.
-- `MAX_CONCURRENT` read from env at startup; default 1 in prod, unlimited (e.g. 64) in dev/test.
+- `MAX_CONCURRENT` read from env at startup; default 4 in prod, unlimited (e.g. 64) in dev/test.
 
 ## Implementation status
 
