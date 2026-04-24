@@ -5,7 +5,6 @@ import {
   ACCENT_PRIMARY,
   BUTTON_HOVER_COLOR,
   BUTTON_IDLE_COLOR,
-  BUTTON_TEXT_STYLE,
   DEEP_NAVY,
   DEPTH_SPLASH,
   ERROR,
@@ -54,7 +53,7 @@ export class MainMenu extends Phaser.Scene {
   private usernameInput?: HTMLInputElement;
   private passwordInput?: HTMLInputElement;
   private statusText?: Phaser.GameObjects.Text;
-  private startButton?: Phaser.GameObjects.Text;
+  private startButton?: HTMLButtonElement;
   private connected = false;
   private submitting = false;
   private resizeHandlers: Array<() => void> = [];
@@ -156,20 +155,7 @@ export class MainMenu extends Phaser.Scene {
       },
     );
 
-    this.startButton = this.add
-      .text(contentX, panelY + 78, "[ Log In ]", {
-        ...BUTTON_TEXT_STYLE,
-        fontSize: FONT_SIZE_SMALL,
-      })
-      .setOrigin(0, 0)
-      .setInteractive({ useHandCursor: true });
-    this.startButton.on("pointerover", () =>
-      this.startButton?.setColor(BUTTON_HOVER_COLOR),
-    );
-    this.startButton.on("pointerout", () =>
-      this.startButton?.setColor(BUTTON_IDLE_COLOR),
-    );
-    this.startButton.on("pointerdown", () => this.onStart());
+    this.startButton = this.mountButton(contentX, panelY + 78, "[ Log In ]");
 
     this.statusText = this.add.text(contentX, panelY + 120, "Connecting...", {
       fontFamily: FONT_FAMILY,
@@ -413,6 +399,66 @@ export class MainMenu extends Phaser.Scene {
     return input;
   }
 
+  /**
+   * Mount a DOM <button> overlaid on the Phaser canvas at the given scene
+   * coords. Uses a real `<button>` so it joins the natural Tab order after
+   * the password input and activates on Enter without extra wiring.
+   */
+  private mountButton(
+    sceneX: number,
+    sceneY: number,
+    label: string,
+  ): HTMLButtonElement {
+    const canvas = this.game.canvas;
+    const parent = canvas.parentElement ?? document.body;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = label;
+    Object.assign(btn.style, {
+      position: "absolute",
+      zIndex: "20",
+      fontFamily: "monospace",
+      fontSize: "16px",
+      padding: "0",
+      border: "none",
+      background: "transparent",
+      color: BUTTON_IDLE_COLOR,
+      cursor: "pointer",
+      outline: "none",
+    } as Partial<CSSStyleDeclaration>);
+
+    const setHover = (on: boolean) => {
+      btn.style.color = on ? BUTTON_HOVER_COLOR : BUTTON_IDLE_COLOR;
+    };
+    btn.addEventListener("focus", () => setHover(true));
+    btn.addEventListener("blur", () => setHover(false));
+    btn.addEventListener("mouseenter", () => setHover(true));
+    btn.addEventListener("mouseleave", () => {
+      // Keep the hover colour while focused so keyboard users still see
+      // the affordance after the mouse leaves.
+      if (document.activeElement !== btn) setHover(false);
+    });
+    btn.addEventListener("click", () => this.onStart());
+
+    if (!parent.style.position) parent.style.position = "relative";
+    parent.appendChild(btn);
+
+    const place = () => {
+      const rect = canvas.getBoundingClientRect();
+      const parentRect = parent.getBoundingClientRect();
+      const scaleX = rect.width / this.scale.width;
+      btn.style.left = `${rect.left - parentRect.left + sceneX * scaleX}px`;
+      btn.style.top = `${rect.top - parentRect.top + sceneY * scaleX}px`;
+      btn.style.fontSize = `${16 * scaleX}px`;
+    };
+    place();
+    window.addEventListener("resize", place);
+    this.scale.on("resize", place);
+    this.resizeHandlers.push(place);
+
+    return btn;
+  }
+
   private async onStart(): Promise<void> {
     if (this.submitting) return;
     if (!this.connected) {
@@ -495,6 +541,8 @@ export class MainMenu extends Phaser.Scene {
     this.usernameInput = undefined;
     this.passwordInput?.remove();
     this.passwordInput = undefined;
+    this.startButton?.remove();
+    this.startButton = undefined;
   }
 }
 
