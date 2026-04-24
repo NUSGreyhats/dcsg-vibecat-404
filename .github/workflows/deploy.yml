@@ -1,9 +1,6 @@
 name: Deploy to DigitalOcean
 
 on:
-  push:
-    branches:
-      - '**'
   workflow_dispatch:
     inputs:
       ref:
