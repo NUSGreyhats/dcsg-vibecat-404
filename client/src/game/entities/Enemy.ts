@@ -9,6 +9,7 @@ const HP_BAR_WIDTH = 28;
 const HP_BAR_HEIGHT = 3;
 const HP_BAR_OFFSET_Y = -24;
 const IDLE_EPSILON = 0.4;
+const KAMIKAZE_BLAST_COLORS = [0xfff1a8, 0xff9a3c, 0xe33b2f] as const;
 
 const ENEMY_TYPE = {
   GRUNT: 1,
@@ -139,6 +140,10 @@ export class Enemy extends Phaser.GameObjects.Container {
     if (this.dying) return;
     this.dying = true;
 
+    if (this.enemyType === ENEMY_TYPE.KAMIKAZE) {
+      this.spawnKamikazeExplosion();
+    }
+
     const target = this.sprite;
     if (target instanceof Phaser.GameObjects.Sprite) {
       target.setTintFill(0xffffff);
@@ -157,6 +162,54 @@ export class Enemy extends Phaser.GameObjects.Container {
         this.destroy();
       },
     });
+  }
+
+  private spawnKamikazeExplosion(): void {
+    const scene = this.scene;
+    const x = this.x;
+    const y = this.y;
+
+    const flash = scene.add.circle(x, y, 7, 0xffffff, 0.95);
+    flash.setBlendMode(Phaser.BlendModes.ADD);
+    scene.tweens.add({
+      targets: flash,
+      alpha: 0,
+      scaleX: 2.3,
+      scaleY: 2.3,
+      duration: 120,
+      ease: "Cubic.easeOut",
+      onComplete: () => flash.destroy(),
+    });
+
+    for (let i = 0; i < KAMIKAZE_BLAST_COLORS.length; i++) {
+      const ring = scene.add.circle(x, y, 8 + i * 3, 0xffffff, 0);
+      ring.setStrokeStyle(3 - i * 0.5, KAMIKAZE_BLAST_COLORS[i], 0.9);
+      ring.setBlendMode(Phaser.BlendModes.ADD);
+      scene.tweens.add({
+        targets: ring,
+        alpha: 0,
+        scaleX: 2.1 + i * 0.35,
+        scaleY: 2.1 + i * 0.35,
+        duration: 180 + i * 45,
+        ease: "Cubic.easeOut",
+        onComplete: () => ring.destroy(),
+      });
+    }
+
+    for (let i = 0; i < 8; i++) {
+      const angle = (Math.PI * 2 * i) / 8;
+      const ember = scene.add.circle(x, y, 2, 0xffb347, 0.95);
+      ember.setBlendMode(Phaser.BlendModes.ADD);
+      scene.tweens.add({
+        targets: ember,
+        x: x + Math.cos(angle) * 22,
+        y: y + Math.sin(angle) * 22,
+        alpha: 0,
+        duration: 220,
+        ease: "Quad.easeOut",
+        onComplete: () => ember.destroy(),
+      });
+    }
   }
 
   private playAnim(kind: "idle" | "walk"): void {
