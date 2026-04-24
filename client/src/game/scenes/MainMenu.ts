@@ -35,9 +35,24 @@ interface SponsorSpec {
 }
 
 const SPONSORS: ReadonlyArray<SponsorSpec> = [
-  { label: "NUS\nGreyhats", placeholder: "N", url: "https://nusgreyhats.org/" },
-  { label: "OtterSec", placeholder: "◉", url: "https://osec.io/" },
-  { label: "HTX", placeholder: "×", url: "https://www.htx.gov.sg/" },
+  {
+    label: "NUS\nGreyhats",
+    placeholder: "N",
+    url: "https://nusgreyhats.org/",
+    imageKey: "logo_greyhats",
+  },
+  {
+    label: "OtterSec",
+    placeholder: "◉",
+    url: "https://osec.io/",
+    imageKey: "logo_ottersec",
+  },
+  {
+    label: "HTX",
+    placeholder: "×",
+    url: "https://www.htx.gov.sg/",
+    imageKey: "logo_htx",
+  },
 ];
 
 /**
@@ -70,11 +85,11 @@ export class MainMenu extends Phaser.Scene {
   private static readonly LABEL_GAP = 8;
   private static readonly ROW_INPUT_WIDTH =
     MainMenu.INPUT_WIDTH - MainMenu.LABEL_COLUMN_WIDTH - MainMenu.LABEL_GAP;
-  private static readonly SPONSOR_PANEL_HEIGHT = 120;
+  private static readonly SPONSOR_PANEL_HEIGHT = 140;
   private static readonly SPONSOR_PANEL_GAP = 12;
-  private static readonly SPONSOR_CARD_HEIGHT = 72;
+  private static readonly SPONSOR_CARD_HEIGHT = 92;
   private static readonly SPONSOR_CARD_GAP = 10;
-  private static readonly SPONSOR_ICON_SIZE = 28;
+  private static readonly SPONSOR_ICON_SIZE = 52;
 
   constructor() {
     super({ key: "MainMenu" });

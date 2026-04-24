@@ -226,9 +226,9 @@ func (e *Engine) stepTick(now time.Time) {
 
 	e.drainInput(now)
 	e.advancePlayer(dt)
-	e.advanceEnemies(dt, now)
+	deaths := e.advanceEnemies(dt, now)
 	hits := AdvanceProjectiles(e.room, dt, now)
-	deaths := ResolveCollisions(e.room, hits, now)
+	deaths = append(deaths, ResolveCollisions(e.room, hits, now)...)
 	for _, id := range deaths {
 		go ProcessEnemyDeathAsync(e.room, id)
 		e.send(protocol.S2CEntityDied, protocol.EntityDiedData{EntityID: id})
@@ -428,8 +428,9 @@ func (e *Engine) advancePlayer(dt float32) {
 	}
 }
 
-func (e *Engine) advanceEnemies(dt float32, now time.Time) {
-	for _, en := range e.room.Enemies {
+func (e *Engine) advanceEnemies(dt float32, now time.Time) []uint32 {
+	var deaths []uint32
+	for id, en := range e.room.Enemies {
 		if UpdateEnemy(en, e.player, e.run.CurrentRoom, dt, now) {
 			// Enemy landed an attack: tiny damage. Shield halves it.
 			dmg := int16(5)
@@ -439,12 +440,15 @@ func (e *Engine) advanceEnemies(dt float32, now time.Time) {
 			e.player.HP -= dmg
 			e.player.DamageTaken += int32(dmg)
 			if en.Type == EnemyKamikaze {
-				// Kamikaze self-destructs.
+				// Kamikaze self-destructs on contact — queue for death emission
+				// so S2CEntityDied is sent and the client removes it.
 				en.AIState = AIDead
 				en.HP = 0
+				deaths = append(deaths, id)
 			}
 		}
 	}
+	return deaths
 }
 
 func (e *Engine) updateElapsed(now time.Time) {

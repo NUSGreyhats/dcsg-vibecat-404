@@ -138,6 +138,11 @@ export class Preloader extends Phaser.Scene {
     // -- Splash --
     this.load.image("title", "assets/title.png");
 
+    // -- Sponsor logos --
+    this.load.image("logo_greyhats", "assets/greyhats_logo.png");
+    this.load.image("logo_ottersec", "assets/ottersec_logo.png");
+    this.load.image("logo_htx", "assets/htx_logo.png");
+
     // -- Tileset (shared by all room tilemaps) --
     this.load.image("tilemap", "assets/tilemap.png");
 
