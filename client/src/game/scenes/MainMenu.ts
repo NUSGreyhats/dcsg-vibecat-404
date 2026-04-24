@@ -11,7 +11,6 @@ import {
   FONT_FAMILY,
   FONT_SIZE_BODY,
   FONT_SIZE_CAPTION,
-  FONT_SIZE_MICRO,
   FONT_SIZE_SMALL,
   MID_BLUE,
   MIDNIGHT,
@@ -23,35 +22,35 @@ import {
 } from "../ui/tokens";
 
 /**
- * Sponsor placeholders. Drop a key here once a logo asset is registered in
- * `Preloader.preload()` — the scene will render the image instead of the
- * `placeholder` glyph.
+ * Sponsor row. `imageSrc` is the asset URL for the HTML <img> overlay
+ * the scene mounts over the card; falls back to the `placeholder` glyph
+ * when absent.
  */
 interface SponsorSpec {
-  readonly label: string; // two lines allowed via "\n"
+  readonly label: string;
   readonly placeholder: string;
   readonly url: string;
-  readonly imageKey?: string;
+  readonly imageSrc?: string;
 }
 
 const SPONSORS: ReadonlyArray<SponsorSpec> = [
   {
-    label: "NUS\nGreyhats",
-    placeholder: "N",
-    url: "https://nusgreyhats.org/",
-    imageKey: "logo_greyhats",
+    label: "HTX",
+    placeholder: "×",
+    url: "https://www.htx.gov.sg/",
+    imageSrc: "assets/htx_logo.png",
   },
   {
     label: "OtterSec",
     placeholder: "◉",
     url: "https://osec.io/",
-    imageKey: "logo_ottersec",
+    imageSrc: "assets/ottersec_logo.png",
   },
   {
-    label: "HTX",
-    placeholder: "×",
-    url: "https://www.htx.gov.sg/",
-    imageKey: "logo_htx",
+    label: "Niklaus",
+    placeholder: "N",
+    url: "",
+    imageSrc: "assets/niklas_logo.png",
   },
 ];
 
@@ -72,6 +71,7 @@ export class MainMenu extends Phaser.Scene {
   private connected = false;
   private submitting = false;
   private resizeHandlers: Array<() => void> = [];
+  private sponsorLogoEls: HTMLImageElement[] = [];
 
   private static readonly PANEL_WIDTH = 460;
   private static readonly PANEL_HEIGHT = 200;
@@ -89,7 +89,6 @@ export class MainMenu extends Phaser.Scene {
   private static readonly SPONSOR_PANEL_GAP = 12;
   private static readonly SPONSOR_CARD_HEIGHT = 92;
   private static readonly SPONSOR_CARD_GAP = 10;
-  private static readonly SPONSOR_ICON_SIZE = 52;
 
   constructor() {
     super({ key: "MainMenu" });
@@ -266,64 +265,81 @@ export class MainMenu extends Phaser.Scene {
     h: number,
     sponsor: SponsorSpec,
   ): void {
-    // Card border — no fill so the sponsors panel shows through.
-    const border = this.add
-      .rectangle(x, y, w, h)
-      .setStrokeStyle(1, MID_BLUE)
-      .setOrigin(0, 0);
-
-    // Hit area covers the whole card; clicking opens the sponsor URL in a
-    // new tab. Hover swaps the stroke to the accent colour for affordance.
-    border
-      .setInteractive({
-        hitArea: new Phaser.Geom.Rectangle(0, 0, w, h),
-        hitAreaCallback: Phaser.Geom.Rectangle.Contains,
-        useHandCursor: true,
-      })
-      .on("pointerover", () => border.setStrokeStyle(1, ACCENT_PRIMARY))
-      .on("pointerout", () => border.setStrokeStyle(1, MID_BLUE))
-      .on("pointerdown", () => {
-        window.open(sponsor.url, "_blank", "noopener,noreferrer");
-      });
-
-    // Icon tile: slightly darker than the panel, bordered the same colour
-    // as the card. Real sponsor logos replace the placeholder glyph.
-    const iconSize = MainMenu.SPONSOR_ICON_SIZE;
-    const iconX = x + w / 2 - iconSize / 2;
-    const iconY = y + 8;
+    // White card fill. Phaser-rendered raster logos look blocky when
+    // downscaled heavily (no mipmaps on NPOT textures), so the logo itself
+    // is an HTML <img> overlaid on the canvas — browsers do high-quality
+    // resampling natively. Mirrors the approach used for the login inputs.
     this.add
-      .rectangle(iconX, iconY, iconSize, iconSize, MIDNIGHT, 1)
+      .rectangle(x, y, w, h, 0xffffff, 1)
       .setStrokeStyle(1, MID_BLUE)
       .setOrigin(0, 0);
 
-    if (sponsor.imageKey && this.textures.exists(sponsor.imageKey)) {
-      const pad = 3;
-      this.add
-        .image(iconX + iconSize / 2, iconY + iconSize / 2, sponsor.imageKey)
-        .setDisplaySize(iconSize - pad * 2, iconSize - pad * 2);
+    if (sponsor.imageSrc) {
+      this.mountSponsorImage(x, y, w, h, sponsor);
     } else {
       this.add
-        .text(
-          iconX + iconSize / 2,
-          iconY + iconSize / 2,
-          sponsor.placeholder,
-          {
-            fontFamily: FONT_FAMILY,
-            fontSize: "14px",
-            color: hex(TEXT_PRIMARY),
-          },
-        )
+        .text(x + w / 2, y + h / 2, sponsor.placeholder, {
+          fontFamily: FONT_FAMILY,
+          fontSize: "24px",
+          color: hex(MIDNIGHT),
+        })
         .setOrigin(0.5);
     }
+  }
 
-    this.add
-      .text(x + w / 2, iconY + iconSize + 6, sponsor.label, {
-        fontFamily: FONT_FAMILY,
-        fontSize: FONT_SIZE_MICRO,
-        color: hex(TEXT_PRIMARY),
-        align: "center",
-      })
-      .setOrigin(0.5, 0);
+  /**
+   * Overlay an HTML <img> on the canvas over the given scene-space rect.
+   * Handles hover + click locally so we don't need a Phaser hit-area on
+   * the underlying rectangle. Re-positioned on resize so it tracks the
+   * panel the same way login inputs do.
+   */
+  private mountSponsorImage(
+    sceneX: number,
+    sceneY: number,
+    sceneW: number,
+    sceneH: number,
+    sponsor: SponsorSpec,
+  ): void {
+    const canvas = this.game.canvas;
+    const parent = canvas.parentElement ?? document.body;
+    const img = document.createElement("img");
+    img.src = sponsor.imageSrc!;
+    img.alt = sponsor.label;
+    img.draggable = false;
+    Object.assign(img.style, {
+      position: "absolute",
+      zIndex: "19",
+      objectFit: "contain",
+      padding: "4px",
+      boxSizing: "border-box",
+      cursor: sponsor.url ? "pointer" : "default",
+      userSelect: "none",
+      pointerEvents: "auto",
+    } as Partial<CSSStyleDeclaration>);
+
+    if (sponsor.url) {
+      img.addEventListener("click", () => {
+        window.open(sponsor.url, "_blank", "noopener,noreferrer");
+      });
+    }
+
+    if (!parent.style.position) parent.style.position = "relative";
+    parent.appendChild(img);
+    this.sponsorLogoEls.push(img);
+
+    const place = () => {
+      const rect = canvas.getBoundingClientRect();
+      const parentRect = parent.getBoundingClientRect();
+      const scaleX = rect.width / this.scale.width;
+      img.style.left = `${rect.left - parentRect.left + sceneX * scaleX}px`;
+      img.style.top = `${rect.top - parentRect.top + sceneY * scaleX}px`;
+      img.style.width = `${sceneW * scaleX}px`;
+      img.style.height = `${sceneH * scaleX}px`;
+    };
+    place();
+    window.addEventListener("resize", place);
+    this.scale.on("resize", place);
+    this.resizeHandlers.push(place);
   }
 
   private connect(): void {
@@ -558,6 +574,9 @@ export class MainMenu extends Phaser.Scene {
     this.passwordInput = undefined;
     this.startButton?.remove();
     this.startButton = undefined;
+
+    for (const el of this.sponsorLogoEls) el.remove();
+    this.sponsorLogoEls = [];
   }
 }
 

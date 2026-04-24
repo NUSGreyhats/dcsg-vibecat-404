@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { getSync } from "../net/runContext";
 import { PLAYER_MAX_HEALTH, ROOM_COUNT } from "../constants";
-import { ALL_WEAPON_IDS, WEAPON_STATS, type WeaponId } from "../weapons";
+import { WEAPON_STATS, weaponFromServerId, type WeaponId } from "../weapons";
 import { formatTime } from "../ui/formatters";
 import {
   ACCENT_PRIMARY,
@@ -201,8 +201,7 @@ export class GameHUD extends Phaser.Scene {
   private refreshWeapon(weaponId: number, ammo: number): void {
     if (!this.weaponText || !this.weaponIcon) return;
 
-    const idx = Phaser.Math.Clamp(weaponId, 0, ALL_WEAPON_IDS.length - 1);
-    const id: WeaponId = ALL_WEAPON_IDS[idx];
+    const id: WeaponId = weaponFromServerId(weaponId);
     const stats = WEAPON_STATS[id];
     const name = stats?.displayName ?? "—";
     this.weaponText.setText(`${name}  ${ammo}`);

@@ -166,7 +166,11 @@ This gives the viewer everything it needs to render from the first frame without
 
 ## Intentional bugs in this area
 
-### BUG-09 JSON Case-Insensitive Field Smuggling
+### BUG-09 JSON Case-Insensitive Field Smuggling — DISABLED
+
+**Status:** Disabled. The parser differential (P1 case-sensitive/first-wins vs P2 `encoding/json` case-insensitive/last-wins) is still present, but its payload target — the `DebugItems` fallback in `server/internal/game/items.go` — has been removed. A smuggled `item_name: "timewarp"` now dead-ends at `ValidateItemName` (not in `AllowedItems` → rejected). See [../bugs.md — currently disabled](../bugs.md#currently-disabled).
+
+**To reintroduce:** re-add the `DebugItems` map + fallback branch in `HandleUseItem`. See [../features/inventory-items.md](../features/inventory-items.md) for the dispatch shape to restore.
 
 **Source:** [Trail of Bits — Unexpected security footguns in Go's parsers](https://blog.trailofbits.com/2025/06/17/unexpected-security-footguns-in-gos-parsers/).
 
@@ -234,9 +238,9 @@ Client sends a `C2S_USE_ITEM` with duplicate `item_name` keys:
 - Audit log records the benign first `item_name`; leaderboard replay will mismatch if the log is cross-referenced with the effective game state.
 - Do NOT add a "duplicate key check" in `encoding/json` — that kills the bug.
 
-**Synergies:**
+**Synergies (when active):**
 - `timewarp` (−5 s) stacks with seed-planned routing — see [BUG-01](../features/mob-ai.md#bug-01-mob-seed-optimization).
-- `instakill` can shorten boss setup — see [BUG-08](../features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max).
+- `instakill` can shorten boss setup — see [BUG-08](../features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max) (also disabled).
 
 **See also:** BUG-10 at [../features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass](../features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass) (dispatch-side details of item handling).
 

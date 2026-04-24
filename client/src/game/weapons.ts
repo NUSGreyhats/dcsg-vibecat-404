@@ -2,6 +2,7 @@ export type WeaponId = "pistol" | "rifle" | "shotgun";
 
 export interface WeaponStats {
   id: WeaponId;
+  serverId: number;
   displayName: string;
   cooldownMs: number;
   bulletSpeed: number;
@@ -14,6 +15,7 @@ export interface WeaponStats {
 export const WEAPON_STATS: Record<WeaponId, WeaponStats> = {
   pistol: {
     id: "pistol",
+    serverId: 1,
     displayName: "Pistol",
     cooldownMs: 150,
     bulletSpeed: 600,
@@ -24,8 +26,9 @@ export const WEAPON_STATS: Record<WeaponId, WeaponStats> = {
   },
   rifle: {
     id: "rifle",
+    serverId: 2,
     displayName: "Rifle",
-    cooldownMs: 220,
+    cooldownMs: 75,
     bulletSpeed: 700,
     damage: 2,
     bulletTextureKey: "bullet_lmg",
@@ -34,6 +37,7 @@ export const WEAPON_STATS: Record<WeaponId, WeaponStats> = {
   },
   shotgun: {
     id: "shotgun",
+    serverId: 3,
     displayName: "Shotgun",
     cooldownMs: 520,
     bulletSpeed: 480,
@@ -48,4 +52,15 @@ export const ALL_WEAPON_IDS: WeaponId[] = ["pistol", "rifle", "shotgun"];
 
 export function getWeaponStats(id: WeaponId): WeaponStats {
   return WEAPON_STATS[id];
+}
+
+// Map the server's numeric weapon_id to its client-side WeaponId. Previous
+// code indexed into ALL_WEAPON_IDS directly which silently aliased server
+// ids to the wrong slot when ids are non-contiguous.
+const SERVER_ID_TO_WEAPON: Map<number, WeaponId> = new Map(
+  (Object.values(WEAPON_STATS) as WeaponStats[]).map((s) => [s.serverId, s.id]),
+);
+
+export function weaponFromServerId(serverId: number): WeaponId {
+  return SERVER_ID_TO_WEAPON.get(serverId) ?? "pistol";
 }

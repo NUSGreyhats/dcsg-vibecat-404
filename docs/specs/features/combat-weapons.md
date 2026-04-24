@@ -22,7 +22,7 @@ var weaponSpecs = map[uint8]WeaponSpec{
 }
 ```
 
-Client mirror: `client/src/game/weapons.ts`. Must stay in sync with server.
+Client mirror: `client/src/game/weapons.ts`. Must stay in sync with server. The client carries a `serverId` on each weapon-stats entry and a `weaponFromServerId()` helper — do NOT rely on indexing into `ALL_WEAPON_IDS` by server id (earlier code did; it silently aliased slots when the mapping was treated as 0-indexed).
 
 ### Weapon state (per player)
 
@@ -207,7 +207,11 @@ For enemies with HP slightly above the single-shot damage, this effectively doub
 
 ---
 
-### BUG-08 HP Integer Overflow (Healing Past Max)
+### BUG-08 HP Integer Overflow (Healing Past Max) — DISABLED
+
+**Status:** Disabled. The `+30000 HP` Heart pickup that delivered the overflow has been removed from `rooms_data.go`. `ApplyHeal` still has no overflow check, but the only path that calls it with an amount > 100 is gone — so the wrap is unreachable via normal gameplay. See [bugs.md — currently disabled](../bugs.md#currently-disabled).
+
+**To reintroduce:** re-add a large-heal pickup (Heart, or some other item). Before doing that, decide whether to keep the wrap or add a saturating clamp — the original bug was "too powerful" because a single pickup grab trivialized the boss.
 
 **Source:** [100 Go Mistakes #18 — Neglecting integer overflows](https://100go.co/#neglecting-integer-overflows-18). Go performs **silent integer wraparound** on overflow — no panic, no error.
 
@@ -254,9 +258,9 @@ If `amount = 10` and `reduction = 50`, `effectiveDmg = -40`. `e.HP -= (-40)` →
 
 **Detection:** Replay reproduces identically. Do NOT change HP to a wider integer type — that fixes the bug for both players (safer) but also removes the intended skill-ceiling mechanic.
 
-**Synergies:** Faster setup via [BUG-04 swap cancel](#bug-04-swap-cancel). Enabled faster by [BUG-09 `instakill`](../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling) for adds cleanup before the boss.
+**Synergies:** Faster setup via [BUG-04 swap cancel](#bug-04-swap-cancel). Historically enabled faster by [BUG-09 `instakill`](../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling) for adds cleanup before the boss — both BUG-09 and BUG-08 are now disabled, so this chain is moot until they return together.
 
-**Savings:** ~5–10 s on boss fight.
+**Savings:** ~5–10 s on boss fight (when enabled).
 
 ## Packets used
 

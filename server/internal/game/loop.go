@@ -346,11 +346,7 @@ func (e *Engine) dispatchUseItem(raw []byte, now time.Time) {
 	if err := json.Unmarshal(raw, &pkt); err != nil {
 		return
 	}
-	_, advance := HandleUseItem(e.player, e.run, e.room, pkt.ItemName, now)
-	if advance {
-		// skip_room equivalent: treat the room as cleared for the door pass.
-		e.room.AllEnemiesDead = true
-	}
+	HandleUseItem(e.player, e.run, e.room, pkt.ItemName, now)
 }
 
 func (e *Engine) tryEnterDoor(doorID uint32, now time.Time) {
@@ -370,7 +366,6 @@ func (e *Engine) transitionToRoom(nextRoom uint8, now time.Time) {
 		TimeMs:    elapsed,
 		Kills:     uint8(len(e.room.KillLog)),
 	})
-	e.run.TimewarpUsedInRoom = false
 
 	if nextRoom > FinalRoom {
 		// Boss room is FinalRoom; completing it happens via enemy death

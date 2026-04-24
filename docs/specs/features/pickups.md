@@ -34,15 +34,14 @@ PickupState {
 
 ### Pickup types
 
+Current shipping set:
+
 | Type | Name              | Effect                                                       |
 | ---- | ----------------- | ------------------------------------------------------------ |
-| 1    | Health potion     | `ApplyHeal(+20)` — see [combat-weapons.md BUG-08](combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max) for wraparound hazard. |
-| 2    | Ammo crate        | `+{N}` ammo for current weapon.                              |
-| 3    | Speed boost       | Timed movement-speed multiplier.                             |
-| 4    | Damage boost      | Timed damage multiplier (KIV — see open questions).          |
-| 5    | Heart (large)     | `ApplyHeal(+30000)` — boss-room pickup; wraps past MaxHP and kills a high-HP player. The [BUG-08 "avoid if HP > 2767"](combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max) hazard. |
+| 1    | Health potion     | `ApplyHeal(+20)`.                                            |
+| 2    | Ammo crate        | `+20` ammo for current weapon (clamped to `AmmoMax`).        |
 
-Exact heal amounts and durations TBD — see open questions in [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md).
+Removed (formerly types 3–5): Speed boost, Damage boost, and Heart (large, `+30000 HP`). See [bugs.md — currently disabled](../bugs.md#currently-disabled): the Heart pickup was the payload for [BUG-08](combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max), and the boost pickups were judged low-value. The pickup-type constants for the removed types are no longer declared in `pickups.go` — if they return, they'll get new (or recycled) IDs.
 
 ## Interact handler
 
@@ -124,5 +123,5 @@ Two design flaws stacked:
 
 - [../foundations/02-protocol.md](../foundations/02-protocol.md) — `C2S_INTERACT`, `PickupSpawn`.
 - [../foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md) — `RoomState.Pickups`.
-- [combat-weapons.md](combat-weapons.md) — `ApplyHeal` wraparound hazard for Type 5 pickup (BUG-08).
+- [combat-weapons.md](combat-weapons.md) — `ApplyHeal` semantics. The Type 5 Heart pickup that triggered BUG-08 has been removed.
 - [rooms-doors.md](rooms-doors.md) — rooms host pickups.

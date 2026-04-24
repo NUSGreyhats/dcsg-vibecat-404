@@ -211,7 +211,7 @@ The one grey area is the 80 px `radius` — that **does** gate the packet, but o
 
 - `Controls` facade, `Game.handleInput`, and `InventoryMenu`'s local bindings all exist and work.
 - `shootHeld()` is exported but not used — reserved for future auto-fire weapons.
-- Weapon slots hardcoded to 1/2/3 matches the current three-weapon roster (pistol, rifle, shotgun — see `client/src/game/weapons.ts`). Adding a 4th weapon means adding key `FOUR` to the `KeyMap` and a `return 4` branch in `weaponSwitchPressed()`.
+- Weapon slots 1/2/3 map to pistol/rifle/shotgun (server ids 1/2/3). The client uses `weaponFromServerId()` to translate the server's numeric id to the client-side `WeaponId` — do NOT index into `ALL_WEAPON_IDS` with the server id directly.
 - No touch / gamepad support — desktop-keyboard-and-mouse only. Adding touch would involve a virtual joystick + tap-to-interact, and is not in scope for DEF CON.
 
 ## Intentional bugs in this area

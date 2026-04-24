@@ -49,9 +49,6 @@ Walk up and press `E` to grab them.
 | ------------- | ---------------------------------------------------- |
 | Health potion | Heals you.                                           |
 | Ammo crate    | Refills ammo for your current weapon.                |
-| Speed boost   | Move faster for a few seconds.                       |
-| Damage boost  | Hit harder for a few seconds.                        |
-| Heart (large) | **Careful** — a massive heal that can kill you if your HP is already high. Only grab it when you're hurt. |
 
 ## Inventory
 

@@ -101,11 +101,13 @@ graph LR
 - `JSON.stringify(envelope)` preserves camelCase / snake_case on the envelope fields as defined in `packet.ts`. `type`, `seq`, `ts`, `server_ts`, `data` — snake_case matches the Go server's JSON tags.
 - The pre-open buffer (`queued: string[]`) exists because `MainMenu.onStart()` can call `sendAuth()` between `new WebSocket()` and `onopen`. Buffer order is FIFO; flush happens once, synchronously, inside `onopen`.
 
-### Duplicate-key and case-insensitive payloads (BUG-09)
+### Duplicate-key and case-insensitive payloads (BUG-09 — currently disabled)
 
-The stock client uses `JSON.stringify`, which **cannot** emit duplicate JSON keys (last write wins at the JS object level) and always emits field names exactly as they appear in the TS source. Triggering [BUG-09 — JSON Case-Insensitive Field Smuggling](../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling) therefore requires a custom client — e.g. a WebSocket script that hand-builds frame text like `'{"type":8,"seq":1,"ts":0,"data":{"item_name":"HEALTH_POTION","item_name":"timewarp"}}'`. This is by design: exploiting packet-level bugs is supposed to be a coding exercise, not a menu option.
+The stock client uses `JSON.stringify`, which **cannot** emit duplicate JSON keys (last write wins at the JS object level) and always emits field names exactly as they appear in the TS source. Triggering [BUG-09 — JSON Case-Insensitive Field Smuggling](../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling) would therefore require a custom client — e.g. a WebSocket script that hand-builds frame text like `'{"type":8,"seq":1,"ts":0,"data":{"item_name":"HEALTH_POTION","item_name":"timewarp"}}'`.
 
-The stock client must never grow a "developer mode" that lets users craft arbitrary JSON — that would short-circuit the challenge. Stick to the typed helpers.
+BUG-09 is currently **disabled** on the server (the `DebugItems` fallback the smuggled payload used to land in has been removed). A crafted duplicate-key frame is still processed by `encoding/json` but resolves to an unknown item name that `ValidateItemName` rejects. See [../bugs.md — currently disabled](../bugs.md#currently-disabled).
+
+The stock client must never grow a "developer mode" that lets users craft arbitrary JSON — that short-circuits the challenge if/when BUG-09 returns. Stick to the typed helpers.
 
 ## Inbound pipeline — S2C
 

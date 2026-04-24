@@ -2,7 +2,7 @@ import Phaser from "phaser";
 
 import { PLAYER_MAX_HEALTH } from "../constants";
 import { directionFromVector, type Direction8 } from "../ui/anims";
-import { ALL_WEAPON_IDS, WEAPON_STATS, type WeaponId } from "../weapons";
+import { WEAPON_STATS, weaponFromServerId, type WeaponId } from "../weapons";
 import {
   BONE_WHITE,
   BLOOD_RED,
@@ -110,12 +110,7 @@ export class Player extends Phaser.GameObjects.Container {
       this.drawHpBar(snap.hp);
     }
     if (typeof snap.weapon_id === "number") {
-      const idx = Phaser.Math.Clamp(
-        snap.weapon_id,
-        0,
-        ALL_WEAPON_IDS.length - 1,
-      );
-      const next = ALL_WEAPON_IDS[idx];
+      const next = weaponFromServerId(snap.weapon_id);
       if (next !== this.weaponId) {
         this.weaponId = next;
         const spriteKey = WEAPON_STATS[next].spriteKey;
