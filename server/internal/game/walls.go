@@ -51,14 +51,23 @@ var waterGIDs = func() map[int]struct{} {
 	return m
 }()
 
-// tiledLayer / tiledMap mirror the subset of the Tiled JSON schema we care
-// about: a "Walls" tile layer whose non-zero cells are solid.
+// tiledLayer / tiledObject / tiledMap mirror the subset of the Tiled JSON
+// schema we care about: a "Walls" tile layer whose non-zero cells are
+// solid, and an "Objects" object layer carrying a PlayerSpawn marker.
 type tiledLayer struct {
-	Name   string `json:"name"`
-	Type   string `json:"type"`
-	Width  int    `json:"width"`
-	Height int    `json:"height"`
-	Data   []int  `json:"data"`
+	Name    string        `json:"name"`
+	Type    string        `json:"type"`
+	Width   int           `json:"width"`
+	Height  int           `json:"height"`
+	Data    []int         `json:"data"`
+	Objects []tiledObject `json:"objects"`
+}
+
+type tiledObject struct {
+	Name string  `json:"name"`
+	Type string  `json:"type"`
+	X    float32 `json:"x"`
+	Y    float32 `json:"y"`
 }
 
 type tiledMap struct {
@@ -66,6 +75,17 @@ type tiledMap struct {
 	Height int          `json:"height"`
 	Layers []tiledLayer `json:"layers"`
 }
+
+// playerSpawn captures the authored PlayerSpawn marker for a room. `ok`
+// is false when no marker exists or the room has no tilemap; callers
+// fall back to the heuristic in placePlayerSpawn.
+type playerSpawn struct {
+	X, Y float32
+	ok   bool
+}
+
+// playerSpawns is keyed by room index (1..11), parallel to wallGrids.
+var playerSpawns [12]playerSpawn
 
 // init parses the embedded tilemaps at process start. A failure on one
 // room is logged via panic — the binary shouldn't boot with missing walls.
@@ -82,7 +102,38 @@ func init() {
 		}
 		grid := parseWallGrid(&m)
 		wallGrids[i] = grid
+		playerSpawns[i] = parsePlayerSpawn(&m)
 	}
+}
+
+// parsePlayerSpawn returns the room's authored PlayerSpawn marker, if
+// any. Tiled exports point objects with width/height = 0 and a "type"
+// field set in the object editor; we accept either `type` or `name`
+// equal to "PlayerSpawn" so author conventions can drift slightly
+// without breaking the load.
+func parsePlayerSpawn(m *tiledMap) playerSpawn {
+	for _, L := range m.Layers {
+		if L.Type != "objectgroup" {
+			continue
+		}
+		for _, o := range L.Objects {
+			if o.Type == "PlayerSpawn" || o.Name == "PlayerSpawn" {
+				return playerSpawn{X: o.X, Y: o.Y, ok: true}
+			}
+		}
+	}
+	return playerSpawn{}
+}
+
+// PlayerSpawnAt returns the authored PlayerSpawn position for the room,
+// if a marker exists. Callers fall back to the heuristic placement when
+// `ok` is false (no marker, or no tilemap).
+func PlayerSpawnAt(roomIndex uint8) (x, y float32, ok bool) {
+	if roomIndex >= uint8(len(playerSpawns)) {
+		return 0, 0, false
+	}
+	s := playerSpawns[roomIndex]
+	return s.X, s.Y, s.ok
 }
 
 func parseWallGrid(m *tiledMap) *wallGrid {

@@ -84,6 +84,18 @@ export class GameState extends Phaser.Events.EventEmitter {
           room: RoomData;
           split_ms: number;
         };
+        // Server-side split semantics: split_ms is the cumulative
+        // elapsed time at the moment the player FINISHED the previous
+        // room (entered this one). Record it under the previous room's
+        // index so the HUD can show one row per cleared room.
+        const finishedRoom = this.currentRoom ?? data.room_index - 1;
+        if (finishedRoom >= 1) {
+          this.splits.push({
+            room_index: finishedRoom,
+            time_ms: data.split_ms,
+            kills: 0,
+          });
+        }
         this.currentRoom = data.room_index;
         this.roomData = data.room;
         this.entities = [];
