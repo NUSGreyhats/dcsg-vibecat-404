@@ -138,6 +138,10 @@ export class Preloader extends Phaser.Scene {
     // -- Splash --
     this.load.image("title", "assets/title.png");
 
+    // Sponsor logos are rendered as HTML <img> overlays in MainMenu, so
+    // we don't load them through Phaser — browsers resample raster logos
+    // much better than WebGL LINEAR does without mipmaps.
+
     // -- Tileset (shared by all room tilemaps) --
     this.load.image("tilemap", "assets/tilemap.png");
 

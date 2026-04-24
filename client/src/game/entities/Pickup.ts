@@ -6,9 +6,6 @@ import { BONE_WHITE, COIN_GOLD, TEXT_STROKE, hex } from "../ui/tokens";
 const PICKUP_TYPE = {
   HEALTH: 1,
   AMMO: 2,
-  SPEED: 3,
-  DAMAGE: 4,
-  LARGE_HEART: 5,
 } as const;
 
 type PickupStyle = {
@@ -24,12 +21,6 @@ function styleFor(type: number): PickupStyle {
       return { color: 0xdc2d2d, size: 16, glyph: "♥", iconKey: "heart" };
     case PICKUP_TYPE.AMMO:
       return { color: COIN_GOLD, size: 16, glyph: "■", iconKey: "coin" };
-    case PICKUP_TYPE.SPEED:
-      return { color: 0x00e5ff, size: 16, glyph: "⚡" };
-    case PICKUP_TYPE.DAMAGE:
-      return { color: 0xff8c00, size: 16, glyph: "⚔" };
-    case PICKUP_TYPE.LARGE_HEART:
-      return { color: 0xff69b4, size: 22, glyph: "♥", iconKey: "heart" };
     default:
       return { color: 0xcccccc, size: 12, glyph: "?" };
   }

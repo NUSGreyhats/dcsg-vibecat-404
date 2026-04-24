@@ -10,11 +10,11 @@ type WeaponSpec struct {
 	AmmoStart  int
 }
 
-// Mirrors client/src/game/weapons.ts.
+// Mirrors client/src/game/weapons.ts. IDs are stable.
 var WeaponSpecs = map[uint8]WeaponSpec{
 	1: {Damage: 1, CooldownMs: 150, Name: "pistol", AmmoMax: 9999, AmmoStart: 9999},
-	2: {Damage: 2, CooldownMs: 220, Name: "rifle", AmmoMax: 120, AmmoStart: 30},
-	3: {Damage: 6, CooldownMs: 520, Name: "shotgun", AmmoMax: 40, AmmoStart: 8},
+	2: {Damage: 2, CooldownMs: 75, Name: "rifle", AmmoMax: 30, AmmoStart: 30},
+	3: {Damage: 6, CooldownMs: 520, Name: "shotgun", AmmoMax: 8, AmmoStart: 8},
 }
 
 func WeaponCooldown(id uint8) time.Duration {
