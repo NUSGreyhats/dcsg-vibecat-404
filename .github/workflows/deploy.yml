@@ -3,13 +3,12 @@ name: Deploy to DigitalOcean
 on:
   push:
     branches:
-      - main
+      - '**'
   workflow_dispatch:
     inputs:
       ref:
-        description: "Git ref to deploy (branch / tag / SHA). Defaults to main."
+        description: "Git ref to deploy (branch / tag / SHA). Defaults to the branch this workflow was run from."
         required: false
-        default: main
 
 # Serialize deploys so two pushes in a row don't fight for the droplet.
 concurrency:
@@ -37,7 +36,7 @@ jobs:
             set -euo pipefail
 
             REPO_SLUG="${{ github.repository }}"
-            REF="${{ github.event.inputs.ref || 'main' }}"
+            REF="${{ github.event.inputs.ref || github.ref_name }}"
             DIR="$HOME/defcon-game"
 
             echo "==> Target: $REPO_SLUG @ $REF"
