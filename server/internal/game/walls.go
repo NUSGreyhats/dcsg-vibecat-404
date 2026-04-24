@@ -20,12 +20,36 @@ const (
 	solidRoom0 uint8   = 0 // sentinel for "no walls"
 )
 
-// wallGrid is a 40×24 bitmap of solid tiles. true == wall.
-type wallGrid [GridRows][GridCols]bool
+// cellKind classifies what a wall-layer tile blocks. Movement is blocked
+// by both kinds; projectiles pass over water but are absorbed by solids.
+type cellKind uint8
+
+const (
+	cellEmpty cellKind = iota
+	cellSolid          // brick wall — blocks movement and projectiles
+	cellWater          // water tile — blocks movement, lets projectiles fly
+)
+
+// wallGrid is a 40×24 grid of cell classifications.
+type wallGrid [GridRows][GridCols]cellKind
 
 // wallGrids is keyed by room index (1..11). Rooms without a tilemap get
 // an empty grid (outer bounds only).
 var wallGrids [12]*wallGrid
+
+// waterGIDs are the tileset GIDs that render as water. They live in the
+// "Walls" layer because they block movement, but bullets fly over them.
+// Range: tileset rows 2..5 × cols 0..7 (0-indexed) at firstgid=1, 12 cols.
+var waterGIDs = func() map[int]struct{} {
+	const cols = 12
+	m := make(map[int]struct{}, 32)
+	for r := 2; r <= 5; r++ {
+		for c := 0; c <= 7; c++ {
+			m[r*cols+c+1] = struct{}{}
+		}
+	}
+	return m
+}()
 
 // tiledLayer / tiledMap mirror the subset of the Tiled JSON schema we care
 // about: a "Walls" tile layer whose non-zero cells are solid.
@@ -80,27 +104,45 @@ func parseWallGrid(m *tiledMap) *wallGrid {
 			}
 			r := i / GridCols
 			c := i % GridCols
-			g[r][c] = true
+			if _, isWater := waterGIDs[tileID]; isWater {
+				g[r][c] = cellWater
+			} else {
+				g[r][c] = cellSolid
+			}
 		}
 	}
 	return &g
 }
 
-// IsWallAt reports whether the tile at world-space (x,y) is solid for the
-// given room. Out-of-bounds coordinates return true so callers can treat
-// "past the edge" as a wall.
+// IsWallAt reports whether (x, y) is impassable for movement. Both solid
+// walls and water count — entities can't walk into either. Out-of-bounds
+// coordinates return true so callers treat "past the edge" as a wall.
 func IsWallAt(roomIndex uint8, x, y float32) bool {
+	return cellAt(roomIndex, x, y) != cellEmpty
+}
+
+// BlocksProjectileAt reports whether (x, y) absorbs a projectile. Solid
+// walls do; water does not. Out-of-bounds coordinates return true so
+// projectiles that fly off the map are culled.
+func BlocksProjectileAt(roomIndex uint8, x, y float32) bool {
+	return cellAt(roomIndex, x, y) == cellSolid
+}
+
+// cellAt returns the cell classification at (x, y). Out-of-bounds maps to
+// cellSolid so callers see "past the edge" as a hard stop for both
+// movement and projectiles.
+func cellAt(roomIndex uint8, x, y float32) cellKind {
 	if roomIndex >= uint8(len(wallGrids)) {
-		return true
+		return cellSolid
 	}
 	g := wallGrids[roomIndex]
 	if g == nil {
-		return false
+		return cellEmpty
 	}
 	c := int(x / TileSize)
 	r := int(y / TileSize)
 	if c < 0 || c >= GridCols || r < 0 || r >= GridRows {
-		return true
+		return cellSolid
 	}
 	return g[r][c]
 }
