@@ -1,5 +1,10 @@
 import { defineConfig } from 'vite';
 
+// Game server expected at :8080 in dev. Override with GAME_SERVER if you
+// need to point Vite at a different host/port.
+const gameServer = process.env.GAME_SERVER ?? 'http://localhost:8080';
+const gameServerWs = gameServer.replace(/^http/, 'ws');
+
 export default defineConfig({
     base: './',
     build: {
@@ -12,6 +17,14 @@ export default defineConfig({
         },
     },
     server: {
-        port: 8080
+        // 5173 (Vite default) so it doesn't clash with the game server on
+        // :8080. WS_URL auto-resolves to ws://<host>/ws, which Vite then
+        // proxies down to the Go server — same URL shape as prod Caddy.
+        port: 5173,
+        proxy: {
+            '/ws': { target: gameServerWs, ws: true, changeOrigin: true },
+            '/api': { target: gameServer, changeOrigin: true },
+            '/register': { target: gameServer, changeOrigin: true },
+        },
     }
 });
