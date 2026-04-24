@@ -145,3 +145,4 @@ See [../bugs.md](../bugs.md#synergy-map).
 - [../foundations/07-determinism-seeding.md](../foundations/07-determinism-seeding.md) — RNG consumption invariant.
 - [../foundations/05-server-runtime.md](../foundations/05-server-runtime.md) — BUG-06 settle race, BUG-11 kill log.
 - [combat-weapons.md](combat-weapons.md) — BUG-07 damage batch.
+- [harder-mobs.md](harder-mobs.md) — reinforcement waves and pack aggro; extends this spec's spawn pipeline and BUG-01 seed-search surface.

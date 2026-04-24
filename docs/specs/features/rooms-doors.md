@@ -15,10 +15,13 @@ RoomData {
     room_index     uint8
     tilemap_id     string             // e.g. "room-3"
     enemies        []EnemySpawn       // base positions; RNG offsets applied at load
+    waves          []WaveDef          // reinforcement waves — see harder-mobs.md
     pickups        []PickupSpawn
     doors          []DoorDef
 }
 ```
+
+Wave mobs count toward `AllEnemiesDead` — doors unlock only after all initial *and* wave mobs are dead.
 
 Server-side per-room state is `RoomState` from [../foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md):
 
@@ -136,3 +139,4 @@ Client has 10 room tilemaps (`room-1.json` through `room-10.json`); an 11th (bos
 - [../foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md) — `DoorState`, `RoomState`.
 - [pickups.md](pickups.md) — pickup interactions within rooms.
 - [mob-ai.md](mob-ai.md) — enemy spawn before doors unlock.
+- [harder-mobs.md](harder-mobs.md) — `WaveDef` shape and firing rules.
