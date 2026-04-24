@@ -127,7 +127,18 @@ type RoomLoadData struct {
 	SplitMs   int64    `json:"split_ms"`
 }
 
+// RunOutcome is the wire-format terminal state of a run. Only values listed
+// below are valid on the S2C_RUN_COMPLETE packet; see
+// docs/specs/foundations/02-protocol.md#s2c_run_complete-outcomes.
+type RunOutcome string
+
+const (
+	RunOutcomeCompleted RunOutcome = "completed"
+	RunOutcomeFailed    RunOutcome = "failed"
+)
+
 type RunCompleteData struct {
+	Outcome RunOutcome  `json:"outcome"`
 	TotalMs int64       `json:"total_ms"`
 	Rank    int         `json:"rank"`
 	Splits  []SplitData `json:"splits"`

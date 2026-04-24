@@ -117,9 +117,15 @@ func (e *EnemyState) TakeDamage(amount int16) {
     e.HP -= effectiveDmg                   // subtracting negative = adding HP... unless it wraps
 }
 
-// Death check
+// Enemy death — part of the post-collision death pass.
 if e.HP <= 0 {
-    // kill enemy
+    e.AIState = AIDead
+}
+
+// Player death — separate tick pass, runs after enemy-death pass.
+// See ../foundations/05-server-runtime.md#player-death-pass.
+if p.HP <= 0 {
+    finishRun(now, elapsedMs, RunFailed)
 }
 ```
 
@@ -229,9 +235,9 @@ func (p *PlayerState) ApplyHeal(amount int16) {
 }
 ```
 
-If `p.HP` is high and `amount` is large, `p.HP += amount` wraps past `32767` to a **large negative** number. The `> MaxHP` clamp never fires (negative is not > MaxHP). The player now has negative HP, and the death check `HP <= 0` kills them.
+If `p.HP` is high and `amount` is large, `p.HP += amount` wraps past `32767` to a **large negative** number. The `> MaxHP` clamp never fires (negative is not > MaxHP). The player now has negative HP. The per-tick **player-death pass** (signed `HP <= 0` on `int16`) catches the wrap and transitions `Status → Failed`. See [../foundations/05-server-runtime.md#player-death-pass](../foundations/05-server-runtime.md#player-death-pass).
 
-Twist: there is a `+30000` heal pickup in the boss room. If `HP > 2767` at pickup, `2768 + 30000 = 32768` → wraps to `-32768` → **player dies**. Savvy players avoid this pickup unless their HP is low enough.
+**Twist:** the Heart pickup applies `ApplyHeal(+30000)` during `C2S_INTERACT` drain. If `HP > 2767` at pickup, the `int16` add wraps `32768 → -32768`, the `MaxHP` clamp misses (negative is not `> MaxHP`), and the player-death pass later in the same tick fails the run. Savvy players avoid the Heart unless `HP ≤ 2767`.
 
 For the enemy side:
 
@@ -252,7 +258,7 @@ If `amount = 10` and `reduction = 50`, `effectiveDmg = -40`. `e.HP -= (-40)` →
 - Only works on the boss (regular enemies die fast enough that the setup isn't worth it).
 - Player must avoid accidentally killing self with the `+30000` heal pickup.
 
-**Detection:** Replay reproduces identically. Do NOT change HP to a wider integer type — that fixes the bug for both players (safer) but also removes the intended skill-ceiling mechanic.
+**Detection:** Replay reproduces identically. Do NOT change HP to a wider integer type — that fixes the bug for both players (safer) but also removes the intended skill-ceiling mechanic. Do NOT collapse the player-death pass into the enemy-death pass — they read different state (post-drain heals vs. post-collision enemy HP) and sharing the pass would either miss the BUG-08 wrap or force a second collision walk.
 
 **Synergies:** Faster setup via [BUG-04 swap cancel](#bug-04-swap-cancel). Enabled faster by [BUG-09 `instakill`](../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling) for adds cleanup before the boss.
 

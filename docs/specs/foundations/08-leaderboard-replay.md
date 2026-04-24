@@ -52,6 +52,8 @@ game.db (SQLite)
 S2C_LEADERBOARD to all connected players
 ```
 
+Only runs with `Status == RunCompleted` are submitted to `completedRunCh`. `RunFailed` runs (triggered by the [player-death pass](./05-server-runtime.md#player-death-pass) on `HP <= 0`) skip the leaderboard entirely — the `CompletedRun` struct is never constructed, no DB row is written, and replay verification never runs on a failed run. This preserves the "only boss-clear times are leaderboard-eligible" invariant and keeps the verification path simple: every row the replay engine sees is a successful completion.
+
 Lobby reads `game.db` read-only for its public leaderboard and replay-download endpoints. See [04-lobby.md](./04-lobby.md).
 
 ## `game.db` schema (target)

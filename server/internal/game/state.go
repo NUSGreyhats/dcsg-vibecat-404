@@ -13,7 +13,26 @@ const (
 	RunIdle RunStatus = iota
 	RunRunning
 	RunCompleted
+	RunFailed
 )
+
+// IsTerminal reports whether the run is in an end state (the tickLoop
+// should exit, no further input is accepted).
+func (s RunStatus) IsTerminal() bool {
+	return s == RunCompleted || s == RunFailed
+}
+
+// Outcome returns the wire-format outcome for a terminal status. Panics on
+// non-terminal values — callers must gate on IsTerminal first.
+func (s RunStatus) Outcome() protocol.RunOutcome {
+	switch s {
+	case RunCompleted:
+		return protocol.RunOutcomeCompleted
+	case RunFailed:
+		return protocol.RunOutcomeFailed
+	}
+	panic("RunStatus.Outcome called on non-terminal status")
+}
 
 type Vec2 struct {
 	X, Y float32

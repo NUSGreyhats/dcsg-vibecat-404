@@ -16,7 +16,7 @@ Append rows here when adding a new scene. Registration order in `client/src/game
 | `Game`           | `client/src/game/scenes/Game.ts`                 | Main gameplay: owns entity maps, reconciles S2C snapshots, forwards input. | `GameHUD`, `InventoryMenu` (while paused) |
 | `GameHUD`        | `client/src/game/scenes/GameHUD.ts`              | Overlay: HP bar, timer, room indicator, weapon + ammo text. Polls state each frame. | `Game` |
 | `InventoryMenu`  | `client/src/game/scenes/InventoryMenu.ts`        | Modal overlay: inventory list, selection, `C2S_USE_ITEM`. Pauses `Game` while open. | `Game` (paused) |
-| `WinScreen`      | `client/src/game/scenes/WinScreen.ts`            | Run summary (total time, rank, splits) + live leaderboard + "Play Again". | — |
+| `WinScreen`      | `client/src/game/scenes/WinScreen.ts`            | Run summary (total time, rank, splits) + live leaderboard + "Play Again". Title and leaderboard section branch on `runOutcome`: `"completed"` shows rank + submission row; `"failed"` shows a "RUN FAILED" banner and hides rank (no leaderboard submission occurred). | — |
 
 Scenes **not yet present** in the repo but referenced by older specs:
 
@@ -199,7 +199,7 @@ Mirror detach in `Game.cleanup()`. Each handler's responsibility:
 | `onRoomLoad`        | Tear down `backgroundObjs`, `enemies`, `projectiles`, `pickups`, `doors`; rebuild from `RoomData` via `paintRoomBackground + buildRoom`; reposition persistent `Player`. |
 | `onDoorUnlocked`    | `doors.get(id)?.setUnlocked(true);`                                                                       |
 | `onEntityDied`      | Both `enemies.get(id)?.markDead()` and `pickups.get(id)?.setConsumed()` (server may reuse entity ids across entity types within a room; defensive handling is cheap). |
-| `onRunComplete`     | `scene.stop("GameHUD"); scene.start("WinScreen");`                                                         |
+| `onRunComplete`     | Reads `sync.state.runOutcome`; `scene.stop("GameHUD"); scene.start("WinScreen", { outcome })`.              |
 
 ### `Game.update()` responsibilities
 

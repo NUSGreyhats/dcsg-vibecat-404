@@ -16,7 +16,7 @@ This rule is intentionally violated by one place: the per-enemy cleanup goroutin
 
 ```go
 RunState {
-    Status          enum { Idle, Running, Completed }
+    Status          enum { Idle, Running, Completed, Failed }
     PlayerID        string
     DisplayName     string
     RunStartTime    time.Time
@@ -50,7 +50,7 @@ PlayerState {
 
 Field notes:
 
-- **`HP, MaxHP int16`** — range −32768..32767. No overflow guard on `+=`/`-=`. See [../features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max](../features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max).
+- **`HP, MaxHP int16`** — range −32768..32767. No overflow guard on `+=`/`-=`. See [../features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max](../features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max). Checked against `<= 0` in the per-tick **player-death pass** (see [05-server-runtime.md#player-death-pass](./05-server-runtime.md#player-death-pass)); signed comparison is load-bearing so a BUG-08 wrap-to-negative trips the check.
 - **`Inventory []string`** — stores item names; per-string length validated with `len()` (byte count) capped at 16. See [../features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass](../features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass).
 - **`WeaponCooldown map[uint8]time.Time`** — per-weapon next-allowed-fire timestamp. Shared `time.Now()` within a tick enables [BUG-04](../features/combat-weapons.md#bug-04-swap-cancel) and [BUG-07](../features/combat-weapons.md#bug-07-damage-batch-overflow).
 

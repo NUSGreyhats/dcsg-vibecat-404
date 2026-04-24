@@ -211,7 +211,7 @@ func (e *Engine) tickLoop(ctx context.Context) {
 				return
 			}
 			e.stepTick(time.Now())
-			if e.run.Status == RunCompleted {
+			if e.run.Status.IsTerminal() {
 				return
 			}
 		}
@@ -232,6 +232,15 @@ func (e *Engine) stepTick(now time.Time) {
 	for _, id := range deaths {
 		go ProcessEnemyDeathAsync(e.room, id)
 		e.send(protocol.S2CEntityDied, protocol.EntityDiedData{EntityID: id})
+	}
+
+	// Player-death pass — signed HP<=0 against int16 so a BUG-08 wrap
+	// to negative trips it. Runs after the drain (heals applied) and
+	// enemy-death pass (kamikaze self-destruct resolved), before the
+	// door unlock (no BUG-03 door-skip on the fatal tick).
+	if e.run.Status == RunRunning && e.player.HP <= 0 {
+		e.finishRun(now, e.currentElapsed(now), RunFailed)
+		return
 	}
 
 	// Settle tick counter (post-door load).
@@ -375,7 +384,7 @@ func (e *Engine) transitionToRoom(nextRoom uint8, now time.Time) {
 	if nextRoom > FinalRoom {
 		// Boss room is FinalRoom; completing it happens via enemy death
 		// below, not door transition. Guard rail just in case.
-		e.finishRun(now, elapsed)
+		e.finishRun(now, elapsed, RunCompleted)
 		return
 	}
 
@@ -452,7 +461,7 @@ func (e *Engine) updateElapsed(now time.Time) {
 
 	// End-of-run detection: boss room cleared.
 	if e.run.CurrentRoom == FinalRoom && e.room.AllEnemiesDead && e.run.Status == RunRunning {
-		e.finishRun(now, e.run.ElapsedMs)
+		e.finishRun(now, e.run.ElapsedMs, RunCompleted)
 	}
 }
 
@@ -460,8 +469,11 @@ func (e *Engine) currentElapsed(now time.Time) int64 {
 	return now.Sub(e.run.RunStartTime).Milliseconds()
 }
 
-func (e *Engine) finishRun(now time.Time, totalMs int64) {
-	e.run.Status = RunCompleted
+// finishRun transitions the run to a terminal status and emits
+// S2C_RUN_COMPLETE. `status` must be RunCompleted or RunFailed — the wire
+// outcome is derived from it so the two values cannot drift.
+func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {
+	e.run.Status = status
 	e.run.ElapsedMs = totalMs
 
 	// Append final split if not already captured.
@@ -471,27 +483,32 @@ func (e *Engine) finishRun(now time.Time, totalMs int64) {
 		Kills:     uint8(len(e.room.KillLog)),
 	})
 
-	inputLog, _ := json.Marshal(e.run.InputLog)
-	replayID := uuid.NewString()
-	checksum := leaderboard.Checksum(e.run.Seed, inputLog)
-	cr := &leaderboard.CompletedRun{
-		ReplayID:    replayID,
-		PlayerID:    e.PlayerID,
-		DisplayName: e.DisplayName,
-		TotalMs:     totalMs,
-		Splits:      append([]protocol.SplitData(nil), e.run.Splits...),
-		Seed:        e.run.Seed,
-		InputLog:    inputLog,
-		Checksum:    checksum,
-		SubmittedAt: now,
-	}
-	if e.Submit != nil {
-		if !e.Submit(cr) {
-			log.Printf("completedCh full, dropping run %s", replayID)
+	// Only successful completions are leaderboard-eligible. Failed runs
+	// skip submission — no CompletedRun, no DB row, no replay verification.
+	if status == RunCompleted {
+		inputLog, _ := json.Marshal(e.run.InputLog)
+		replayID := uuid.NewString()
+		checksum := leaderboard.Checksum(e.run.Seed, inputLog)
+		cr := &leaderboard.CompletedRun{
+			ReplayID:    replayID,
+			PlayerID:    e.PlayerID,
+			DisplayName: e.DisplayName,
+			TotalMs:     totalMs,
+			Splits:      append([]protocol.SplitData(nil), e.run.Splits...),
+			Seed:        e.run.Seed,
+			InputLog:    inputLog,
+			Checksum:    checksum,
+			SubmittedAt: now,
+		}
+		if e.Submit != nil {
+			if !e.Submit(cr) {
+				log.Printf("completedCh full, dropping run %s", replayID)
+			}
 		}
 	}
 
 	e.send(protocol.S2CRunComplete, protocol.RunCompleteData{
+		Outcome: status.Outcome(),
 		TotalMs: totalMs,
 		Rank:    0,
 		Splits:  e.run.Splits,

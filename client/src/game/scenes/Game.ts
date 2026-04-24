@@ -22,6 +22,7 @@ import type {
   ProjSnapshot,
   PlayerSnapshot,
   SplitData,
+  RunOutcome,
 } from "../../net/packet";
 
 type StatePayload = {
@@ -241,12 +242,13 @@ export class Game extends Phaser.Scene {
   }
 
   private onRunComplete(
+    outcome: RunOutcome,
     _totalMs: number,
     _rank: number,
     _splits: SplitData[],
   ): void {
     this.scene.stop("GameHUD");
-    this.scene.start("WinScreen");
+    this.scene.start("WinScreen", { outcome });
   }
 
   private nearestPickupId(

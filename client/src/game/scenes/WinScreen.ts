@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { getSync, resetSync } from "../net/runContext";
+import { RunOutcome } from "../../net/packet";
 import type { LeaderboardEntry, SplitData } from "../../net/packet";
 import { formatTime } from "../ui/formatters";
 import {
@@ -7,6 +8,7 @@ import {
   BUTTON_HOVER_COLOR,
   BUTTON_IDLE_COLOR,
   BUTTON_TEXT_STYLE,
+  ERROR,
   FONT_FAMILY,
   FONT_SIZE_BODY_EM,
   FONT_SIZE_SECTION,
@@ -38,19 +40,31 @@ export class WinScreen extends Phaser.Scene {
   private leaderboardTexts: Phaser.GameObjects.Text[] = [];
   private leaderboardHeader?: Phaser.GameObjects.Text;
   private playAgainButton?: Phaser.GameObjects.Text;
+  private outcome: RunOutcome = RunOutcome.COMPLETED;
 
   constructor() {
     super({ key: "WinScreen" });
   }
 
+  init(data?: { outcome?: RunOutcome }): void {
+    // Prefer scene-launch data; fall back to state mirror so a late direct
+    // start() (e.g. hot-reload) still picks up the outcome.
+    this.outcome =
+      data?.outcome ?? getSync().state.runOutcome ?? RunOutcome.COMPLETED;
+  }
+
   create(): void {
     const cx = this.scale.width / 2;
 
+    const failed = this.outcome === RunOutcome.FAILED;
+    const title = failed ? "Run Failed" : "Run Complete";
+    const titleColor = failed ? hex(ERROR) : hex(ACCENT_PRIMARY);
+
     this.add
-      .text(cx, 60, "Run Complete", {
+      .text(cx, 60, title, {
         fontFamily: FONT_FAMILY,
         fontSize: FONT_SIZE_TITLE,
-        color: hex(ACCENT_PRIMARY),
+        color: titleColor,
       })
       .setOrigin(0.5);
 
@@ -68,13 +82,25 @@ export class WinScreen extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    this.add
-      .text(cx, 170, `Rank:  #${rank}`, {
-        fontFamily: FONT_FAMILY,
-        fontSize: FONT_SIZE_SECTION,
-        color: hex(TEXT_SECONDARY),
-      })
-      .setOrigin(0.5);
+    // Rank row only makes sense for completed runs; failed runs are not
+    // leaderboard-eligible (see foundations/08-leaderboard-replay.md).
+    if (!failed) {
+      this.add
+        .text(cx, 170, `Rank:  #${rank}`, {
+          fontFamily: FONT_FAMILY,
+          fontSize: FONT_SIZE_SECTION,
+          color: hex(TEXT_SECONDARY),
+        })
+        .setOrigin(0.5);
+    } else {
+      this.add
+        .text(cx, 170, "Run not submitted to leaderboard", {
+          fontFamily: FONT_FAMILY,
+          fontSize: FONT_SIZE_SECTION,
+          color: hex(TEXT_SECONDARY),
+        })
+        .setOrigin(0.5);
+    }
 
     // Splits table (left column)
     this.add.text(120, 220, "Splits", HEADER_STYLE).setOrigin(0, 0);
