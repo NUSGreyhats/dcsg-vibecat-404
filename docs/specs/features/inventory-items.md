@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Player inventory (string-named items), item-name validation pipeline, command-prefix parsing on item names, and the dispatch between "allowed" items and a left-in "debug" item set. Hosts [BUG-10 — Rune vs Byte Item Length Bypass](#bug-10-rune-vs-byte-item-length-bypass) and the item-dispatch half of [BUG-09 — JSON Smuggling](../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling) (the parser half lives in the protocol spec).
+Player inventory (string-named items) and item-name validation pipeline. Formerly also hosted a command-prefix parser and a "debug items" fallback (`instakill`, `teleport`, `timewarp`, `!skip_room`). Those enabled [BUG-09](#bug-09-json-smuggling-dispatch-side-detail) and [BUG-10](#bug-10-rune-vs-byte-item-length-bypass) — both are **currently disabled**, see [bugs.md](../bugs.md#currently-disabled). The specs for the disabled bugs are preserved below for when they return.
 
 ## Data model
 
@@ -15,88 +15,63 @@ Inventory []string   // item names, size-capped; see validateItemName
 ### Allowed items map
 
 ```go
-var allowedItems = map[string]ItemDef{
-    "health_potion":  { effect: heal(20) },
-    "speed_boost":    { effect: speedMult(1.5, 5*time.Second) },
-    "shield":         { effect: damageReduction(0.5, 5*time.Second) },
+var AllowedItems = map[string]func(*PlayerState, *RunState, time.Time){
+    "health_potion": func(p *PlayerState, rs *RunState, now time.Time) { ApplyHeal(p, 20) },
+    "speed_boost":   func(p *PlayerState, rs *RunState, now time.Time) { p.SpeedMult = 1.5; p.SpeedMultUntil = now.Add(5 * time.Second) },
+    "shield":        func(p *PlayerState, rs *RunState, now time.Time) { p.ShieldUntil = now.Add(5 * time.Second) },
 }
 ```
 
-### Debug items map (left-in fallback)
+This is the complete set of usable items in the shipping code. Nothing else dispatches.
+
+### Debug items map — REMOVED
+
+Formerly `DebugItems` held `instakill` / `teleport` / `timewarp`, and a separate command path dispatched `!skip_room`. These have been removed from `server/internal/game/items.go`. See [bugs.md](../bugs.md#currently-disabled) for the rationale and the possibility of reintroducing them.
+
+## Validation + dispatch pipeline
+
+### 1. Length validation
 
 ```go
-var debugItems = map[string]ItemDef{
-    "instakill":     { damage: 9999 },
-    "teleport":      { effect: teleportToDoor() },
-    "timewarp":      { duration: -5000 },  // subtracts 5s from elapsed
-}
-```
-
-`ItemDef` is a union of possible effects; the shape doesn't matter for the bug — what matters is that debug items exist as a fallback the dispatcher falls through to when the name doesn't match `allowedItems`.
-
-## Validation + parse pipeline
-
-### 1. Length validation (byte-count based — BUG-10 ingress)
-
-```go
-func validateItemName(name string) bool {
-    if len(name) > 16 {    // len() counts BYTES, not characters
+func ValidateItemName(name string) bool {
+    if len(name) > 16 {
         return false
     }
-    return isAllowedItem(name)
+    return IsAllowedItem(name)
 }
 ```
 
 ### 2. Rune-aware allow check
 
 ```go
-func isAllowedItem(name string) bool {
+func IsAllowedItem(name string) bool {
     normalized := strings.ToLower(strings.TrimSpace(name))
-    _, exists := allowedItems[normalized]
-    return exists
+    _, ok := AllowedItems[normalized]
+    return ok
 }
 ```
 
-Note `strings.TrimSpace` strips certain Unicode whitespace characters as well as ASCII — the trim can shift the effective string in ways that byte-index operations below don't see.
+Historically the mismatch between byte-counting `len()` here and rune-aware `strings.ToLower`/`strings.TrimSpace` below was the surface for BUG-10. Without a debug-items fallback (or a command prefix) there is nothing useful to reach via a bypass, so the mismatch is currently benign. The mismatch itself is intentionally preserved so that reintroducing BUG-10 later is a one-line change (re-add the command path).
 
-### 3. Command-prefix parsing (byte-index based — BUG-10 exit)
+### 3. Dispatch
 
 ```go
-func parseItemCommand(name string) (string, string) {
-    // Check for command prefix "!" at byte position 0
-    if name[0] == '!' {
-        return name[1:], "command"      // byte slice, not rune-safe
+func HandleUseItem(p *PlayerState, rs *RunState, r *RoomState, effectiveName string, now time.Time) (applied bool, advanceRoom bool) {
+    _ = r
+    if !ValidateItemName(effectiveName) {
+        return false, false
     }
-    return name, "item"
+    normalized := strings.ToLower(strings.TrimSpace(effectiveName))
+    fn, ok := AllowedItems[normalized]
+    if !ok {
+        return false, false
+    }
+    fn(p, rs, now)
+    return true, false
 }
 ```
 
-If `parseItemCommand` returns `("skip_room", "command")`, a command dispatcher is invoked that triggers debug commands (e.g. `skip_room` instantly clears the current room).
-
-## Dispatch
-
-```go
-func handleUseItem(pkt UseItemPacket, player *PlayerState) {
-    name := pkt.ItemName
-    if !validateItemName(name) { return }       // byte-length check + allow check
-
-    payload, kind := parseItemCommand(name)
-    switch kind {
-    case "command":
-        dispatchCommand(payload, player)         // includes skip_room etc.
-    case "item":
-        if item, ok := allowedItems[strings.ToLower(payload)]; ok {
-            applyItem(item, player); return
-        }
-        // fallback — debug items (meant to be disabled, still present)
-        if item, ok := debugItems[strings.ToLower(payload)]; ok {
-            applyItem(item, player); return
-        }
-    }
-}
-```
-
-This is the dispatch-side half of [BUG-09](../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling) — the debug-items fallback is the payload the JSON parser differential delivers.
+No command-prefix parsing, no fallback into a debug map. The `advanceRoom` return value is retained for signature stability but is always `false` now (it previously signalled that `!skip_room` had cleared the room).
 
 ## Data flow
 
@@ -104,24 +79,13 @@ This is the dispatch-side half of [BUG-09](../foundations/02-protocol.md#bug-09-
 C2S_USE_ITEM { item_name }
     │
     ▼
-[audit / logging middleware — parser P1, case-sensitive, first-key-wins]
-    │ logs e.g. "HEALTH_POTION"
-    ▼
-encoding/json → UseItemPacket { ItemName: "timewarp" }    ← parser P2 (last-key-wins)
+encoding/json → UseItemPacket { ItemName }
     │
     ▼
-validateItemName (byte length → bool)                     ← BUG-10 ingress
+ValidateItemName (byte length → bool, + IsAllowedItem)
     │
-    ▼
-parseItemCommand (byte-indexed prefix check)              ← BUG-10 exit
-    │       │
-    │       └─── "command" path → dispatchCommand (skip_room, …)
-    │
-    ▼ "item" path
-allowedItems lookup → applyItem
-    │
-    ▼ fallback
-debugItems lookup → applyItem                             ← BUG-09 payload lands here
+    ▼ (valid items only)
+AllowedItems lookup → effect
 ```
 
 ## Client interactions
@@ -132,18 +96,18 @@ debugItems lookup → applyItem                             ← BUG-09 payload l
 
 ## Implementation notes
 
-- Package: `internal/game/items` (target).
-- Keep all three stages (validate → parseCommand → dispatch) as separate functions. BUG-10 requires that the length/normalization stage and the command-parse stage see different effective strings.
-- `strings.TrimSpace` specifically: Go's implementation trims Unicode whitespace. Do not replace with an ASCII-only trim — that changes the attack surface.
-- `debugItems` must remain reachable via the fallback. Do not delete the map.
+- Package: `internal/game/items`.
+- `strings.TrimSpace` specifically: Go's implementation trims Unicode whitespace. Do not replace with an ASCII-only trim without thinking first — that change would close off the BUG-10 ingress if/when the debug-items path returns.
 
 ## Implementation status
 
-Greenfield. Current server has no item system; only a `Coins` counter. The current `client/src/game/shop.ts` hints at a future shop flow that'll overlap with inventory.
+Active. Current server ships the shape above — `AllowedItems` only.
 
 ## Intentional bugs in this area
 
-### BUG-10 Rune vs Byte Item Length Bypass
+All item-hosted bugs are currently **disabled**. Specs preserved.
+
+### BUG-10 Rune vs Byte Item Length Bypass — DISABLED
 
 **Source:** [100 Go Mistakes #36 — Not understanding the concept of a rune](https://100go.co/#not-understanding-the-concept-of-rune-36). In Go, `len(string)` returns **byte count**, not character count. Multi-byte UTF-8 characters (emoji, CJK, etc.) count as 1 rune but 2–4 bytes.
 
@@ -182,19 +146,17 @@ E.g.: a legal item name that *also* begins with `!` after a specific rune sequen
 
 **Savings:** ~3–5 s per room where used.
 
+**Status:** Disabled. The byte-vs-rune asymmetry still exists in `ValidateItemName`, but the command-prefix parser and `DebugItems` map it used to reach are gone. To reintroduce: re-add `ParseItemCommand` + `dispatchCommand` + a `DebugItems` map in `server/internal/game/items.go` and route them from `HandleUseItem`. Discuss the room cap first — uncapped `!skip_room` skips the entire run.
+
 ---
 
-### BUG-09 JSON Smuggling (dispatch-side detail)
+### BUG-09 JSON Smuggling (dispatch-side detail) — DISABLED
 
-The parser-differential body of this bug lives in [../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling](../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling). The dispatch fallback (`debugItems`) that the smuggled `timewarp` / `instakill` payload lands in lives here.
+The parser-differential body of this bug lives in [../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling](../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling). The dispatch fallback (`debugItems`) that the smuggled `timewarp` / `instakill` payload used to land in no longer exists.
 
-**Design choice (this side):** The dispatcher has a fallback path into `debugItems` when the name is not in `allowedItems`. This fallback was "meant to be disabled" but is left in — a realistic code-review miss.
+**Former design choice (this side):** The dispatcher had a fallback path into `debugItems` when the name was not in `allowedItems`. That fallback has been removed from `server/internal/game/items.go` — `HandleUseItem` now rejects anything not in `AllowedItems`.
 
-**What participants need from this file:** knowledge that the `debugItems` map exists and what its entries do. This is sourced from the stripped public source.
-
-**Do NOT:**
-- Remove the `debugItems` fallback.
-- Gate it behind a build tag (that would allow CI to catch it).
+**To reintroduce:** restore `DebugItems` + the fallback branch in `HandleUseItem`. The JSON parser-side asymmetry still exists in the protocol spec — nothing has changed there. See the BUG-09 note in the protocol doc.
 
 ## Packets used
 
@@ -205,5 +167,5 @@ The parser-differential body of this bug lives in [../foundations/02-protocol.md
 
 - [../foundations/02-protocol.md](../foundations/02-protocol.md) — JSON parser semantics + BUG-09 parser half.
 - [../foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md) — `PlayerState.Inventory`.
-- [combat-weapons.md](combat-weapons.md) — `instakill` and `timewarp` stack with BUG-08 boss setup.
-- [../bugs.md](../bugs.md) — central index.
+- [combat-weapons.md](combat-weapons.md) — when BUG-09 returns, `instakill` and `timewarp` stack with BUG-08 boss setup (also disabled).
+- [../bugs.md](../bugs.md) — central index, including the disabled-bugs list.

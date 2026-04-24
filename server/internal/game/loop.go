@@ -226,9 +226,9 @@ func (e *Engine) stepTick(now time.Time) {
 
 	e.drainInput(now)
 	e.advancePlayer(dt)
-	e.advanceEnemies(dt, now)
+	deaths := e.advanceEnemies(dt, now)
 	hits := AdvanceProjectiles(e.room, dt, now)
-	deaths := ResolveCollisions(e.room, hits, now)
+	deaths = append(deaths, ResolveCollisions(e.room, hits, now)...)
 	for _, id := range deaths {
 		go ProcessEnemyDeathAsync(e.room, id)
 		e.send(protocol.S2CEntityDied, protocol.EntityDiedData{EntityID: id})
@@ -355,11 +355,7 @@ func (e *Engine) dispatchUseItem(raw []byte, now time.Time) {
 	if err := json.Unmarshal(raw, &pkt); err != nil {
 		return
 	}
-	_, advance := HandleUseItem(e.player, e.run, e.room, pkt.ItemName, now)
-	if advance {
-		// skip_room equivalent: treat the room as cleared for the door pass.
-		e.room.AllEnemiesDead = true
-	}
+	HandleUseItem(e.player, e.run, e.room, pkt.ItemName, now)
 }
 
 func (e *Engine) tryEnterDoor(doorID uint32, now time.Time) {
@@ -379,7 +375,6 @@ func (e *Engine) transitionToRoom(nextRoom uint8, now time.Time) {
 		TimeMs:    elapsed,
 		Kills:     uint8(len(e.room.KillLog)),
 	})
-	e.run.TimewarpUsedInRoom = false
 
 	if nextRoom > FinalRoom {
 		// Boss room is FinalRoom; completing it happens via enemy death
@@ -437,8 +432,9 @@ func (e *Engine) advancePlayer(dt float32) {
 	}
 }
 
-func (e *Engine) advanceEnemies(dt float32, now time.Time) {
-	for _, en := range e.room.Enemies {
+func (e *Engine) advanceEnemies(dt float32, now time.Time) []uint32 {
+	var deaths []uint32
+	for id, en := range e.room.Enemies {
 		if UpdateEnemy(en, e.player, e.run.CurrentRoom, dt, now) {
 			// Enemy landed an attack: tiny damage. Shield halves it.
 			dmg := int16(5)
@@ -448,12 +444,15 @@ func (e *Engine) advanceEnemies(dt float32, now time.Time) {
 			e.player.HP -= dmg
 			e.player.DamageTaken += int32(dmg)
 			if en.Type == EnemyKamikaze {
-				// Kamikaze self-destructs.
+				// Kamikaze self-destructs on contact — queue for death emission
+				// so S2CEntityDied is sent and the client removes it.
 				en.AIState = AIDead
 				en.HP = 0
+				deaths = append(deaths, id)
 			}
 		}
 	}
+	return deaths
 }
 
 func (e *Engine) updateElapsed(now time.Time) {

@@ -31,12 +31,14 @@ specs/
 │   ├── 09-spectator-mode.md          — read-only viewer variant (greenfield)
 │   └── 10-ui-components.md           — visual/UX design tokens + component catalog
 └── features/              ← self-contained gameplay features
-    ├── combat-weapons.md             — BUG-04, BUG-07, BUG-08
+    ├── combat-weapons.md             — BUG-04, BUG-07, BUG-08 (disabled)
     ├── mob-ai.md                     — BUG-01
     ├── rooms-doors.md                — BUG-03
     ├── pickups.md                    — BUG-05
-    └── inventory-items.md            — BUG-10, BUG-09 dispatch half
+    └── inventory-items.md            — BUG-10 (disabled), BUG-09 dispatch half (disabled)
 ```
+
+> BUG-08, BUG-09, BUG-10 are currently **disabled** in the shipping code — the specs are kept for reference and future reintroduction. See [bugs.md — currently disabled](bugs.md#currently-disabled).
 
 ## Reading order for a new implementer
 

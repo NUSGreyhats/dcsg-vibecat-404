@@ -19,8 +19,7 @@ const (
 //	Rooms 8–10 — late game, dense mixes, Room 10 is the heaviest pre-boss.
 //	Room 11    — boss only, no doors; run ends on boss kill.
 //
-// Room 11 is the only room with a Heart (pickup type 5). Doors always target
-// roomIndex+1.
+// Doors always target roomIndex+1.
 var RoomTemplates = [12]*RoomTemplate{
 	nil, // index 0 unused
 
@@ -52,7 +51,7 @@ var RoomTemplates = [12]*RoomTemplate{
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 251, Type: PickupHealthPotion, X: 180, Y: 620},
-			{EntityID: 252, Type: PickupSpeedBoost, X: 1100, Y: 620},
+			{EntityID: 252, Type: PickupAmmoCrate, X: 1100, Y: 620},
 		},
 		Doors: []DoorDef{
 			{DoorID: 291, X: 1220, Y: 384, TargetRoom: 3},
@@ -70,7 +69,7 @@ var RoomTemplates = [12]*RoomTemplate{
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 351, Type: PickupAmmoCrate, X: 200, Y: 640},
-			{EntityID: 352, Type: PickupDamageBoost, X: 1080, Y: 640},
+			{EntityID: 352, Type: PickupHealthPotion, X: 1080, Y: 640},
 		},
 		Doors: []DoorDef{
 			{DoorID: 391, X: 640, Y: 40, TargetRoom: 4},
@@ -107,7 +106,7 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 505, Type: EnemyGrunt, X: 860, Y: 440},
 		},
 		Pickups: []PickupSpawnDef{
-			{EntityID: 551, Type: PickupSpeedBoost, X: 200, Y: 640},
+			{EntityID: 551, Type: PickupAmmoCrate, X: 200, Y: 640},
 			{EntityID: 552, Type: PickupHealthPotion, X: 1080, Y: 640},
 		},
 		Doors: []DoorDef{
@@ -127,7 +126,7 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 606, Type: EnemyKamikaze, X: 640, Y: 500},
 		},
 		Pickups: []PickupSpawnDef{
-			{EntityID: 651, Type: PickupDamageBoost, X: 220, Y: 640},
+			{EntityID: 651, Type: PickupHealthPotion, X: 220, Y: 640},
 			{EntityID: 652, Type: PickupAmmoCrate, X: 1060, Y: 640},
 		},
 		Doors: []DoorDef{
@@ -148,7 +147,7 @@ var RoomTemplates = [12]*RoomTemplate{
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 751, Type: PickupHealthPotion, X: 200, Y: 640},
-			{EntityID: 752, Type: PickupSpeedBoost, X: 1080, Y: 640},
+			{EntityID: 752, Type: PickupAmmoCrate, X: 1080, Y: 640},
 		},
 		Doors: []DoorDef{
 			{DoorID: 791, X: 1220, Y: 384, TargetRoom: 8},
@@ -168,7 +167,7 @@ var RoomTemplates = [12]*RoomTemplate{
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 851, Type: PickupAmmoCrate, X: 200, Y: 640},
-			{EntityID: 852, Type: PickupDamageBoost, X: 1080, Y: 640},
+			{EntityID: 852, Type: PickupHealthPotion, X: 1080, Y: 640},
 		},
 		Doors: []DoorDef{
 			{DoorID: 891, X: 1220, Y: 384, TargetRoom: 9},
@@ -188,7 +187,7 @@ var RoomTemplates = [12]*RoomTemplate{
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 951, Type: PickupHealthPotion, X: 200, Y: 640},
-			{EntityID: 952, Type: PickupSpeedBoost, X: 1080, Y: 640},
+			{EntityID: 952, Type: PickupAmmoCrate, X: 1080, Y: 640},
 		},
 		Doors: []DoorDef{
 			{DoorID: 991, X: 640, Y: 40, TargetRoom: 10},
@@ -210,7 +209,7 @@ var RoomTemplates = [12]*RoomTemplate{
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 1051, Type: PickupAmmoCrate, X: 200, Y: 640},
-			{EntityID: 1052, Type: PickupDamageBoost, X: 1080, Y: 640},
+			{EntityID: 1052, Type: PickupAmmoCrate, X: 1080, Y: 640},
 			{EntityID: 1053, Type: PickupHealthPotion, X: 640, Y: 660},
 		},
 		Doors: []DoorDef{
@@ -225,9 +224,9 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 1101, Type: EnemyBoss, X: 640, Y: 280},
 		},
 		Pickups: []PickupSpawnDef{
-			{EntityID: 1151, Type: PickupHeart, X: 640, Y: 600},
+			{EntityID: 1151, Type: PickupHealthPotion, X: 640, Y: 600},
 			{EntityID: 1152, Type: PickupAmmoCrate, X: 200, Y: 600},
-			{EntityID: 1153, Type: PickupDamageBoost, X: 1080, Y: 600},
+			{EntityID: 1153, Type: PickupAmmoCrate, X: 1080, Y: 600},
 		},
 		Doors: nil,
 	},

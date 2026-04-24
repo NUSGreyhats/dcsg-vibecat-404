@@ -72,8 +72,6 @@ type RunState struct {
 	Splits       []protocol.SplitData
 	InputLog     []InputRecord
 	RunsUsed     uint8
-	// Per-room timewarp usage (BUG-09 bound).
-	TimewarpUsedInRoom bool
 }
 
 type PlayerState struct {

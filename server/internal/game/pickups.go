@@ -9,9 +9,6 @@ import (
 const (
 	PickupHealthPotion uint8 = 1
 	PickupAmmoCrate    uint8 = 2
-	PickupSpeedBoost   uint8 = 3
-	PickupDamageBoost  uint8 = 4
-	PickupHeart        uint8 = 5
 )
 
 // HandleInteract implements the buggy interact — square-axis check with the
@@ -32,7 +29,7 @@ func HandleInteract(p *PlayerState, r *RoomState, targetID uint32, now time.Time
 	return nil
 }
 
-func applyPickup(p *PlayerState, pk *PickupState, now time.Time) {
+func applyPickup(p *PlayerState, pk *PickupState, _ time.Time) {
 	switch pk.Type {
 	case PickupHealthPotion:
 		ApplyHeal(p, 20)
@@ -46,14 +43,5 @@ func applyPickup(p *PlayerState, pk *PickupState, now time.Time) {
 			}
 			p.WeaponAmmo[p.CurrentWeapon] = cur
 		}
-	case PickupSpeedBoost:
-		p.SpeedMult = 1.5
-		p.SpeedMultUntil = now.Add(5 * time.Second)
-	case PickupDamageBoost:
-		p.DamageMult = 1.5
-		p.DamageMultUntil = now.Add(5 * time.Second)
-	case PickupHeart:
-		// BUG-08 trap: raw +30000 heal wraps past 32767 for a high-HP player.
-		ApplyHeal(p, 30000)
 	}
 }
