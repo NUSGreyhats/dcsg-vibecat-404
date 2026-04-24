@@ -67,8 +67,9 @@ graph TD
     TICK["Ticker fires every 50ms"] --> DRAIN["Drain inCh — process all queued client packets"]
     DRAIN --> PHYSICS["Physics step: move player, projectiles, mob AI"]
     PHYSICS --> COLLISION["Collision: projectile↔enemy, player↔pickup"]
-    COLLISION --> DEATH["Death check: remove dead, check room clear"]
-    DEATH --> DOOR["Door unlock: all enemies dead → Unlocked"]
+    COLLISION --> DEATH["Enemy-death pass: remove dead, check room clear"]
+    DEATH --> PDEATH["Player-death pass: HP <= 0 → Status=Failed, finishRun(failed)"]
+    PDEATH --> DOOR["Door unlock: all enemies dead → Unlocked"]
     DOOR --> TIMER["Update elapsed: time.Now() − runStart"]
     TIMER --> SEND["Build S2C_STATE → outCh"]
 
@@ -76,8 +77,36 @@ graph TD
     style SEND fill:#2ecc71,color:#fff
 ```
 
-- 50 ms ticker fires → drain `inCh` of all queued C2S packets → physics → collision → death → door → timer → send.
+- 50 ms ticker fires → drain `inCh` of all queued C2S packets → physics → collision → enemy-death → player-death → door → timer → send.
 - All logic runs on a single goroutine per player. No mutex guards player/room state — the goroutine is the sole owner.
+
+### Player-death pass
+
+Runs once per tick, after the enemy-death pass and before the door unlock. Single conditional:
+
+```go
+if e.run.Status == RunRunning && e.player.HP <= 0 {
+    e.finishRun(tickNow, e.run.ElapsedMs, RunFailed)
+    return // skip door/timer/send-state; finishRun sends S2C_RUN_COMPLETE{outcome:"failed"}
+}
+```
+
+Ordering constraints (each is load-bearing for an existing bug):
+
+- **After `advanceEnemies`** — a kamikaze's melee hit in `advanceEnemies` is the normal death path; the enemy self-destruct (`en.HP=0`) still runs, and the player takes its 5/2-dmg hit before this pass checks.
+- **After the drain phase** — `C2S_INTERACT` on a `PickupHeart` applies its `+30000` heal during drain; the wrap-to-negative needs this pass to latch on the same tick. This is the BUG-08 twist — see [combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max](../features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max).
+- **Before door unlock** — prevents a corpse from advancing rooms via [BUG-03](../features/rooms-doors.md#bug-03-door-skip-no-proximity) on the same tick.
+- **Signed `HP <= 0`** — not `== 0`. A wrap to `-32768` must trigger death.
+
+`finishRun(now, elapsedMs, outcome)` gains an `outcome` parameter. On `RunFailed`:
+
+- `e.run.Status = RunFailed`.
+- Final split captured same as completion.
+- `S2C_RUN_COMPLETE` sent with `outcome: "failed"` (see [02-protocol.md](./02-protocol.md#s2c_run_complete-outcomes)).
+- **Not submitted** to `completedRunCh` — failed runs never appear on the leaderboard. The `CompletedRun` struct is only constructed on `RunCompleted`.
+- Spectators still receive the `S2C_RUN_COMPLETE`; the 500 ms flush window is unchanged.
+
+No mutex. No new goroutine. The gameLoop remains the sole owner.
 
 ## `ts` validation
 

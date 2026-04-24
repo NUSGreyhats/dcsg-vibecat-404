@@ -53,7 +53,7 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 | 0x82 | `S2C_RUN_STARTED`   | `{ seed: int64, room: RoomData }`                                       |
 | 0x83 | `S2C_STATE`         | `{ elapsed_ms, player: PlayerSnapshot, entities: [], projectiles: [] }` |
 | 0x84 | `S2C_ROOM_LOAD`     | `{ room_index, room: RoomData, split_ms }`                              |
-| 0x85 | `S2C_RUN_COMPLETE`  | `{ total_ms, rank, splits: [] }`                                        |
+| 0x85 | `S2C_RUN_COMPLETE`  | `{ outcome: "completed" \| "failed", total_ms, rank, splits: [] }`      |
 | 0x86 | `S2C_LEADERBOARD`   | `{ entries: [] }`                                                       |
 | 0x87 | `S2C_ERROR`         | `{ code, message }` — codes include `SPECTATOR_READ_ONLY` (closes conn). |
 | 0x88 | `S2C_DOOR_UNLOCKED` | `{ door_id }`                                                           |
@@ -72,6 +72,15 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 | `ProjSnapshot`     | `{ proj_id, x, y, angle, owner }`                                                             |
 | `SplitData`        | `{ room_index, time_ms, kills }`                                                              |
 | `LeaderboardEntry` | `{ rank, display_name, total_ms, splits, seed, replay_id }`                                   |
+
+### S2C_RUN_COMPLETE outcomes
+
+| Outcome     | Trigger                                        | `rank`                    | Leaderboard submit |
+| ----------- | ---------------------------------------------- | ------------------------- | ------------------ |
+| `completed` | Boss room `AllEnemiesDead` while Running       | server-assigned rank      | yes                |
+| `failed`    | Player-death pass: `HP <= 0` while Running     | `0` (sentinel)            | no                 |
+
+`splits` includes the final split in both cases — the slot the player was in when the run terminated. A failed run's replay is still deterministic (same InputLog, same seed), but it is not leaderboard-eligible and is not written to the DB. See [05-server-runtime.md#player-death-pass](./05-server-runtime.md#player-death-pass).
 
 ## Data flow (server side)
 

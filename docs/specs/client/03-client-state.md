@@ -26,6 +26,7 @@ class GameState extends Phaser.Events.EventEmitter {
     seed?: number;                        // from S2C_RUN_STARTED
     runStarted = false;                   // set true on S2C_RUN_STARTED, false on apply() reset at next run
     runFinished = false;                  // set true on S2C_RUN_COMPLETE
+    runOutcome?: "completed" | "failed";  // from S2C_RUN_COMPLETE.outcome
     elapsedMs = 0;                        // from S2C_STATE.elapsed_ms
     currentRoom?: number;                 // from S2C_RUN_STARTED / S2C_ROOM_LOAD
     roomData?: RoomData;                  // from S2C_RUN_STARTED / S2C_ROOM_LOAD
@@ -72,7 +73,7 @@ The slice is deliberate: `InventoryMenu` uses a local copy so a live `S2C_STATE`
 | `roomLoad`      | `(roomIndex: number, room: RoomData, splitMs: number)`                                         | `Game` (rebuild world)  |
 | `doorUnlocked`  | `(doorId: number)`                                                                             | `Game` (flip door sprite) |
 | `entityDied`    | `(entityId: number)`                                                                           | `Game` (play death anim) |
-| `runComplete`   | `(totalMs: number, rank: number, splits: SplitData[])`                                         | `Game` → `WinScreen`    |
+| `runComplete`   | `(outcome: "completed" \| "failed", totalMs: number, rank: number, splits: SplitData[])`        | `Game` → `WinScreen`    |
 | `leaderboard`   | `(entries: LeaderboardEntry[])`                                                                | `WinScreen`             |
 | `error`         | `({ code: string, message: string })`                                                          | `MainMenu`, others (future) |
 
@@ -122,7 +123,7 @@ switch(envelope.type):
     case ROOM_LOAD:     currentRoom / roomData / clear entities/projectiles/unlockedDoors/deadEntities
     case DOOR_UNLOCKED: unlockedDoors.add(door_id)
     case ENTITY_DIED:   deadEntities.add(entity_id)
-    case RUN_COMPLETE:  runFinished / totalMs / rank / splits
+    case RUN_COMPLETE:  runFinished / runOutcome / totalMs / rank / splits
     case LEADERBOARD:   leaderboard
     case ERROR:         lastError
     │

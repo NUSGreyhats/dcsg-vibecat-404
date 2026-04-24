@@ -146,7 +146,7 @@ The `apply()` switch (in `GameState.ts`) is a single exhaustive match; each bran
 
 ### Ordering & drop tolerance
 
-The server emits packets in the order shown in [foundations/05-server-runtime.md](../foundations/05-server-runtime.md): drain → physics → collision → death → door → timer → send. The client trusts that ordering and does not reorder or buffer inbound frames.
+The server emits packets in the order shown in [foundations/05-server-runtime.md](../foundations/05-server-runtime.md): drain → physics → collision → enemy-death → player-death → door → timer → send. The client trusts that ordering and does not reorder or buffer inbound frames.
 
 - `S2C_STATE` is idempotent — each frame contains the **full** entity / projectile list, so a dropped frame costs at most 50 ms of smoothing and self-heals on the next tick.
 - `S2C_ENTITY_DIED` and `S2C_DOOR_UNLOCKED` are sticky side-effect packets — the next `S2C_STATE` would make up for a lost death (the entity is absent from `entities[]`) but the explosion/animation cue and the unlocked-door indicator both rely on the event firing. In practice the WebSocket TCP stream doesn't drop mid-connection, so we don't design around it. If spectators see transient desyncs (see [09-spectator-mode.md](./09-spectator-mode.md)) the next `S2C_STATE` resyncs them.
