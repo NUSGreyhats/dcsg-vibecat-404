@@ -125,6 +125,11 @@ export class Game extends Phaser.Scene {
       this.scene.launch("InventoryMenu");
       this.scene.pause();
     }
+
+    if (this.controls.pausePressed()) {
+      this.scene.launch("PauseMenu");
+      this.scene.pause();
+    }
   }
 
   private onServerState(payload: StatePayload): void {
