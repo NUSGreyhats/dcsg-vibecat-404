@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import {
   S2CType,
+  RunOutcome,
   type S2CEnvelope,
   type RoomData,
   type PlayerSnapshot,
@@ -17,6 +18,7 @@ export class GameState extends Phaser.Events.EventEmitter {
   seed?: number;
   runStarted = false;
   runFinished = false;
+  runOutcome?: RunOutcome;
   elapsedMs = 0;
   currentRoom?: number;
   roomData?: RoomData;
@@ -53,6 +55,7 @@ export class GameState extends Phaser.Events.EventEmitter {
         this.currentRoom = data.room.room_index;
         this.runStarted = true;
         this.runFinished = false;
+        this.runOutcome = undefined;
         this.elapsedMs = 0;
         this.entities = [];
         this.projectiles = [];
@@ -119,17 +122,28 @@ export class GameState extends Phaser.Events.EventEmitter {
       }
       case S2CType.RUN_COMPLETE: {
         const data = envelope.data as {
+          outcome?: RunOutcome;
           total_ms: number;
           rank: number;
           splits: SplitData[];
           replay_id?: string;
           seed?: number;
         };
+        // Older server builds may omit `outcome`; default to COMPLETED so
+        // existing replays / in-flight runs keep rendering the WinScreen.
+        const outcome: RunOutcome = data.outcome ?? RunOutcome.COMPLETED;
         this.runFinished = true;
+        this.runOutcome = outcome;
         this.totalMs = data.total_ms;
         this.rank = data.rank;
         this.splits = data.splits;
-        this.emit("runComplete", data.total_ms, data.rank, data.splits);
+        this.emit(
+          "runComplete",
+          outcome,
+          data.total_ms,
+          data.rank,
+          data.splits,
+        );
         break;
       }
       case S2CType.LEADERBOARD: {

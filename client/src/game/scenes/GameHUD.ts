@@ -225,7 +225,7 @@ export class GameHUD extends Phaser.Scene {
     this.weaponIcon.setX(textLeft - WEAPON_ICON_GAP);
   }
 
-  private onRunComplete(totalMs: number): void {
+  private onRunComplete(_outcome: string, totalMs: number): void {
     this.latchedTotalMs = totalMs;
   }
 

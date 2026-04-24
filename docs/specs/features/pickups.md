@@ -40,7 +40,7 @@ PickupState {
 | 2    | Ammo crate        | `+{N}` ammo for current weapon.                              |
 | 3    | Speed boost       | Timed movement-speed multiplier.                             |
 | 4    | Damage boost      | Timed damage multiplier (KIV — see open questions).          |
-| 5    | Heart (large)     | `ApplyHeal(+30000)` — boss-room pickup; wraps past MaxHP and kills a high-HP player. The [BUG-08 "avoid if HP > 2767"](combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max) hazard. |
+| 5    | Heart (large)     | `ApplyHeal(+30000)` — boss-room pickup. Applied during `C2S_INTERACT` drain; the int16 add wraps past MaxHP. The per-tick [player-death pass](../foundations/05-server-runtime.md#player-death-pass) catches the resulting negative HP on the same tick and fails the run. The [BUG-08 "avoid if HP > 2767"](combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max) hazard. |
 
 Exact heal amounts and durations TBD — see open questions in [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md).
 

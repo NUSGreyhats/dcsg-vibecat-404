@@ -70,6 +70,7 @@ export type S2CDataFor<T extends S2CType> = T extends typeof S2CType.AUTH_OK
         ? { room_index: number; room: RoomData; split_ms: number }
         : T extends typeof S2CType.RUN_COMPLETE
           ? {
+              outcome: RunOutcome;
               total_ms: number;
               rank: number;
               splits: SplitData[];
@@ -142,6 +143,15 @@ export type ProjSnapshot = {
 };
 
 export type SplitData = { room_index: number; time_ms: number; kills: number };
+
+// Terminal state of a run on the S2C_RUN_COMPLETE packet. Matches the
+// Go-side protocol.RunOutcome constants. Use the named members instead of
+// bare string literals.
+export const RunOutcome = {
+  COMPLETED: "completed",
+  FAILED: "failed",
+} as const;
+export type RunOutcome = (typeof RunOutcome)[keyof typeof RunOutcome];
 
 export type LeaderboardEntry = {
   rank: number;
