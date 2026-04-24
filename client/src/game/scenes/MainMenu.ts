@@ -355,7 +355,7 @@ export class MainMenu extends Phaser.Scene {
       type: "text" | "password";
       placeholder: string;
       maxLength: number;
-      autocomplete: string;
+      autocomplete: AutoFill;
     },
   ): HTMLInputElement {
     const canvas = this.game.canvas;

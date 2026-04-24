@@ -187,6 +187,10 @@ func (e *Engine) initRun(startTime int64) bool {
 	tmpl := RoomTemplates[1]
 	roomData := LoadRoom(e.room, e.run.MobRNG, tmpl, now)
 
+	// Honour Room 1's authored PlayerSpawn marker. NewPlayerState has
+	// only the heuristic bottom-center position; this overrides it.
+	placePlayerSpawn(e.player, 1)
+
 	e.send(protocol.S2CRunStarted, protocol.RunStartedData{
 		Seed: startTime,
 		Room: roomData,
@@ -537,10 +541,26 @@ func (e *Engine) sendState(now time.Time) {
 	e.send(protocol.S2CState, data)
 }
 
-// placePlayerSpawn finds a non-wall tile in the target room and places the
-// player there. Prefers the bottom-center; falls back to a spiral search.
+// placePlayerSpawn finds a spawn tile in the target room and places the
+// player there. Prefers the authored PlayerSpawn marker from the room's
+// Tiled Objects layer; falls back to a heuristic + spiral search if no
+// marker exists or the marker landed inside geometry.
 func placePlayerSpawn(p *PlayerState, roomIndex uint8) {
 	const hw, hh float32 = 10, 10
+	if sx, sy, ok := PlayerSpawnAt(roomIndex); ok {
+		// Marker is authoritative when present and clear of walls. If the
+		// authored point happens to overlap geometry, snap to the nearest
+		// non-wall tile rather than silently falling through to defaults
+		// — that keeps the room's "intended" entrance close to where the
+		// designer placed it.
+		if !BlockedAABB(roomIndex, sx, sy, hw, hh) {
+			p.X, p.Y = sx, sy
+			return
+		}
+		nx, ny := NearestNonWall(roomIndex, sx, sy)
+		p.X, p.Y = nx, ny
+		return
+	}
 	candidates := [][2]float32{
 		{RoomWidth / 2, RoomHeight - 100},
 		{RoomWidth / 2, RoomHeight / 2},
