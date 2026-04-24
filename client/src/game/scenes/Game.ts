@@ -44,6 +44,8 @@ export class Game extends Phaser.Scene {
   backgroundObjs: Phaser.GameObjects.GameObject[] = [];
   controls!: Controls;
   inputSendAcc = 0;
+  private requestedPickupIds = new Set<number>();
+  private requestedDoorIds = new Set<number>();
 
   constructor() {
     super({ key: "Game" });
@@ -107,17 +109,21 @@ export class Game extends Phaser.Scene {
     const slot = this.controls.weaponSwitchPressed();
     if (slot !== null) sync.sendSwitchWeapon(slot);
 
-    if (this.controls.interactPressed() && this.player) {
-      const id = this.nearestPickupId(this.player.x, this.player.y, 80);
-      if (id !== null) {
-        sync.sendInteract(id);
-      } else {
-        const doorId = this.nearestUnlockedDoorId(
-          this.player.x,
-          this.player.y,
-          80,
-        );
-        if (doorId !== null) sync.sendEnterDoor(doorId);
+    if (this.player) {
+      const pickupId = this.nearestPickupId(this.player.x, this.player.y, 24);
+      if (pickupId !== null && !this.requestedPickupIds.has(pickupId)) {
+        this.requestedPickupIds.add(pickupId);
+        sync.sendInteract(pickupId);
+      }
+
+      const doorId = this.nearestUnlockedDoorId(
+        this.player.x,
+        this.player.y,
+        28,
+      );
+      if (doorId !== null && !this.requestedDoorIds.has(doorId)) {
+        this.requestedDoorIds.add(doorId);
+        sync.sendEnterDoor(doorId);
       }
     }
 
@@ -206,6 +212,8 @@ export class Game extends Phaser.Scene {
     this.pickups.clear();
     for (const d of this.doors.values()) d.destroy();
     this.doors.clear();
+    this.requestedPickupIds.clear();
+    this.requestedDoorIds.clear();
 
     // Rebuild with the new room data.
     this.backgroundObjs = paintRoomBackground(this, room);

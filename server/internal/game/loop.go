@@ -324,7 +324,9 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 		if err := json.Unmarshal(env.Data, &pkt); err != nil {
 			return
 		}
-		HandleInteract(e.player, e.room, pkt.TargetID, now)
+		if consumed := HandleInteract(e.player, e.room, pkt.TargetID, now); consumed != nil {
+			e.send(protocol.S2CEntityDied, protocol.EntityDiedData{EntityID: pkt.TargetID})
+		}
 	case protocol.C2SEnterDoor:
 		var pkt protocol.EnterDoorPacket
 		if err := json.Unmarshal(env.Data, &pkt); err != nil {
