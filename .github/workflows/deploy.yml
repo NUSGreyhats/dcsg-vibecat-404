@@ -1,24 +1,99 @@
 name: Deploy to DigitalOcean
 
-# Stub on main. The real workflow body lives on deploy branches
-# (e.g. ci/deploy-digitalocean). workflow_dispatch uses the file
-# content from the ref passed at dispatch time, not this stub —
-# we only need this file to exist on the default branch so the
-# REST dispatch endpoint can locate the workflow.
-
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       ref:
-        description: "Git ref to deploy (branch / tag / SHA). Use a deploy branch for the real script."
+        description: "Git ref to deploy (branch / tag / SHA). Defaults to main."
         required: false
         default: main
 
+# Serialize deploys so two pushes in a row don't fight for the droplet.
+concurrency:
+  group: deploy-digitalocean
+  cancel-in-progress: false
+
 jobs:
-  noop:
+  deploy:
+    name: Deploy docker-compose stack
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     steps:
-      - name: Stub
-        run: |
-          echo "This is the stub deploy.yml on main."
-          echo "Re-run with ref=<deploy-branch> to execute the real deploy."
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          # Fail the step on any non-zero exit from the remote script.
+          script_stop: true
+          # Give docker builds room on slow droplets.
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+
+            REPO_SLUG="${{ github.repository }}"
+            REF="${{ github.event.inputs.ref || 'main' }}"
+            DIR="$HOME/defcon-game"
+
+            echo "==> Target: $REPO_SLUG @ $REF"
+            echo "==> Host:   $(hostname)  user: $(whoami)"
+            echo "==> Path:   $DIR"
+
+            # Preflight — make sure docker is usable without sudo.
+            docker version >/dev/null 2>&1 || {
+              echo "docker is not available to $USER — add the user to the 'docker' group or install docker." >&2
+              exit 1
+            }
+            docker compose version >/dev/null 2>&1 || {
+              echo "docker compose v2 is required (plugin or standalone compose-v2)." >&2
+              exit 1
+            }
+
+            # First deploy: clone. Subsequent: fetch + hard reset.
+            if [ ! -d "$DIR/.git" ]; then
+              echo "==> Cloning fresh checkout"
+              git clone --depth 50 "https://github.com/${REPO_SLUG}.git" "$DIR"
+            fi
+
+            cd "$DIR"
+            git remote set-url origin "https://github.com/${REPO_SLUG}.git"
+            git fetch --prune --tags origin "+refs/heads/*:refs/remotes/origin/*"
+            # Resolve REF to a full SHA so the deploy is unambiguous.
+            RESOLVED_SHA="$(git rev-parse "origin/${REF}" 2>/dev/null || git rev-parse "${REF}")"
+            echo "==> Resolved ${REF} → ${RESOLVED_SHA}"
+            git reset --hard "${RESOLVED_SHA}"
+
+            # Build + launch. --build forces a rebuild when source has changed.
+            echo "==> docker compose up -d --build"
+            docker compose up -d --build --remove-orphans
+
+            echo "==> docker image prune"
+            docker image prune -f >/dev/null
+
+            echo "==> Status"
+            docker compose ps
+
+            # Smoke-check: Caddy front on :3000, game-server /health on
+            # loopback :8080, and the /register page + identity HTTP API
+            # reachable through the Caddy proxy.
+            for i in 1 2 3 4 5; do
+              if curl -fsS http://localhost:3000/ >/dev/null 2>&1; then
+                echo "==> client reachable on :3000"
+                break
+              fi
+              echo "    waiting for client ($i/5)…"
+              sleep 2
+            done
+            curl -fsS http://127.0.0.1:8080/health >/dev/null \
+              && echo "==> game-server /health ok" \
+              || { echo "!! game-server /health failed" >&2; exit 1; }
+            curl -fsS http://localhost:3000/register >/dev/null \
+              && echo "==> /register reachable via Caddy" \
+              || { echo "!! /register unreachable via Caddy" >&2; exit 1; }
+
+            echo "==> Deploy complete: ${REPO_SLUG}@${RESOLVED_SHA}"

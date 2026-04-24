@@ -1,0 +1,38 @@
+{
+    auto_https off
+    admin off
+}
+
+:3000 {
+    encode gzip
+
+    @ws path /ws
+    handle @ws {
+        reverse_proxy game-server:8080
+    }
+
+    @api path /api/*
+    handle @api {
+        reverse_proxy game-server:8080
+    }
+
+    # Dev stand-in for the lobby registration page (see
+    # docs/specs/foundations/03-identity-auth.md § Implementation status).
+    @register path /register
+    handle @register {
+        reverse_proxy game-server:8080
+    }
+
+    handle {
+        root * /srv
+        # Hashed asset filenames (e.g. /assets/index-abc123.js) are safe to
+        # cache forever; index.html must always revalidate so fresh builds
+        # are picked up without a manual hard-refresh.
+        @immutable path /assets/*
+        header @immutable Cache-Control "public, max-age=31536000, immutable"
+        @html path / /index.html
+        header @html Cache-Control "no-cache"
+        try_files {path} {path}.html /index.html
+        file_server
+    }
+}

@@ -1,0 +1,109 @@
+# 08 — Leaderboard & Replay
+
+## Purpose
+
+Server-authoritative leaderboard + tamper-proof replay verification. Every completed run stores its full `InputLog`; the replay engine can re-run `(seed, InputLog)` and must produce the same final time. The leaderboard is the anticheat backstop that makes all the intentional bugs safe to ship — a "cheat" only counts if it reproduces from replay.
+
+## `CompletedRun`
+
+```go
+CompletedRun {
+    ReplayID        string
+    PlayerID        string
+    DisplayName     string
+    TotalMs         int64
+    Splits          []SplitData
+    Seed            int64
+    InputLog        []InputRecord
+    Checksum        [32]byte
+    SubmittedAt     time.Time
+}
+```
+
+- `ReplayID` is a server-generated UUID.
+- `Checksum = SHA256(seed || serialize(InputLog))`. Computed at submission and stored; the replay endpoint recomputes to detect tampering on `game.db` at rest.
+- `InputLog` is the full ordered sequence of C2S packets (after drain, within each tick).
+
+## Replay engine
+
+Given `(seed, InputLog)`:
+
+1. Construct a fresh `RunState` with `Seed` and `MobRNG` per [07-determinism-seeding.md](./07-determinism-seeding.md).
+2. Replay each `InputRecord` in order, running the same 20 Hz tick loop as live gameplay (see [05-server-runtime.md](./05-server-runtime.md)).
+3. Record the reproduced final `total_ms`. It must match `CompletedRun.TotalMs` to within replay tolerance (nanosecond-level — they should be exactly equal for deterministic bugs).
+
+**Non-deterministic bugs** (specifically [BUG-11](./05-server-runtime.md#bug-11-kill-log-append-race)) violate byte-exact reproduction. The replay engine accommodates this by accepting runs whose reproduced time is within a tolerance window derived from known race bounds. The exact tolerance is TBD — see open questions in [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md).
+
+## Data flow
+
+```
+gameLoop (per player)
+    │ appends to InputLog each tick (post-drain)
+    │ on run completion, builds CompletedRun + checksum
+    ▼
+completedRunCh (buf 128)
+    ▼
+leaderboard goroutine (single, server-lifetime)
+    │ INSERT INTO completed_runs
+    │ recompute rank
+    ▼
+game.db (SQLite)
+    ▼ (broadcast)
+S2C_LEADERBOARD to all connected players
+```
+
+Lobby reads `game.db` read-only for its public leaderboard and replay-download endpoints. See [04-lobby.md](./04-lobby.md).
+
+## `game.db` schema (target)
+
+```sql
+CREATE TABLE completed_runs (
+    replay_id      TEXT PRIMARY KEY,
+    player_id      TEXT NOT NULL,
+    display_name   TEXT NOT NULL,
+    total_ms       INTEGER NOT NULL,
+    seed           INTEGER NOT NULL,
+    splits_json    TEXT NOT NULL,
+    input_log      BLOB NOT NULL,
+    checksum       BLOB NOT NULL,
+    submitted_at   DATETIME NOT NULL
+);
+CREATE INDEX idx_runs_total_ms ON completed_runs(total_ms);
+CREATE INDEX idx_runs_player   ON completed_runs(player_id);
+```
+
+`InputLog` stored as a compact binary blob (msgpack or length-prefixed JSON — TBD).
+
+## `S2C_LEADERBOARD`
+
+```
+{
+  entries: [
+    { rank, display_name, total_ms, splits, seed, replay_id }
+  ]
+}
+```
+
+Broadcast to connected players on every new submission that changes the top N. Full rankings also available via `/api/leaderboard` on the lobby service.
+
+## Implementation notes
+
+- Leaderboard goroutine is spawned once at server startup and owns `game.db`. All inserts go through `completedRunCh`.
+- Broadcast to connected players: the leaderboard goroutine holds a registry of per-player `outCh`s populated at `C2S_AUTH` time. Non-blocking sends (drop if `outCh` is full — it's OK, the next broadcast will catch up).
+- Replay endpoint (on lobby) streams `InputLog` as-is. Optional: replay verification run on-demand from admin panel.
+
+## Implementation status
+
+Current server (`server/main.go`) persists winners to `winners.csv` with only `{name, timestamp}` — no `InputLog`, no checksum, no replay. Migration to `game.db` and the full replay pipeline is later work.
+
+## Intentional bugs in this area
+
+None — this is the anticheat backstop. Bugs found here (e.g., weak checksum, missing validation of replay length) must be **fixed**. Intentional bugs in the game loop rely on the replay system being correct, so they can be trusted not to invalidate legitimate runs.
+
+## Cross-references
+
+- [02-protocol.md](./02-protocol.md) — `S2C_LEADERBOARD`, `S2C_RUN_COMPLETE`.
+- [05-server-runtime.md](./05-server-runtime.md) — `completedRunCh`, leaderboard goroutine.
+- [06-game-state-conventions.md](./06-game-state-conventions.md) — `InputLog`, `Splits`, `Seed`.
+- [07-determinism-seeding.md](./07-determinism-seeding.md) — RNG consumption invariant replay depends on.
+- [04-lobby.md](./04-lobby.md) — public `/api/leaderboard` + `/api/replay/:replay_id` endpoints.

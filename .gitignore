@@ -1,0 +1,28 @@
+# Build artifacts
+server/server
+server/defcon-server
+server/cmd/server/server
+server/bin/
+server/*.test
+
+# Databases and data at rest
+*.db
+*.db-shm
+*.db-wal
+/data/
+server/data/stripped-source/
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Dependencies / installer output
+node_modules/
+dist/
+
+# Local env overrides
+.env
+.env.local

@@ -1,83 +1,196 @@
 import Phaser from "phaser";
-import {
-  ENEMY_SPEED,
-  ENEMY_HEALTH,
-  ENEMY_HEAVY_HEALTH,
-  ENEMY_GRUNT_DAMAGE,
-  ENEMY_HEAVY_DAMAGE,
-} from "../constants";
 
-export type RobotType = "robot-grunt" | "robot-heavy";
+import type { EntitySnapshot } from "../../net/packet";
+import { directionFromVector, type Direction8 } from "../ui/anims";
+import { BONE_WHITE, HP_AMBER, HP_GREEN, HP_RED } from "../ui/tokens";
 
-export default class Enemy extends Phaser.Physics.Arcade.Sprite {
-  syncId: number = 0;
-  health: number;
-  damage: number;
-  private moveSpeed: number;
-  private target: Phaser.GameObjects.Sprite;
+const LERP_FACTOR = 0.3;
+const HP_BAR_WIDTH = 28;
+const HP_BAR_HEIGHT = 3;
+const HP_BAR_OFFSET_Y = -24;
+const IDLE_EPSILON = 0.4;
 
-  constructor(
-    scene: Phaser.Scene,
-    x: number,
-    y: number,
-    type: RobotType,
-    target: Phaser.GameObjects.Sprite,
-  ) {
-    super(scene, x, y, type);
+const ENEMY_TYPE = {
+  GRUNT: 1,
+  RUNNER: 2,
+  TANK: 3,
+  KAMIKAZE: 4,
+  BOSS: 5,
+} as const;
 
-    this.target = target;
+/**
+ * Archetype tint — the enemy atlas ships a single white-cat silhouette
+ * with red markings. Per-archetype visual variation comes from a
+ * multiplicative tint. Tints push white into red/blue/yellow hues
+ * without losing the red blood markings.
+ */
+function tintForType(type: number): number {
+  switch (type) {
+    case ENEMY_TYPE.GRUNT:
+      return 0xffffff; // stock white
+    case ENEMY_TYPE.RUNNER:
+      return 0xffc080; // warm amber — runner
+    case ENEMY_TYPE.TANK:
+      return 0x9eb8ff; // steely blue — armored
+    case ENEMY_TYPE.KAMIKAZE:
+      return 0xff8080; // pink-red — volatile
+    case ENEMY_TYPE.BOSS:
+      return 0xffd0d0; // pale blood — boss
+    default:
+      return 0xcccccc;
+  }
+}
+
+function sizeForType(type: number): number {
+  switch (type) {
+    case ENEMY_TYPE.TANK:
+    case ENEMY_TYPE.BOSS:
+      return 44;
+    case ENEMY_TYPE.KAMIKAZE:
+      return 20;
+    default:
+      return 32;
+  }
+}
+
+/**
+ * Server-driven AI actor. Rendered as a masked-kitsune-cat from
+ * `enemy.json`; tinted and scaled per archetype. Direction and
+ * walk/idle state derive from the lerp delta each tick.
+ */
+export class Enemy extends Phaser.GameObjects.Container {
+  readonly entityId: number;
+  readonly enemyType: number;
+  sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Rectangle;
+  private readonly hpBar: Phaser.GameObjects.Graphics;
+  private readonly maxHp: number;
+  private currentHp: number;
+  private targetX: number;
+  private targetY: number;
+  private dying = false;
+  private facing: Direction8 = "down";
+  private moving = false;
+
+  constructor(scene: Phaser.Scene, snap: EntitySnapshot) {
+    super(scene, snap.x, snap.y);
+    this.entityId = snap.entity_id;
+    this.enemyType = snap.type;
+    this.maxHp = Math.max(1, snap.hp);
+    this.currentHp = snap.hp;
+    this.targetX = snap.x;
+    this.targetY = snap.y;
+
+    const size = sizeForType(snap.type);
+    const tint = tintForType(snap.type);
+
+    if (scene.textures.exists("enemy")) {
+      const sprite = scene.add.sprite(0, 0, "enemy");
+      sprite.setDisplaySize(size, size);
+      sprite.setTint(tint);
+      this.sprite = sprite;
+      this.playAnim("idle");
+    } else {
+      this.sprite = scene.add.rectangle(0, 0, size, size, tint);
+    }
+    this.add(this.sprite);
+
+    this.hpBar = scene.add.graphics();
+    this.add(this.hpBar);
+    this.drawHpBar();
 
     scene.add.existing(this);
-    scene.physics.add.existing(this);
-
-    const body = this.body as Phaser.Physics.Arcade.Body;
-
-    if (type === "robot-heavy") {
-      this.health = ENEMY_HEAVY_HEALTH;
-      this.damage = ENEMY_HEAVY_DAMAGE;
-      this.moveSpeed = ENEMY_SPEED * 0.7;
-      body.setCircle(16, 4, 4);
-    } else {
-      this.health = ENEMY_HEALTH;
-      this.damage = ENEMY_GRUNT_DAMAGE;
-      this.moveSpeed = ENEMY_SPEED;
-      body.setCircle(12, 4, 4);
-    }
-
-    this.setDepth(8);
   }
 
-  update() {
-    if (!this.target || !this.target.active) {
-      this.setVelocity(0);
+  applySnapshot(snap: EntitySnapshot): void {
+    if (this.dying) return;
+    this.targetX = snap.x;
+    this.targetY = snap.y;
+    if (snap.hp !== this.currentHp) {
+      this.currentHp = snap.hp;
+      this.drawHpBar();
+    }
+  }
+
+  tick(_dt: number): void {
+    if (this.dying) return;
+
+    const dx = this.targetX - this.x;
+    const dy = this.targetY - this.y;
+    this.x = Phaser.Math.Linear(this.x, this.targetX, LERP_FACTOR);
+    this.y = Phaser.Math.Linear(this.y, this.targetY, LERP_FACTOR);
+
+    const facing = directionFromVector(dx, dy, IDLE_EPSILON);
+    const moving = facing !== null;
+    if (facing !== null && facing !== this.facing) {
+      this.facing = facing;
+    }
+    if (moving !== this.moving) {
+      this.moving = moving;
+      this.playAnim(moving ? "walk" : "idle");
+    } else if (moving && this.sprite instanceof Phaser.GameObjects.Sprite) {
+      const expected = `enemy-walk_${this.facing}`;
+      if (this.sprite.anims?.currentAnim?.key !== expected) {
+        this.playAnim("walk");
+      }
+    }
+  }
+
+  markDead(): void {
+    if (this.dying) return;
+    this.dying = true;
+
+    const target = this.sprite;
+    if (target instanceof Phaser.GameObjects.Sprite) {
+      target.setTintFill(0xffffff);
+    } else {
+      target.setFillStyle(0xffffff);
+    }
+
+    this.scene.tweens.add({
+      targets: this,
+      alpha: 0,
+      scaleX: 1.4,
+      scaleY: 1.4,
+      duration: 180,
+      ease: "Cubic.easeOut",
+      onComplete: () => {
+        this.destroy();
+      },
+    });
+  }
+
+  private playAnim(kind: "idle" | "walk"): void {
+    if (!(this.sprite instanceof Phaser.GameObjects.Sprite)) return;
+    const key = `enemy-${kind}_${this.facing}`;
+    if (!this.scene?.anims?.exists(key)) return;
+    if (this.sprite.anims.currentAnim?.key === key) return;
+    this.sprite.play(key);
+  }
+
+  private drawHpBar(): void {
+    const ratio = Phaser.Math.Clamp(this.currentHp / this.maxHp, 0, 1);
+    const filled = Math.floor(HP_BAR_WIDTH * ratio);
+
+    this.hpBar.clear();
+    if (ratio >= 1 || this.currentHp <= 0) {
       return;
     }
-
-    const angle = Phaser.Math.Angle.Between(
-      this.x,
-      this.y,
-      this.target.x,
-      this.target.y,
+    this.hpBar.fillStyle(0x200000, 1);
+    this.hpBar.fillRect(
+      -HP_BAR_WIDTH / 2,
+      HP_BAR_OFFSET_Y,
+      HP_BAR_WIDTH,
+      HP_BAR_HEIGHT,
     );
-    this.setRotation(angle);
-    this.setVelocity(
-      Math.cos(angle) * this.moveSpeed,
-      Math.sin(angle) * this.moveSpeed,
+    const color = ratio > 0.5 ? HP_GREEN : ratio > 0.25 ? HP_AMBER : HP_RED;
+    this.hpBar.fillStyle(color, 1);
+    this.hpBar.fillRect(-HP_BAR_WIDTH / 2, HP_BAR_OFFSET_Y, filled, HP_BAR_HEIGHT);
+    this.hpBar.lineStyle(1, BONE_WHITE, 0.5);
+    this.hpBar.strokeRect(
+      -HP_BAR_WIDTH / 2,
+      HP_BAR_OFFSET_Y,
+      HP_BAR_WIDTH,
+      HP_BAR_HEIGHT,
     );
-  }
-
-  takeDamage(amount: number): boolean {
-    this.health -= amount;
-
-    this.setTintFill(0xffffff);
-    this.scene.time.delayedCall(80, () => {
-      if (this.active) this.clearTint();
-    });
-
-    if (this.health <= 0) {
-      this.destroy();
-      return true;
-    }
-    return false;
   }
 }

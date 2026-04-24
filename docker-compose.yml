@@ -1,0 +1,33 @@
+services:
+  game-server:
+    build: ./server
+    environment:
+      LISTEN_ADDR: ":8080"
+      # identity mode: WS C2S_AUTH requires the player_id to exist in
+      # identity.db. Players must register (username + password) before
+      # they can play.
+      AUTH_MODE: "identity"
+      MAX_CONCURRENT: "64"
+      GAME_DB: "/data/game.db"
+      IDENTITY_DB: "/data/identity.db"
+      ALLOWLIST_PATH: "/data/allowlist.json"
+    volumes:
+      - game-data:/data
+    # Bind to loopback only: all browser traffic goes through the Caddy
+    # client container on :3000, which reverse-proxies /ws, /api/*, and
+    # /register here. Binding to 127.0.0.1 keeps the dev-only leaderboard
+    # JSON endpoint off the public internet on the DO droplet.
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+  client:
+    build: ./client
+    ports:
+      - "3000:3000"
+    depends_on:
+      - game-server
+    restart: unless-stopped
+
+volumes:
+  game-data:

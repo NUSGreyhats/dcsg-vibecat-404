@@ -1,39 +1,131 @@
-export default class Controls {
-  keys: any;
+import Phaser from "phaser";
 
-  constructor(scene: Phaser.Scene) {
-    this.keys = scene.input.keyboard!.addKeys({
-      up: Phaser.Input.Keyboard.KeyCodes.W,
-      down: Phaser.Input.Keyboard.KeyCodes.S,
-      left: Phaser.Input.Keyboard.KeyCodes.A,
-      right: Phaser.Input.Keyboard.KeyCodes.D,
+export type MovementInput = { dx: number; dy: number };
 
-      up2: Phaser.Input.Keyboard.KeyCodes.UP,
-      down2: Phaser.Input.Keyboard.KeyCodes.DOWN,
-      left2: Phaser.Input.Keyboard.KeyCodes.LEFT,
-      right2: Phaser.Input.Keyboard.KeyCodes.RIGHT,
+export type Controls = {
+  movement(): MovementInput;
+  aimAngle(pivotX: number, pivotY: number): number;
+  shootPressed(): boolean;
+  shootHeld(): boolean;
+  interactPressed(): boolean;
+  inventoryPressed(): boolean;
+  pausePressed(): boolean;
+  weaponSwitchPressed(): number | null;
+};
 
-      sprint: Phaser.Input.Keyboard.KeyCodes.SHIFT,
-    });
+type KeyMap = {
+  w: Phaser.Input.Keyboard.Key;
+  a: Phaser.Input.Keyboard.Key;
+  s: Phaser.Input.Keyboard.Key;
+  d: Phaser.Input.Keyboard.Key;
+  up: Phaser.Input.Keyboard.Key;
+  down: Phaser.Input.Keyboard.Key;
+  left: Phaser.Input.Keyboard.Key;
+  right: Phaser.Input.Keyboard.Key;
+  interact: Phaser.Input.Keyboard.Key;
+  inventory: Phaser.Input.Keyboard.Key;
+  pause: Phaser.Input.Keyboard.Key;
+  one: Phaser.Input.Keyboard.Key;
+  two: Phaser.Input.Keyboard.Key;
+  three: Phaser.Input.Keyboard.Key;
+};
+
+/**
+ * Build a {@link Controls} facade over a scene. Each method re-reads
+ * live input state — nothing is cached across ticks so callers always
+ * see the latest values.
+ */
+export function createControls(scene: Phaser.Scene): Controls {
+  const kb = scene.input.keyboard;
+  if (!kb) {
+    // Keyboard plugin disabled — return a no-op facade so callers
+    // don't crash when asked for input.
+    return {
+      movement: () => ({ dx: 0, dy: 0 }),
+      aimAngle: () => 0,
+      shootPressed: () => false,
+      shootHeld: () => false,
+      interactPressed: () => false,
+      inventoryPressed: () => false,
+      pausePressed: () => false,
+      weaponSwitchPressed: () => null,
+    };
   }
 
-  get moveLeft(): boolean {
-    return this.keys.left.isDown || this.keys.left2.isDown;
-  }
+  const keys: KeyMap = {
+    w: kb.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+    a: kb.addKey(Phaser.Input.Keyboard.KeyCodes.A),
+    s: kb.addKey(Phaser.Input.Keyboard.KeyCodes.S),
+    d: kb.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+    up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+    down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
+    left: kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
+    right: kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
+    interact: kb.addKey(Phaser.Input.Keyboard.KeyCodes.E),
+    inventory: kb.addKey(Phaser.Input.Keyboard.KeyCodes.I),
+    pause: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
+    one: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
+    two: kb.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
+    three: kb.addKey(Phaser.Input.Keyboard.KeyCodes.THREE),
+  };
 
-  get moveRight(): boolean {
-    return this.keys.right.isDown || this.keys.right2.isDown;
-  }
+  // Phaser's pointer API doesn't expose a frame-bounded "just pressed"
+  // for the main button, so we track the edge ourselves.
+  let shootEdge = false;
+  scene.input.on(Phaser.Input.Events.POINTER_DOWN, (p: Phaser.Input.Pointer) => {
+    if (p.leftButtonDown()) {
+      shootEdge = true;
+    }
+  });
 
-  get moveUp(): boolean {
-    return this.keys.up.isDown || this.keys.up2.isDown;
-  }
+  const justDown = Phaser.Input.Keyboard.JustDown;
 
-  get moveDown(): boolean {
-    return this.keys.down.isDown || this.keys.down2.isDown;
-  }
-
-  get sprint(): boolean {
-    return this.keys.sprint.isDown;
-  }
+  return {
+    movement(): MovementInput {
+      let dx = 0;
+      let dy = 0;
+      if (keys.a.isDown || keys.left.isDown) dx -= 1;
+      if (keys.d.isDown || keys.right.isDown) dx += 1;
+      if (keys.w.isDown || keys.up.isDown) dy -= 1;
+      if (keys.s.isDown || keys.down.isDown) dy += 1;
+      const mag = Math.hypot(dx, dy);
+      if (mag > 1) {
+        dx /= mag;
+        dy /= mag;
+      }
+      return { dx, dy };
+    },
+    aimAngle(pivotX: number, pivotY: number): number {
+      const p = scene.input.activePointer;
+      // Prefer world coords so camera scroll doesn't warp the angle.
+      const worldX = Number.isFinite(p.worldX) ? p.worldX : p.x;
+      const worldY = Number.isFinite(p.worldY) ? p.worldY : p.y;
+      return Math.atan2(worldY - pivotY, worldX - pivotX);
+    },
+    shootPressed(): boolean {
+      if (shootEdge) {
+        shootEdge = false;
+        return true;
+      }
+      return false;
+    },
+    shootHeld(): boolean {
+      return scene.input.activePointer.leftButtonDown();
+    },
+    interactPressed(): boolean {
+      return justDown(keys.interact);
+    },
+    inventoryPressed(): boolean {
+      return justDown(keys.inventory);
+    },
+    pausePressed(): boolean {
+      return justDown(keys.pause);
+    },
+    weaponSwitchPressed(): number | null {
+      if (justDown(keys.one)) return 1;
+      if (justDown(keys.two)) return 2;
+      if (justDown(keys.three)) return 3;
+      return null;
+    },
+  };
 }

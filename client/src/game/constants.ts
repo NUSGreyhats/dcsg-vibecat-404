@@ -1,26 +1,23 @@
-export const SPEED = 300;
-export const SPRINT_MULTIPLIER = 2;
-
-export const BULLET_SPEED = 600;
-export const BULLET_LIFESPAN = 2000;
-
-export const ENEMY_SPEED = 120;
-export const ENEMY_HEALTH = 3;
-export const ENEMY_HEAVY_HEALTH = 6;
-export const ENEMY_GRUNT_DAMAGE = 1;
-export const ENEMY_HEAVY_DAMAGE = 2;
-
 export const ROOM_WIDTH = 1280;
 export const ROOM_HEIGHT = 768;
-export const ROOM_COUNT = 10;
+export const ROOM_COUNT = 11;
+export const WIN_ROOM = 11;
 
-export const PLAYER_MAX_HEALTH = 10;
-export const PLAYER_INVINCIBLE_MS = 800;
+export const PLAYER_MAX_HEALTH = 100;
 
-export const WS_URL = "ws://localhost:8888/ws";
-export const STATE_SYNC_INTERVAL_MS = 1000;
+export const WS_URL = (() => {
+  if (typeof window !== "undefined" && window.location) {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    // In prod, the reverse proxy routes /ws → game-server :8080.
+    // In dev, override with VITE_WS_URL to point at :8080 directly.
+    const override = import.meta.env?.VITE_WS_URL as string | undefined;
+    if (override) return override;
+    return `${proto}//${window.location.host}/ws`;
+  }
+  return "ws://localhost:8080/ws";
+})();
 
-export const WIN_ROOM = 10;
+// Tick intervals (server runs at 20 Hz).
+export const INPUT_SEND_INTERVAL_MS = 50;
 
-/** Base framerate (fps) for the player walk cycle. Higher = faster leg movement. */
 export const WALK_ANIM_FRAMERATE = 8;

@@ -1,580 +1,308 @@
-import Phaser, { Scene } from "phaser";
-import Controls from "./utils/Controls";
-import Player from "../entities/Player";
-import Enemy, { RobotType } from "../entities/Enemy";
-import Bullet from "../entities/Bullet";
-import Coin from "../entities/Coin";
+import Phaser from "phaser";
+import { getSync } from "../net/runContext";
 import {
   ROOM_WIDTH,
   ROOM_HEIGHT,
-  WS_URL,
-  STATE_SYNC_INTERVAL_MS,
-  WIN_ROOM,
+  INPUT_SEND_INTERVAL_MS,
 } from "../constants";
-import { getPlayerName } from "./MainMenu";
-import GameStateSync from "../net/GameStateSync";
-import { getWeaponStats, type WeaponId } from "../weapons";
-import { KEYCODE_BACKTICK } from "../shop";
+import { Player } from "../entities/Player";
+import { Enemy } from "../entities/Enemy";
+import { Bullet } from "../entities/Bullet";
+import { Pickup } from "../entities/Pickup";
+import { Door } from "../entities/Door";
+import {
+  paintRoomBackground,
+  buildRoom,
+  type BuiltRoom,
+} from "../world/roomLayout";
+import { createControls, type Controls } from "./utils/Controls";
+import type {
+  RoomData,
+  EntitySnapshot,
+  ProjSnapshot,
+  PlayerSnapshot,
+  SplitData,
+} from "../../net/packet";
 
-const DOOR_COLOR = 0x6b4423;
+type StatePayload = {
+  elapsed_ms: number;
+  player: PlayerSnapshot;
+  entities: EntitySnapshot[];
+  projectiles: ProjSnapshot[];
+};
 
-function getObjProp(
-  obj: Phaser.Types.Tilemaps.TiledObject,
-  name: string,
-): string | undefined {
-  if (!obj.properties) return undefined;
-  if (Array.isArray(obj.properties)) {
-    const prop = (obj.properties as { name: string; value: string }[]).find(
-      (p) => p.name === name,
-    );
-    return prop?.value;
-  }
-  return (obj.properties as Record<string, string>)[name];
-}
-
-export class Game extends Scene {
-  camera: Phaser.Cameras.Scene2D.Camera;
-  controls: Controls;
-  player: Player;
-  enemies: Phaser.GameObjects.Group;
-  bullets: Phaser.GameObjects.Group;
-  coins: Phaser.GameObjects.Group;
-
-  private currentMap: Phaser.Tilemaps.Tilemap | null = null;
-  private groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
-  private wallsLayer: Phaser.Tilemaps.TilemapLayer | null = null;
-  private wallColliders: Phaser.Physics.Arcade.Collider[] = [];
-  private doorBlockerGroup: Phaser.Physics.Arcade.StaticGroup | null = null;
-  private doorBlocker: Phaser.GameObjects.Rectangle | null = null;
-  private exitZone: Phaser.GameObjects.Rectangle | null = null;
-  private exitDoorCollider: Phaser.Physics.Arcade.Collider | null = null;
-  private exitZoneData: {
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-  } | null = null;
-  private doorOpen = false;
-  private lastShotTime = 0;
-  private killCount = 0;
-  private nextEnemyId = 0;
-  private gameOver = false;
-  private exitThrottle = false;
-  inventoryOpen = false;
-  shopOpen = false;
-  playerName = "Player";
-  private stateSync: GameStateSync | null = null;
+/**
+ * The main gameplay scene. Owns entity maps keyed by server ID, reconciles
+ * each server "state" snapshot, and forwards local input.
+ */
+export class Game extends Phaser.Scene {
+  player?: Player;
+  enemies: Map<number, Enemy> = new Map();
+  projectiles: Map<number, Bullet> = new Map();
+  pickups: Map<number, Pickup> = new Map();
+  doors: Map<number, Door> = new Map();
+  backgroundObjs: Phaser.GameObjects.GameObject[] = [];
+  controls!: Controls;
+  inputSendAcc = 0;
 
   constructor() {
-    super("Game");
+    super({ key: "Game" });
   }
 
-  create() {
-    this.killCount = 0;
-    this.gameOver = false;
-    this.exitThrottle = false;
-    this.inventoryOpen = false;
-    this.shopOpen = false;
-    this.playerName = getPlayerName();
+  create(): void {
+    const sync = getSync();
+    this.controls = createControls(this);
 
-    this.wallColliders = [];
-    this.exitDoorCollider = null;
-    this.exitZone = null;
-    this.exitZoneData = null;
-    this.doorBlocker = null;
-    this.doorBlockerGroup = null;
-    this.groundLayer = null;
-    this.wallsLayer = null;
-    this.currentMap = null;
-
-    this.enemies = this.add.group();
-    this.bullets = this.add.group();
-    this.coins = this.add.group();
-
-    this.controls = new Controls(this);
-    this.player = new Player(
-      this,
-      ROOM_WIDTH / 2,
-      ROOM_HEIGHT / 2,
-      this.controls,
-    );
-
-    this.physics.add.overlap(
-      this.bullets,
-      this.enemies,
-      (bulletObj, enemyObj) =>
-        this.onBulletHitEnemy(bulletObj as Bullet, enemyObj as Enemy),
-    );
-
-    this.physics.add.overlap(
-      this.player,
-      this.enemies,
-      (_playerObj, enemyObj) => this.onEnemyHitPlayer(enemyObj as Enemy),
-    );
-
-    this.physics.add.overlap(this.player, this.coins, (_playerObj, coinObj) =>
-      this.onPlayerPickupCoin(coinObj as Coin),
-    );
-
-    this.camera = this.cameras.main;
-    this.camera.setBackgroundColor(0x1a1a2e);
-    this.cameras.main.setBounds(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
-    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
-
-    this.scene.launch("GameHUD");
-    this.loadRoom();
-    this.events.emit("coin-count-changed", this.player.coins);
-    this.events.emit(
-      "weapon-changed",
-      getWeaponStats(this.player.equippedWeaponId).displayName,
-    );
-
-    const kb = this.input.keyboard!;
-    const K = Phaser.Input.Keyboard.KeyCodes;
-    kb.addKey(K.I).on("down", () => this.tryOpenInventory());
-    kb.addKey(K.TAB).on("down", () => this.tryOpenInventory());
-    kb.addKey(KEYCODE_BACKTICK).on("down", () => this.tryOpenShop());
-
-    kb.on("keydown-ESC", () => {
-      if (this.gameOver || this.inventoryOpen || this.shopOpen) return;
-      this.scene.pause();
-      this.scene.launch("PauseMenu", { gameOver: false });
-    });
-
-    this.events.on("resume", () => {
-      this.input.keyboard!.resetKeys();
-    });
-
-    this.stateSync = new GameStateSync(this, WS_URL, STATE_SYNC_INTERVAL_MS);
-    this.stateSync.start();
-
-    this.events.once("shutdown", () => {
-      this.stateSync?.stop();
-      this.stateSync = null;
-    });
-  }
-
-  getKillCount(): number {
-    return this.killCount;
-  }
-
-  getEnemyStates(): Array<{
-    id: number;
-    x: number;
-    y: number;
-    hp: number;
-    type: string;
-  }> {
-    const result: Array<{
-      id: number;
-      x: number;
-      y: number;
-      hp: number;
-      type: string;
-    }> = [];
-    for (const child of this.enemies.getChildren()) {
-      const e = child as Enemy;
-      if (!e.active) continue;
-      result.push({
-        id: e.syncId,
-        x: Math.round(e.x * 100) / 100,
-        y: Math.round(e.y * 100) / 100,
-        hp: e.health,
-        type: e.texture.key,
-      });
-    }
-    return result;
-  }
-
-  rollbackEnemies(
-    enemyStates: Array<{
-      id: number;
-      x: number;
-      y: number;
-      hp: number;
-      type: string;
-    }>,
-  ) {
-    const existingMap = new Map<number, Enemy>();
-    for (const child of this.enemies.getChildren()) {
-      const e = child as Enemy;
-      if (e.active) existingMap.set(e.syncId, e);
-    }
-
-    const rolledBackIds = new Set<number>();
-    for (const es of enemyStates) {
-      rolledBackIds.add(es.id);
-      const existing = existingMap.get(es.id);
-      if (existing) {
-        existing.setPosition(es.x, es.y);
-        existing.health = es.hp;
-      } else {
-        const enemy = new Enemy(
-          this,
-          es.x,
-          es.y,
-          es.type as RobotType,
-          this.player,
-        );
-        enemy.syncId = es.id;
-        enemy.health = es.hp;
-        this.enemies.add(enemy);
-      }
-    }
-
-    for (const [id, enemy] of existingMap) {
-      if (!rolledBackIds.has(id)) {
-        enemy.destroy();
-      }
-    }
-  }
-
-  applyRollbackState(
-    currentRoom: number,
-    kills: number,
-    enemyStates: Array<{
-      id: number;
-      x: number;
-      y: number;
-      hp: number;
-      type: string;
-    }>,
-  ) {
-    if (this.player.progress.currentRoom !== currentRoom) {
-      this.player.progress.currentRoom = currentRoom;
-      this.exitThrottle = false;
-      this.loadRoom();
-    }
-
-    this.killCount = kills;
-    this.events.emit("kill-count-changed", this.killCount);
-
-    this.rollbackEnemies(enemyStates);
-    this.checkRoomCleared();
-  }
-
-  tryOpenInventory() {
-    if (this.gameOver || this.inventoryOpen || this.shopOpen) return;
-    this.inventoryOpen = true;
-    this.input.keyboard!.enabled = false;
-    this.scene.pause();
-    this.scene.launch("InventoryMenu");
-  }
-
-  tryOpenShop() {
-    if (this.gameOver || this.shopOpen || this.inventoryOpen) return;
-    this.shopOpen = true;
-    this.input.keyboard!.enabled = false;
-    this.scene.pause();
-    this.scene.launch("ShopMenu");
-  }
-
-  tryPurchaseShopWeapon(id: WeaponId, price: number): boolean {
-    if (this.player.ownsWeapon(id) || this.player.coins < price) return false;
-    this.player.coins -= price;
-    if (!this.player.acquireWeapon(id)) {
-      this.player.coins += price;
-      return false;
-    }
-    this.events.emit("coin-count-changed", this.player.coins);
-    return true;
-  }
-
-  playerEquipWeapon(id: WeaponId): boolean {
-    if (!this.player.equipWeapon(id)) return false;
-    this.events.emit("weapon-changed", getWeaponStats(id).displayName);
-    return true;
-  }
-
-  // ---- Room lifecycle (tilemap-based) ----
-
-  private clearRoomGeometry() {
-    for (const c of this.wallColliders) c.destroy();
-    this.wallColliders = [];
-
-    if (this.exitDoorCollider) {
-      this.exitDoorCollider.destroy();
-      this.exitDoorCollider = null;
-    }
-
-    this.exitZone?.destroy();
-    this.exitZone = null;
-    this.exitZoneData = null;
-
-    this.doorBlockerGroup?.clear(true, true);
-    this.doorBlocker = null;
-
-    this.groundLayer?.destroy();
-    this.wallsLayer?.destroy();
-    this.currentMap?.destroy();
-    this.groundLayer = null;
-    this.wallsLayer = null;
-    this.currentMap = null;
-
-    for (const e of this.enemies.getChildren().slice()) (e as Enemy).destroy();
-    for (const b of this.bullets.getChildren().slice()) (b as Bullet).destroy();
-    for (const c of this.coins.getChildren().slice()) (c as Coin).destroy();
-  }
-
-  private loadRoom() {
-    this.clearRoomGeometry();
-    this.doorOpen = false;
-
-    const roomNum = this.player.progress.currentRoom;
-
-    const map = this.make.tilemap({ key: `room-${roomNum}` });
-    const tileset = map.addTilesetImage("defcon_tileset", "defcon-tiles")!;
-
-    this.groundLayer = map.createLayer("Ground", tileset)!;
-    this.groundLayer.setDepth(-5);
-
-    this.wallsLayer = map.createLayer("Walls", tileset)!;
-    this.wallsLayer.setDepth(0);
-    this.wallsLayer.setCollisionByExclusion([-1, 0]);
-
-    this.currentMap = map;
-
-    this.doorBlockerGroup = this.physics.add.staticGroup();
-
-    this.wallColliders.push(
-      this.physics.add.collider(this.player, this.wallsLayer),
-      this.physics.add.collider(this.enemies, this.wallsLayer),
-      this.physics.add.collider(this.bullets, this.wallsLayer, (b) => {
-        (b as Bullet).destroy();
-      }),
-      this.physics.add.collider(this.player, this.doorBlockerGroup!),
-      this.physics.add.collider(this.enemies, this.doorBlockerGroup!),
-      this.physics.add.collider(this.bullets, this.doorBlockerGroup!, (b) => {
-        (b as Bullet).destroy();
-      }),
-    );
-
-    const objects = map.getObjectLayer("Objects")?.objects ?? [];
-
-    const ps = objects.find((o) => o.type === "PlayerSpawn");
-    if (ps) this.player.setPosition(ps.x!, ps.y!);
-    this.player.setVelocity(0, 0);
-
-    const db = objects.find((o) => o.type === "DoorBlocker");
-    if (db && db.width && db.height) {
-      this.doorBlocker = this.add.rectangle(
-        db.x! + db.width / 2,
-        db.y! + db.height / 2,
-        db.width,
-        db.height,
-        DOOR_COLOR,
-      );
-      this.doorBlocker.setDepth(0);
-      this.physics.add.existing(this.doorBlocker, true);
-      this.doorBlockerGroup!.add(this.doorBlocker);
-    }
-
-    const ez = objects.find((o) => o.type === "Exit");
-    if (ez && ez.width && ez.height) {
-      this.exitZoneData = {
-        x: ez.x!,
-        y: ez.y!,
-        w: ez.width,
-        h: ez.height,
-      };
-    }
-
-    for (const es of objects.filter((o) => o.type === "EnemySpawn")) {
-      const enemyType = (getObjProp(es, "enemyType") ||
-        "robot-grunt") as RobotType;
-      const enemy = new Enemy(this, es.x!, es.y!, enemyType, this.player);
-      enemy.syncId = this.nextEnemyId++;
-      this.enemies.add(enemy);
-    }
-
-    for (const cs of objects.filter((o) => o.type === "CoinSpawn")) {
-      const in_wall = getObjProp(cs, "in_wall") === "true";
-      const coin = new Coin(this, cs.x!, cs.y!, in_wall);
-      this.coins.add(coin);
-    }
-
-    this.events.emit("room-changed", roomNum);
-  }
-
-  // ---- Door / exit ----
-
-  private tryAdvanceThroughDoor() {
-    if (!this.doorOpen || this.gameOver || this.exitThrottle) return;
-    this.exitThrottle = true;
-    this.player.progress.currentRoom += 1;
-
-    if (this.player.progress.currentRoom > WIN_ROOM) {
-      this.gameOver = true;
-      this.stateSync?.sendStateNow();
-      this.player.setVelocity(0);
-      this.physics.pause();
-      this.scene.launch("WinScreen");
+    const roomData = sync.state.roomData;
+    if (!roomData) {
+      this.scene.start("MainMenu");
       return;
     }
 
-    this.time.delayedCall(200, () => {
-      this.exitThrottle = false;
-    });
-    this.loadRoom();
+    this.backgroundObjs = paintRoomBackground(this, roomData);
+    const built = buildRoom(this, roomData);
+    this.enemies = built.enemies;
+    this.pickups = built.pickups;
+    this.doors = built.doors;
+
+    const px = sync.state.player?.x ?? ROOM_WIDTH / 2;
+    const py = sync.state.player?.y ?? ROOM_HEIGHT - 100;
+    this.player = new Player(this, px, py);
+    this.add.existing(this.player);
+
+    sync.state.on("state", this.onServerState, this);
+    sync.state.on("roomLoad", this.onRoomLoad, this);
+    sync.state.on("doorUnlocked", this.onDoorUnlocked, this);
+    sync.state.on("entityDied", this.onEntityDied, this);
+    sync.state.on("runComplete", this.onRunComplete, this);
+
+    this.events.on("shutdown", this.cleanup, this);
   }
 
-  private openExitDoor() {
-    if (this.doorOpen) return;
-    this.doorOpen = true;
+  update(_time: number, delta: number): void {
+    if (!this.controls) return;
+    const dt = delta / 1000;
+    this.player?.tick(dt);
+    for (const e of this.enemies.values()) e.tick(dt);
+    for (const b of this.projectiles.values()) b.tick(dt);
 
-    if (this.doorBlocker) {
-      this.doorBlockerGroup!.remove(this.doorBlocker, true, true);
-      this.doorBlocker = null;
+    this.handleInput(delta);
+  }
+
+  private handleInput(delta: number): void {
+    const sync = getSync();
+    const mv = this.controls.movement();
+    this.inputSendAcc += delta;
+    if (this.inputSendAcc >= INPUT_SEND_INTERVAL_MS) {
+      sync.sendInput(mv.dx, mv.dy);
+      this.inputSendAcc = 0;
     }
 
-    if (!this.exitZoneData) return;
-    const z = this.exitZoneData;
-
-    this.exitZone = this.add.rectangle(
-      z.x + z.w / 2,
-      z.y + z.h / 2,
-      z.w,
-      z.h,
-      0x66ff99,
-      0.2,
-    );
-    this.exitZone.setDepth(-3);
-    this.physics.add.existing(this.exitZone, true);
-    const eb = this.exitZone.body as Phaser.Physics.Arcade.StaticBody;
-    eb.updateFromGameObject();
-
-    this.tweens.add({
-      targets: this.exitZone,
-      alpha: { from: 0.12, to: 0.35 },
-      duration: 550,
-      yoyo: true,
-      repeat: -1,
-    });
-
-    if (this.exitDoorCollider) this.exitDoorCollider.destroy();
-    this.exitDoorCollider = this.physics.add.overlap(
-      this.player,
-      this.exitZone,
-      () => this.tryAdvanceThroughDoor(),
-    );
-  }
-
-  private checkRoomCleared() {
-    if (this.doorOpen || this.gameOver) return;
-    let alive = 0;
-    for (const c of this.enemies.getChildren()) {
-      if ((c as Enemy).active) alive++;
+    if (this.controls.shootPressed() && this.player) {
+      const angle = this.controls.aimAngle(this.player.x, this.player.y);
+      sync.sendShoot(angle);
+      this.player.triggerShootAnim();
     }
-    if (alive === 0) {
-      this.openExitDoor();
+
+    const slot = this.controls.weaponSwitchPressed();
+    if (slot !== null) sync.sendSwitchWeapon(slot);
+
+    if (this.controls.interactPressed() && this.player) {
+      const id = this.nearestPickupId(this.player.x, this.player.y, 80);
+      if (id !== null) {
+        sync.sendInteract(id);
+      } else {
+        const doorId = this.nearestUnlockedDoorId(
+          this.player.x,
+          this.player.y,
+          80,
+        );
+        if (doorId !== null) sync.sendEnterDoor(doorId);
+      }
     }
-  }
 
-  // ---- Combat ----
+    if (this.controls.inventoryPressed()) {
+      this.scene.launch("InventoryMenu");
+      this.scene.pause();
+    }
 
-  private shootBullet() {
-    const w = getWeaponStats(this.player.equippedWeaponId);
-    if (this.time.now < this.lastShotTime + w.cooldownMs) return;
-    this.lastShotTime = this.time.now;
-
-    const angle = this.player.getAimAngle();
-
-    const spawnX = this.player.x + Math.cos(angle) * 20;
-    const spawnY = this.player.y + Math.sin(angle) * 20;
-
-    const bullet = new Bullet(this, spawnX, spawnY, angle, {
-      speed: w.bulletSpeed,
-      damage: w.damage,
-      textureKey: w.bulletTextureKey,
-      bodyRadius: w.bulletBodyRadius,
-    });
-    this.bullets.add(bullet);
-
-    this.player.playShootAnimation();
-
-    const flash = this.add
-      .circle(spawnX, spawnY, 6, 0xffff00, 0.8)
-      .setDepth(12);
-    this.tweens.add({
-      targets: flash,
-      alpha: 0,
-      scale: 2,
-      duration: 80,
-      onComplete: () => flash.destroy(),
-    });
-  }
-
-  private onBulletHitEnemy(bullet: Bullet, enemy: Enemy) {
-    if (!bullet.active || !enemy.active) return;
-
-    const ex = enemy.x;
-    const ey = enemy.y;
-
-    bullet.destroy();
-    const died = enemy.takeDamage(bullet.damage);
-
-    if (died) {
-      this.killCount++;
-      this.events.emit("kill-count-changed", this.killCount);
-
-      const explosion = this.add.circle(ex, ey, 16, 0xff6600, 0.7).setDepth(15);
-      this.tweens.add({
-        targets: explosion,
-        alpha: 0,
-        scale: 2.5,
-        duration: 300,
-        onComplete: () => explosion.destroy(),
-      });
+    if (this.controls.pausePressed()) {
+      this.scene.launch("PauseMenu");
+      this.scene.pause();
     }
   }
 
-  private onEnemyHitPlayer(enemy: Enemy) {
-    if (!enemy.active || this.gameOver) return;
+  private onServerState(payload: StatePayload): void {
+    // Player
+    if (this.player && payload.player) {
+      this.player.applySnapshot(payload.player);
+    }
 
-    const dmg = enemy.damage;
-    enemy.destroy();
+    const seenEntityIds = new Set<number>();
+    for (const snap of payload.entities) {
+      // state === 3 is AIDead on the server. The server already filters
+      // these out, but stay defensive: a dead snap for an enemy we've
+      // already torn down must not respawn it.
+      if (snap.state === 3) continue;
+      seenEntityIds.add(snap.entity_id);
+      let enemy = this.enemies.get(snap.entity_id);
+      if (!enemy) {
+        enemy = new Enemy(this, snap);
+        this.add.existing(enemy);
+        this.enemies.set(snap.entity_id, enemy);
+      }
+      enemy.applySnapshot(snap);
+    }
 
-    const damaged = this.player.takeDamage(dmg);
-    if (!damaged) return;
+    // Reconcile projectiles.
+    const seenProjIds = new Set<number>();
+    for (const p of payload.projectiles) {
+      seenProjIds.add(p.proj_id);
+      let bullet = this.projectiles.get(p.proj_id);
+      if (!bullet) {
+        bullet = new Bullet(this, p);
+        this.add.existing(bullet);
+        this.projectiles.set(p.proj_id, bullet);
+      }
+      bullet.applySnapshot(p);
+    }
+    // Despawn missing projectiles.
+    for (const [id, bullet] of this.projectiles) {
+      if (!seenProjIds.has(id)) {
+        bullet.destroy();
+        this.projectiles.delete(id);
+      }
+    }
 
-    this.events.emit(
-      "player-health-changed",
-      this.player.health,
-      this.player.maxHealth,
-    );
-
-    if (this.player.health <= 0) {
-      this.gameOver = true;
-      this.player.setVelocity(0);
-      this.physics.pause();
-      this.scene.launch("PauseMenu", { gameOver: true });
+    // Drop enemies/pickups that the server marked dead.
+    const state = getSync().state;
+    for (const id of state.deadEntities) {
+      const e = this.enemies.get(id);
+      if (e) {
+        e.markDead();
+        this.enemies.delete(id);
+      }
+      const pk = this.pickups.get(id);
+      if (pk) {
+        pk.setConsumed();
+        this.pickups.delete(id);
+      }
     }
   }
 
-  private onPlayerPickupCoin(coin: Coin) {
-    if (!coin.active || this.gameOver) return;
-    coin.destroy();
-    this.player.coins += 1;
-    this.events.emit("coin-count-changed", this.player.coins);
+  private onRoomLoad(
+    _roomIndex: number,
+    room: RoomData,
+    _splitMs: number,
+  ): void {
+    // Wipe the old room.
+    for (const obj of this.backgroundObjs) obj.destroy();
+    this.backgroundObjs = [];
+    for (const e of this.enemies.values()) e.destroy();
+    this.enemies.clear();
+    for (const b of this.projectiles.values()) b.destroy();
+    this.projectiles.clear();
+    for (const p of this.pickups.values()) p.destroy();
+    this.pickups.clear();
+    for (const d of this.doors.values()) d.destroy();
+    this.doors.clear();
+
+    // Rebuild with the new room data.
+    this.backgroundObjs = paintRoomBackground(this, room);
+    const built: BuiltRoom = buildRoom(this, room);
+    this.enemies = built.enemies;
+    this.pickups = built.pickups;
+    this.doors = built.doors;
+
+    // Reposition the persistent player at the server-provided start.
+    const sync = getSync();
+    const px = sync.state.player?.x ?? ROOM_WIDTH / 2;
+    const py = sync.state.player?.y ?? ROOM_HEIGHT - 100;
+    if (this.player) {
+      this.player.setPosition(px, py);
+    }
   }
 
-  update(_time: number, delta: number) {
-    if (this.gameOver) return;
+  private onDoorUnlocked(doorId: number): void {
+    this.doors.get(doorId)?.setUnlocked(true);
+  }
 
-    this.player.update();
+  private onEntityDied(entityId: number): void {
+    this.enemies.get(entityId)?.markDead();
+    this.pickups.get(entityId)?.setConsumed();
+  }
 
-    if (this.input.activePointer.isDown) {
-      this.shootBullet();
+  private onRunComplete(
+    _totalMs: number,
+    _rank: number,
+    _splits: SplitData[],
+  ): void {
+    this.scene.stop("GameHUD");
+    this.scene.start("WinScreen");
+  }
+
+  private nearestPickupId(
+    x: number,
+    y: number,
+    radius: number,
+  ): number | null {
+    let bestId: number | null = null;
+    let bestDist = radius * radius;
+    for (const [id, pk] of this.pickups) {
+      const dx = pk.x - x;
+      const dy = pk.y - y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 <= bestDist) {
+        bestDist = d2;
+        bestId = id;
+      }
     }
+    return bestId;
+  }
 
-    for (const enemy of this.enemies.getChildren().slice()) {
-      if ((enemy as Enemy).active) (enemy as Enemy).update();
+  private nearestUnlockedDoorId(
+    x: number,
+    y: number,
+    radius: number,
+  ): number | null {
+    const unlocked = getSync().state.unlockedDoors;
+    let bestId: number | null = null;
+    let bestDist = radius * radius;
+    for (const [id, door] of this.doors) {
+      if (!unlocked.has(id)) continue;
+      const dx = door.x - x;
+      const dy = door.y - y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 <= bestDist) {
+        bestDist = d2;
+        bestId = id;
+      }
     }
+    return bestId;
+  }
 
-    for (const bullet of this.bullets.getChildren().slice()) {
-      if ((bullet as Bullet).active) (bullet as Bullet).update(_time, delta);
-    }
+  private cleanup(): void {
+    const sync = getSync();
+    sync.state.off("state", this.onServerState, this);
+    sync.state.off("roomLoad", this.onRoomLoad, this);
+    sync.state.off("doorUnlocked", this.onDoorUnlocked, this);
+    sync.state.off("entityDied", this.onEntityDied, this);
+    sync.state.off("runComplete", this.onRunComplete, this);
 
-    this.checkRoomCleared();
+    for (const obj of this.backgroundObjs) obj.destroy();
+    this.backgroundObjs = [];
+    for (const e of this.enemies.values()) e.destroy();
+    this.enemies.clear();
+    for (const b of this.projectiles.values()) b.destroy();
+    this.projectiles.clear();
+    for (const p of this.pickups.values()) p.destroy();
+    this.pickups.clear();
+    for (const d of this.doors.values()) d.destroy();
+    this.doors.clear();
+
+    this.player?.destroy();
+    this.player = undefined;
   }
 }
+
+export default Game;

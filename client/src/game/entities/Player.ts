@@ -1,225 +1,258 @@
 import Phaser from "phaser";
-import Controls from "../scenes/utils/Controls";
+
+import { PLAYER_MAX_HEALTH } from "../constants";
+import { directionFromVector, type Direction8 } from "../ui/anims";
+import { ALL_WEAPON_IDS, WEAPON_STATS, type WeaponId } from "../weapons";
 import {
-  SPEED,
-  SPRINT_MULTIPLIER,
-  PLAYER_MAX_HEALTH,
-  PLAYER_INVINCIBLE_MS,
-  WALK_ANIM_FRAMERATE,
-} from "../constants";
-import { type WeaponId, getWeaponStats } from "../weapons";
+  BONE_WHITE,
+  BLOOD_RED,
+  DEPTH_PLAYER,
+  HP_AMBER,
+  HP_GREEN,
+  HP_RED,
+} from "../ui/tokens";
 
-type Direction =
-  | "down"
-  | "downright"
-  | "right"
-  | "upright"
-  | "up"
-  | "upleft"
-  | "left"
-  | "downleft";
+const LERP_FACTOR = 0.3;
+const HP_BAR_WIDTH = 32;
+const HP_BAR_HEIGHT = 4;
+const HP_BAR_OFFSET_Y = -22;
+const DEFAULT_SIZE = 32;
+const HP_BAR_BG = 0x220a0a;
+// Below this lerp-delta the player is considered stationary and plays
+// the idle anim instead of walk.
+const MOVE_EPSILON = 0.4;
+// Distance the weapon muzzle sits out from the player's center along
+// the aim vector.
+const WEAPON_OFFSET = 14;
 
-const DIR_FROM_INDEX: Direction[] = [
-  "right",
-  "downright",
-  "down",
-  "downleft",
-  "left",
-  "upleft",
-  "up",
-  "upright",
-];
+/**
+ * Locally-controlled player avatar.
+ *
+ * Rendering only — does not own any networking state. Call
+ * {@link applySnapshot} whenever a server PlayerSnapshot arrives and
+ * {@link tick} every frame so the rendered sprite lerps toward the
+ * server-authoritative position. Facing follows the mouse cursor; the
+ * weapon sprite orbits the player along the same aim angle.
+ */
+export class Player extends Phaser.GameObjects.Container {
+  readonly sprite: Phaser.GameObjects.Sprite;
+  private readonly hpBar: Phaser.GameObjects.Graphics;
+  private readonly weaponSprite: Phaser.GameObjects.Sprite;
+  private lastHp = PLAYER_MAX_HEALTH;
+  private targetX: number;
+  private targetY: number;
+  private facing: Direction8 = "down";
+  private moving = false;
+  private aimAngle = 0;
+  private weaponId: WeaponId = "pistol";
 
-function angleToDirection(angle: number): Direction {
-  const TWO_PI = Math.PI * 2;
-  const normalized = ((angle % TWO_PI) + TWO_PI) % TWO_PI;
-  const index = Math.round(normalized / (Math.PI / 4)) % 8;
-  return DIR_FROM_INDEX[index];
-}
+  constructor(scene: Phaser.Scene, x: number, y: number) {
+    super(scene, x, y);
+    this.targetX = x;
+    this.targetY = y;
 
-export default class Player extends Phaser.Physics.Arcade.Sprite {
-  controls: Controls;
-  health: number;
-  maxHealth: number;
-  coins: number;
-  ownedWeaponIds: WeaponId[];
-  equippedWeaponId: WeaponId;
-  progress: { currentRoom: number };
-  walkAnimFrameRate: number;
-  weaponSprite: Phaser.GameObjects.Sprite;
-  private invincibleUntil: number = 0;
-  private currentDirection: Direction = "down";
-  private aimAngle: number = 0;
+    if (scene.textures.exists("player")) {
+      this.sprite = scene.add.sprite(0, 0, "player");
+      this.sprite.setDisplaySize(DEFAULT_SIZE, DEFAULT_SIZE);
+      this.add(this.sprite);
+      this.playAnim("idle");
+    } else {
+      const fallbackKey = "__player_fallback_tex";
+      if (!scene.textures.exists(fallbackKey)) {
+        const g = scene.make.graphics({ x: 0, y: 0 }, false);
+        g.fillStyle(BLOOD_RED, 1);
+        g.fillRect(0, 0, DEFAULT_SIZE, DEFAULT_SIZE);
+        g.generateTexture(fallbackKey, DEFAULT_SIZE, DEFAULT_SIZE);
+        g.destroy();
+      }
+      this.sprite = scene.add.sprite(0, 0, fallbackKey);
+      this.add(this.sprite);
+    }
 
-  constructor(scene: Phaser.Scene, x: number, y: number, controls: Controls) {
-    super(scene, x, y, "player");
+    this.hpBar = scene.add.graphics();
+    this.add(this.hpBar);
+    this.drawHpBar(this.lastHp);
 
-    this.controls = controls;
-    this.progress = { currentRoom: 1 };
-    this.coins = 0;
-    this.ownedWeaponIds = ["pistol"];
-    this.equippedWeaponId = "pistol";
-    this.maxHealth = PLAYER_MAX_HEALTH;
-    this.health = this.maxHealth;
-    this.walkAnimFrameRate = WALK_ANIM_FRAMERATE;
+    // Keep the player above tilemaps (depth 0) and entities (depth ≈ 0–5).
+    // Without this, a room tilemap loaded on C2S_ROOM_LOAD renders on top
+    // of the player and visually hides them.
+    this.setDepth(DEPTH_PLAYER);
+
+    // Weapon sprite is a sibling, not a child — its world-space position
+    // is driven by the player's aim angle, not the container's transform.
+    const weaponKey = WEAPON_STATS[this.weaponId].spriteKey;
+    const initialKey = scene.textures.exists(weaponKey)
+      ? weaponKey
+      : "__fallback_pixel";
+    this.weaponSprite = scene.add.sprite(x, y, initialKey);
+    this.weaponSprite.setOrigin(0.5, 0.5);
+    this.weaponSprite.setDepth(DEPTH_PLAYER + 1);
+    this.playWeaponAnim("idle");
 
     scene.add.existing(this);
-    scene.physics.add.existing(this);
-
-    const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setCircle(12, this.width / 2 - 12, this.height / 2 - 12);
-
-    this.setDepth(10);
-    this.play("idle_down");
-
-    const wStats = getWeaponStats(this.equippedWeaponId);
-    this.weaponSprite = scene.add.sprite(x, y, wStats.spriteKey);
-    this.weaponSprite.setOrigin(0.5, 0.5);
-    this.weaponSprite.setDepth(11);
-    this.weaponSprite.play(`${wStats.spriteKey}_idle`);
   }
 
-  getAimAngle(): number {
-    return this.aimAngle;
+  /**
+   * Apply a server snapshot. The rendered position is not set
+   * immediately; instead we store the target so {@link tick} can
+   * smoothly interpolate toward it.
+   */
+  applySnapshot(snap: {
+    x: number;
+    y: number;
+    hp: number;
+    weapon_id?: number;
+  }): void {
+    this.targetX = snap.x;
+    this.targetY = snap.y;
+    if (snap.hp !== this.lastHp) {
+      this.lastHp = snap.hp;
+      this.drawHpBar(snap.hp);
+    }
+    if (typeof snap.weapon_id === "number") {
+      const idx = Phaser.Math.Clamp(
+        snap.weapon_id,
+        0,
+        ALL_WEAPON_IDS.length - 1,
+      );
+      const next = ALL_WEAPON_IDS[idx];
+      if (next !== this.weaponId) {
+        this.weaponId = next;
+        const spriteKey = WEAPON_STATS[next].spriteKey;
+        if (this.scene.textures.exists(spriteKey)) {
+          this.weaponSprite.setTexture(spriteKey);
+        }
+        this.playWeaponAnim("idle");
+      }
+    }
   }
 
-  switchWeaponSprite() {
-    const wStats = getWeaponStats(this.equippedWeaponId);
-    this.weaponSprite.setTexture(wStats.spriteKey);
-    this.weaponSprite.play(`${wStats.spriteKey}_idle`);
-  }
-
-  playShootAnimation() {
-    const wStats = getWeaponStats(this.equippedWeaponId);
-    const shootKey = `${wStats.spriteKey}_shoot`;
-    const idleKey = `${wStats.spriteKey}_idle`;
+  /**
+   * Play the shoot animation, then fall back to idle. Called by the
+   * Game scene whenever the player fires.
+   */
+  triggerShootAnim(): void {
+    const spriteKey = WEAPON_STATS[this.weaponId].spriteKey;
+    const shootKey = `${spriteKey}_shoot`;
+    const idleKey = `${spriteKey}_idle`;
+    if (!this.scene?.anims?.exists(shootKey)) return;
     this.weaponSprite.play(shootKey);
-    this.weaponSprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
-      if (this.weaponSprite.active) {
-        this.weaponSprite.play(idleKey);
-      }
-    });
-  }
-
-  takeDamage(amount: number): boolean {
-    if (this.scene.time.now < this.invincibleUntil) return false;
-
-    this.health = Math.max(0, this.health - amount);
-    this.invincibleUntil = this.scene.time.now + PLAYER_INVINCIBLE_MS;
-
-    this.setTintFill(0xff0000);
-    this.scene.time.delayedCall(150, () => {
-      if (this.active) this.clearTint();
-    });
-
-    const blinkCount = Math.floor(PLAYER_INVINCIBLE_MS / 200) - 1;
-    this.scene.tweens.add({
-      targets: this,
-      alpha: 0.3,
-      duration: 100,
-      yoyo: true,
-      repeat: blinkCount,
-      onComplete: () => {
-        if (this.active) this.setAlpha(1);
+    this.weaponSprite.once(
+      Phaser.Animations.Events.ANIMATION_COMPLETE,
+      () => {
+        if (this.weaponSprite.active && this.scene?.anims?.exists(idleKey)) {
+          this.weaponSprite.play(idleKey);
+        }
       },
-    });
-
-    return true;
-  }
-
-  ownsWeapon(id: WeaponId): boolean {
-    return this.ownedWeaponIds.includes(id);
-  }
-
-  equipWeapon(id: WeaponId): boolean {
-    if (!this.ownsWeapon(id)) return false;
-    this.equippedWeaponId = id;
-    this.switchWeaponSprite();
-    return true;
-  }
-
-  acquireWeapon(id: WeaponId): boolean {
-    if (this.ownsWeapon(id)) return false;
-    this.ownedWeaponIds.push(id);
-    return true;
-  }
-
-  update() {
-    const speed = SPEED * (this.controls.sprint ? SPRINT_MULTIPLIER : 1);
-
-    this.setVelocity(0);
-
-    if (this.controls.moveLeft) {
-      this.setVelocityX(-1);
-    }
-
-    if (this.controls.moveRight) {
-      this.setVelocityX(1);
-    }
-
-    if (this.controls.moveUp) {
-      this.setVelocityY(-1);
-    }
-
-    if (this.controls.moveDown) {
-      this.setVelocityY(1);
-    }
-
-    this.body!.velocity.normalize().scale(speed);
-
-    const pointer = this.scene.input.activePointer;
-    pointer.updateWorldPoint(this.scene.cameras.main);
-    this.aimAngle = Phaser.Math.Angle.Between(
-      this.x,
-      this.y,
-      pointer.worldX,
-      pointer.worldY,
     );
+  }
 
-    this.currentDirection = angleToDirection(this.aimAngle);
+  /**
+   * Advance smoothing by one frame. Updates facing + anim from the
+   * aim direction (mouse) so the sprite reads where the player is
+   * looking, while moving state follows the lerp delta so idle vs
+   * walk reflects actual motion.
+   */
+  tick(_dt: number): void {
+    // Aim toward the pointer in world-space coords. Re-projecting per
+    // frame guards against camera scroll changing the relationship
+    // between screen pixels and world coords.
+    const pointer = this.scene.input.activePointer;
+    const cam = this.scene.cameras.main;
+    if (cam) pointer.updateWorldPoint(cam);
+    const worldX = Number.isFinite(pointer.worldX) ? pointer.worldX : pointer.x;
+    const worldY = Number.isFinite(pointer.worldY) ? pointer.worldY : pointer.y;
+    this.aimAngle = Math.atan2(worldY - this.y, worldX - this.x);
 
-    const isMoving = this.body!.velocity.length() > 0;
-    const animKey = isMoving
-      ? `walk_${this.currentDirection}`
-      : `idle_${this.currentDirection}`;
+    // Smooth toward the server-authoritative target position.
+    const dx = this.targetX - this.x;
+    const dy = this.targetY - this.y;
+    this.x = Phaser.Math.Linear(this.x, this.targetX, LERP_FACTOR);
+    this.y = Phaser.Math.Linear(this.y, this.targetY, LERP_FACTOR);
 
-    if (this.anims.currentAnim?.key !== animKey) {
-      const frameRate = isMoving
-        ? this.walkAnimFrameRate *
-          (this.controls.sprint ? SPRINT_MULTIPLIER : 1)
-        : undefined;
-      this.play({ key: animKey, frameRate, repeat: -1 });
-    } else if (isMoving) {
-      const targetRate =
-        this.walkAnimFrameRate *
-        (this.controls.sprint ? SPRINT_MULTIPLIER : 1);
-      if (this.anims.msPerFrame !== Math.floor(1000 / targetRate)) {
-        this.anims.msPerFrame = Math.floor(1000 / targetRate);
-      }
+    // Facing follows aim direction; moving state follows lerp delta.
+    const aimFacing =
+      directionFromVector(
+        Math.cos(this.aimAngle),
+        Math.sin(this.aimAngle),
+        0.01,
+      ) ?? this.facing;
+    const moving =
+      Math.abs(dx) >= MOVE_EPSILON || Math.abs(dy) >= MOVE_EPSILON;
+
+    const facingChanged = aimFacing !== this.facing;
+    this.facing = aimFacing;
+    if (moving !== this.moving || facingChanged) {
+      this.moving = moving;
+      this.playAnim(moving ? "walk" : "idle");
     }
 
     this.updateWeaponSprite();
   }
 
-  private updateWeaponSprite() {
-    const WEAPON_OFFSET = 14;
+  private playAnim(kind: "idle" | "walk"): void {
+    const key = `player-${kind}_${this.facing}`;
+    if (!this.sprite.anims || !this.scene?.anims?.exists(key)) return;
+    if (this.sprite.anims.currentAnim?.key === key) return;
+    this.sprite.play(key);
+  }
+
+  private playWeaponAnim(kind: "idle" | "shoot"): void {
+    const spriteKey = WEAPON_STATS[this.weaponId].spriteKey;
+    const key = `${spriteKey}_${kind}`;
+    if (!this.scene?.anims?.exists(key)) return;
+    if (this.weaponSprite.anims?.currentAnim?.key === key) return;
+    this.weaponSprite.play(key);
+  }
+
+  private updateWeaponSprite(): void {
     this.weaponSprite.setPosition(
       this.x + Math.cos(this.aimAngle) * WEAPON_OFFSET,
       this.y + Math.sin(this.aimAngle) * WEAPON_OFFSET,
     );
-
     this.weaponSprite.setRotation(this.aimAngle);
 
+    // Aiming left = upper hemisphere of unit circle in screen coords;
+    // flip the sprite vertically so the barrel reads right-side-up.
     const aimingLeft =
       this.aimAngle < -Math.PI / 2 || this.aimAngle > Math.PI / 2;
     this.weaponSprite.setFlipY(aimingLeft);
 
-    // Aiming upward → weapon behind player; aiming downward → weapon in front.
+    // Aiming up = draw weapon behind the player so it tucks under the
+    // shoulder; aiming down = weapon in front.
     const aimingUp = this.aimAngle < 0;
-    this.weaponSprite.setDepth(aimingUp ? this.depth - 1 : this.depth + 1);
+    this.weaponSprite.setDepth(
+      aimingUp ? DEPTH_PLAYER - 1 : DEPTH_PLAYER + 1,
+    );
   }
 
-  destroy(fromScene?: boolean) {
+  private drawHpBar(hp: number): void {
+    const clamped = Phaser.Math.Clamp(hp, 0, PLAYER_MAX_HEALTH);
+    const ratio = clamped / PLAYER_MAX_HEALTH;
+    const filled = Math.floor(HP_BAR_WIDTH * ratio);
+
+    this.hpBar.clear();
+    this.hpBar.fillStyle(HP_BAR_BG, 1);
+    this.hpBar.fillRect(
+      -HP_BAR_WIDTH / 2,
+      HP_BAR_OFFSET_Y,
+      HP_BAR_WIDTH,
+      HP_BAR_HEIGHT,
+    );
+    const color = ratio > 0.6 ? HP_GREEN : ratio > 0.3 ? HP_AMBER : HP_RED;
+    this.hpBar.fillStyle(color, 1);
+    this.hpBar.fillRect(-HP_BAR_WIDTH / 2, HP_BAR_OFFSET_Y, filled, HP_BAR_HEIGHT);
+    // Thin bone-white outline for legibility against busy tiles.
+    this.hpBar.lineStyle(1, BONE_WHITE, 0.7);
+    this.hpBar.strokeRect(
+      -HP_BAR_WIDTH / 2,
+      HP_BAR_OFFSET_Y,
+      HP_BAR_WIDTH,
+      HP_BAR_HEIGHT,
+    );
+  }
+
+  destroy(fromScene?: boolean): void {
     this.weaponSprite?.destroy();
     super.destroy(fromScene);
   }
