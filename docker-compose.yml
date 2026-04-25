@@ -30,6 +30,10 @@ services:
     environment:
       LISTEN_ADDR: ":3001"
       IDENTITY_DB: "/data/identity.db"
+      # Read-only access to the game server's leaderboard DB. WAL mode
+      # (set in server/internal/leaderboard/db.go) lets both processes
+      # share the file safely.
+      GAME_DB: "/data/game.db"
     volumes:
       - game-data:/data
     # Loopback only — public traffic enters via the Caddy client container.

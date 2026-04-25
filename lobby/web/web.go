@@ -1,0 +1,7 @@
+// Package web embeds lobby static assets so they ship inside the binary.
+package web
+
+import _ "embed"
+
+//go:embed leaderboard.html
+var LeaderboardHTML []byte
