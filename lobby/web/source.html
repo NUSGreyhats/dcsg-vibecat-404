@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VIBECAT 404 — Source</title>
+<style>
+  :root {
+    --midnight: #0d1222;
+    --deep-navy: #1a2338;
+    --navy: #2b3d5c;
+    --mid-blue: #5c8fbf;
+    --bone: #f5f0e6;
+    --muted: #8a8679;
+    --accent: #ffdd33;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--midnight);
+    color: var(--bone);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 14px;
+    padding: 24px;
+  }
+  header {
+    max-width: 760px; margin: 0 auto 16px;
+    display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  }
+  h1 { margin: 0; font-size: 22px; letter-spacing: 1px; }
+  nav a { color: var(--mid-blue); text-decoration: none; font-size: 13px; }
+  nav a:hover { color: var(--accent); }
+  main {
+    max-width: 760px; margin: 0 auto;
+    background: var(--deep-navy); border: 2px solid var(--mid-blue); padding: 24px;
+  }
+  p { line-height: 1.6; }
+  ul { line-height: 1.8; padding-left: 20px; }
+  code { background: var(--navy); padding: 1px 6px; }
+  a.download {
+    display: inline-block; margin-top: 16px;
+    padding: 12px 24px; background: var(--accent); color: var(--midnight);
+    text-decoration: none; font-weight: bold; letter-spacing: 1px;
+  }
+  a.download:hover { background: var(--bone); }
+  .meta { margin-top: 16px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Source</h1>
+  <nav>
+    <a href="/leaderboard">→ Leaderboard</a>
+    &nbsp;·&nbsp;
+    <a href="/spectate">→ Spectate</a>
+    &nbsp;·&nbsp;
+    <a href="/">→ Play</a>
+  </nav>
+</header>
+<main>
+  <p>The game's client and server source ship in a single tarball. Download, untar, and read with whatever editor you like — there's no formatting trickery.</p>
+  <p>Inside:</p>
+  <ul>
+    <li><code>server/</code> — the Go game-server runtime</li>
+    <li><code>pkg/</code> — shared Go modules the server imports</li>
+    <li><code>client/</code> — the Phaser client (TypeScript)</li>
+  </ul>
+  <p>Comments, tests, and build configs are stripped. The result still compiles cleanly.</p>
+  <a class="download" href="/source.tar.gz" download>Download source.tar.gz</a>
+  <div class="meta">Untar with <code>tar xzf source.tar.gz</code>. Lobby internals, build infra, and developer docs are not included.</div>
+</main>
+</body>
+</html>

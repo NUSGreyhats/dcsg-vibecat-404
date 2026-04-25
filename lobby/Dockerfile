@@ -25,12 +25,14 @@ COPY pkg ./pkg
 COPY server ./server
 COPY client ./client
 COPY tools ./tools
-RUN cd tools/strip && go run . -in /repo -out /stripped
+RUN cd tools/strip && go run . -in /repo -out /stripped \
+ && tar -C /stripped -czf /source.tar.gz . \
+ && ls -la /source.tar.gz
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates && mkdir -p /data
 WORKDIR /app
 COPY --from=build /out/lobby /app/lobby
-COPY --from=strip /stripped /app/stripped-source
+COPY --from=strip /source.tar.gz /app/source.tar.gz
 EXPOSE 3001
 ENTRYPOINT ["/app/lobby"]

@@ -97,7 +97,7 @@ The published tree contains exactly the code a player would need to study to fin
 
 1. The strip tool (`tools/strip`) runs as a multi-stage build inside `lobby/Dockerfile` — a dedicated `strip` stage walks the allowlist, transforms each file, and writes the result into `/stripped`. The runtime stage `COPY --from=strip /stripped /app/stripped-source`. A broken strip fails the image build, so deploys can't silently ship an empty source tree.
 2. On deploy, `docker compose up -d --build` rebuilds the lobby image and the freshly stripped source ships with it. No volume passing, no separate artifact.
-3. Lobby serves `/app/stripped-source/` at `http://:3000/source/` via `http.FileServer`. `SOURCE_DIR` defaults to `/app/stripped-source` and can be overridden to point at a host mount for ad-hoc testing.
+3. Lobby serves the tarball as a single download at `http://:3000/source.tar.gz`, with a small HTML landing page at `/source` linking to it. Players untar and browse with their editor — no per-file HTTP traversal, no SPA collisions when paths land on `client/index.html`. `SOURCE_TARBALL` defaults to `/app/source.tar.gz` and can be overridden for ad-hoc testing.
 4. Air-gapped prod: the lobby image goes inside the `.tar.gz` Release bundle alongside the rest of the stack — stripped source is part of the image, no extra step.
 
 ### Why lobby, not GitHub Pages

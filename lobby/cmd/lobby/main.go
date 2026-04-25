@@ -37,7 +37,7 @@ func main() {
 	identityDBPath := envDefault("IDENTITY_DB", "/data/identity.db")
 	gameDBPath := envDefault("GAME_DB", "/data/game.db")
 	gameServerURL := envDefault("GAME_SERVER_URL", "http://game-server:8080")
-	sourceDir := envDefault("SOURCE_DIR", "/data/stripped-source")
+	sourceTarball := envDefault("SOURCE_TARBALL", "/app/source.tar.gz")
 	adminUser := os.Getenv("ADMIN_USER")
 	adminPassHash := []byte(os.Getenv("ADMIN_PASS_HASH"))
 
@@ -196,15 +196,28 @@ func main() {
 		}
 	})))
 
-	// /source/* — read-only static serving of the stripped source tree.
-	// http.Dir prevents directory traversal outside sourceDir; the
-	// stripped tree itself is the canonical allowlist (lobby/, tools/,
-	// docs/ etc. are never copied in by tools/strip — see
-	// docs/specs/foundations/09-ci-cd-deploy.md). If sourceDir doesn't
-	// exist yet (fresh deploy, CI hasn't populated the tarball), the
-	// handler 404s — that's the expected state pre-Phase-4c.
-	sourceFS := http.FileServer(http.Dir(sourceDir))
-	mux.Handle("/source/", http.StripPrefix("/source/", sourceFS))
+	// /source — landing page that points at the tarball. /source.tar.gz
+	// streams the file built at image-build time by the strip stage in
+	// lobby/Dockerfile. Players download once and browse the tree
+	// locally; no per-file HTTP traversal, no index.html collisions
+	// with the stripped client/index.html, no surprise SPA rendering.
+	mux.HandleFunc("/source", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(web.SourceHTML)
+	})
+	mux.HandleFunc("/source.tar.gz", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", `attachment; filename="source.tar.gz"`)
+		http.ServeFile(w, r, sourceTarball)
+	})
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -220,7 +233,7 @@ func main() {
 		if adminUser != "" && len(adminPassHash) > 0 {
 			adminEnabled = "on (user=" + adminUser + ")"
 		}
-		log.Printf("lobby: listening on %s (identity_db=%s game_db=%s game_server=%s source_dir=%s admin=%s)", addr, identityDBPath, gameDBPath, gameServerURL, sourceDir, adminEnabled)
+		log.Printf("lobby: listening on %s (identity_db=%s game_db=%s game_server=%s source_tarball=%s admin=%s)", addr, identityDBPath, gameDBPath, gameServerURL, sourceTarball, adminEnabled)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen: %v", err)
 		}
