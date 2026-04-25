@@ -128,7 +128,13 @@ func InstantiateEnemy(roomIndex uint8, id uint32, etype uint8, seed MobSeed, now
 // UpdateEnemy runs one tick of AI. No RNG is consumed here — all randomness
 // was baked in at spawn time (determinism invariant). roomIndex is used to
 // look up the wall grid so enemies don't walk through tilemap walls.
-func UpdateEnemy(e *EnemyState, p *PlayerState, roomIndex uint8, dt float32, now time.Time) (didAttack bool) {
+//
+// `fields` is the per-tick flow-field cache built by the engine before
+// the mob update pass. The Aggro branch reads the cache to choose its
+// next-step tile; if `fields` is nil (test/legacy callers), the cache is
+// constructed locally — correct but slower. See
+// docs/specs/features/mob-ai.md § Aggro chase: flow field.
+func UpdateEnemy(e *EnemyState, p *PlayerState, roomIndex uint8, dt float32, now time.Time, fields *FlowFieldCache) (didAttack bool) {
 	if e.AIState == AIDead {
 		return false
 	}
@@ -154,8 +160,18 @@ func UpdateEnemy(e *EnemyState, p *PlayerState, roomIndex uint8, dt float32, now
 			e.PatrolIndex = (e.PatrolIndex + 1) % uint8(len(e.PatrolPath))
 		}
 	case AIAggro:
-		aimX := p.X + (e.JitterX-0.5)*20
-		aimY := p.Y + (e.JitterY-0.5)*20
+		// Flow-field gradient pursuit. Replaces the old direct-vector
+		// chase that parked mobs against concave wall geometry — see
+		// issue #19.
+		if fields == nil {
+			fields = NewFlowFieldCache(roomIndex)
+		}
+		mr, mc := TileOf(e.X, e.Y)
+		pr, pc := TileOf(p.X, p.Y)
+		fr, fc := BiasedPlayerTile(pr, pc, e.JitterX, e.JitterY, roomIndex)
+		field := fields.Get(fr, fc)
+		nr, nc := NextStepTile(field, mr, mc)
+		aimX, aimY := TileCenter(nr, nc)
 		moveTowardWithWalls(e, aimX, aimY, dt, roomIndex)
 
 		if dist < 34 && now.After(e.AttackCooldown) {
