@@ -12,6 +12,7 @@ import (
 
 	"github.com/greyhats/defcon-game/server/internal/leaderboard"
 	"github.com/greyhats/defcon-game/server/internal/protocol"
+	"github.com/greyhats/defcon-game/server/internal/spectator"
 )
 
 // Engine is the per-player game loop. It owns RunState, PlayerState, and
@@ -25,6 +26,10 @@ type Engine struct {
 	// display name (empty to fall back to the raw player_id) and an
 	// error to reject the connection.
 	AuthCheck func(playerID string) (string, error)
+	// Live receives a Summary on every tick once the run has started.
+	// May be nil — engines run fine without a live registry; the
+	// /internal/live-games endpoint just won't see them.
+	Live *spectator.LiveRegistry
 
 	PlayerID    string
 	DisplayName string
@@ -284,6 +289,27 @@ func (e *Engine) stepTick(now time.Time) {
 
 	e.updateElapsed(now)
 	e.sendState(now)
+	e.publishLiveSummary()
+}
+
+// publishLiveSummary pushes a per-tick snapshot to the live-games registry
+// so /internal/live-games (and the lobby's selector) sees this run. Cheap
+// and non-blocking — drops on a full channel because the next tick's push
+// supersedes anyway.
+func (e *Engine) publishLiveSummary() {
+	if e.Live == nil || e.run == nil || e.PlayerID == "" {
+		return
+	}
+	e.Live.Update(spectator.Summary{
+		PlayerID:    e.PlayerID,
+		DisplayName: e.DisplayName,
+		RoomIndex:   e.run.CurrentRoom,
+		ElapsedMs:   e.run.ElapsedMs,
+		// SpectatorCount is filled in once per-engine spectator fan-out
+		// lands (task #4). Until then it's always 0.
+		SpectatorCount: 0,
+		StartedAt:      e.run.RunStartTime.UnixMilli(),
+	})
 }
 
 // drainInput pulls every queued C2S packet and dispatches each with the

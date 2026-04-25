@@ -12,19 +12,22 @@
     }
 
     # Lobby owns identity endpoints (#21), the /register page, the public
-    # leaderboard webapp (#22), and replay download.
-    @lobby_api path /api/register /api/login /api/verify /api/health /api/leaderboard /api/replay/*
+    # leaderboard webapp (#22), replay download, and the spectator
+    # selector page + live-games feed (#23). The /spectate/:player_id
+    # viewer page lands in Phase 3b alongside the spectator client bundle.
+    @lobby_api path /api/register /api/login /api/verify /api/health /api/leaderboard /api/replay/* /api/live
     handle @lobby_api {
         reverse_proxy lobby:3001
     }
 
-    @lobby_pages path /register /leaderboard
+    @lobby_pages path /register /leaderboard /spectate
     handle @lobby_pages {
         reverse_proxy lobby:3001
     }
 
-    # Remaining /api/* still hits the game server (none today; spectator
-    # endpoints arrive in Phase 3 #23).
+    # Remaining /api/* still hits the game server (no public endpoints
+    # today; /ws/spectate routes alongside /ws once Phase 3 server-side
+    # spectator fan-out lands).
     @api path /api/*
     handle @api {
         reverse_proxy game-server:8080

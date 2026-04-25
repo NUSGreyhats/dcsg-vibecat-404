@@ -19,6 +19,7 @@ import (
 	"github.com/greyhats/defcon-game/server/internal/game"
 	"github.com/greyhats/defcon-game/server/internal/leaderboard"
 	"github.com/greyhats/defcon-game/server/internal/protocol"
+	"github.com/greyhats/defcon-game/server/internal/spectator"
 )
 
 func main() {
@@ -56,6 +57,13 @@ func main() {
 	defer cancel()
 	lbSvc.Start(ctx)
 
+	// Live-games registry — engines push a Summary every tick; the
+	// /internal/live-games endpoint serves the aggregated snapshot to
+	// the lobby's spectator selector. See
+	// docs/specs/foundations/05-server-runtime.md#internal-endpoint.
+	liveReg := spectator.NewLiveRegistry(maxConcurrent)
+	liveReg.Start(ctx)
+
 	allowlist := auth.NewAllowlist(allowlistPath)
 
 	// Build the auth gate once so the WS handler doesn't re-derive it per
@@ -83,12 +91,23 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handleWS(ctx, w, r, sem, authCheck, lbSvc)
+		handleWS(ctx, w, r, sem, authCheck, lbSvc, liveReg)
 	})
 	mux.HandleFunc("/internal/slot-status", func(w http.ResponseWriter, _ *http.Request) {
 		used := len(sem)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"used":` + strconv.Itoa(used) + `,"max":` + strconv.Itoa(maxConcurrent) + `}`))
+	})
+	mux.HandleFunc("/internal/live-games", func(w http.ResponseWriter, _ *http.Request) {
+		// Loopback-only consumption — the lobby polls this every 2 s and
+		// caches in-process. Returns [] (not null) when no runs are live so
+		// the lobby's selector renders an explicit empty state.
+		entries := liveReg.Snapshot()
+		if entries == nil {
+			entries = []spectator.Summary{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(entries)
 	})
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
@@ -118,7 +137,7 @@ func main() {
 	_ = srv.Shutdown(shutdownCtx)
 }
 
-func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem chan struct{}, authCheck func(string) (string, error), lb *leaderboard.Service) {
+func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem chan struct{}, authCheck func(string) (string, error), lb *leaderboard.Service, liveReg *spectator.LiveRegistry) {
 	select {
 	case sem <- struct{}{}:
 	default:
@@ -142,6 +161,7 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 	outCh := make(chan protocol.S2CEnvelope, game.OutChBuf)
 
 	engine := game.NewEngine(inCh, outCh, lb.Submit, authCheck)
+	engine.Live = liveReg
 
 	go connReader(connCtx, conn, inCh, cancel)
 	go connWriter(connCtx, conn, outCh, cancel)
@@ -155,6 +175,7 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 
 		if engine.PlayerID != "" {
 			lb.Unregister(engine.PlayerID)
+			liveReg.Remove(engine.PlayerID)
 		}
 	}()
 }

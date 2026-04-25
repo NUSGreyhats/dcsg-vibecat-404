@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VIBECAT 404 — Spectate</title>
+<style>
+  :root {
+    --midnight: #0d1222;
+    --deep-navy: #1a2338;
+    --navy: #2b3d5c;
+    --mid-blue: #5c8fbf;
+    --bone: #f5f0e6;
+    --muted: #8a8679;
+    --accent: #ffdd33;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--midnight);
+    color: var(--bone);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 14px;
+    padding: 24px;
+  }
+  header {
+    max-width: 960px;
+    margin: 0 auto 16px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  h1 {
+    margin: 0;
+    font-size: 22px;
+    letter-spacing: 1px;
+  }
+  nav a {
+    color: var(--mid-blue);
+    text-decoration: none;
+    font-size: 13px;
+  }
+  nav a:hover { color: var(--accent); }
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .tile {
+    background: var(--deep-navy);
+    border: 2px solid var(--mid-blue);
+    padding: 12px;
+    text-decoration: none;
+    color: var(--bone);
+    display: block;
+    transition: border-color 80ms ease;
+  }
+  .tile:hover { border-color: var(--accent); }
+  .tile .name { font-size: 16px; color: var(--accent); margin-bottom: 6px; }
+  .tile .row { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+  .tile .row span:last-child { color: var(--bone); font-variant-numeric: tabular-nums; }
+  .empty {
+    padding: 48px 8px;
+    color: var(--muted);
+    text-align: center;
+    border: 2px dashed var(--navy);
+  }
+  .meta {
+    margin-top: 16px;
+    color: var(--muted);
+    font-size: 12px;
+    text-align: right;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Spectate</h1>
+  <nav>
+    <a href="/leaderboard">→ Leaderboard</a>
+    &nbsp;·&nbsp;
+    <a href="/">→ Play</a>
+  </nav>
+</header>
+<main>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>No live runs right now. Refresh once someone hits "start".</div>
+  <div class="meta" id="meta"></div>
+</main>
+
+<script>
+  const gridEl = document.getElementById('grid');
+  const emptyEl = document.getElementById('empty');
+  const metaEl = document.getElementById('meta');
+
+  function fmtMs(ms) {
+    const total = Math.max(0, ms | 0);
+    const m = Math.floor(total / 60000);
+    const s = Math.floor((total % 60000) / 1000);
+    return m + ':' + String(s).padStart(2, '0');
+  }
+
+  function escape(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[c]);
+  }
+
+  async function load() {
+    try {
+      const res = await fetch('/api/live');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const entries = await res.json();
+      gridEl.innerHTML = '';
+      if (entries.length === 0) {
+        emptyEl.hidden = false;
+      } else {
+        emptyEl.hidden = true;
+        for (const e of entries) {
+          const a = document.createElement('a');
+          a.className = 'tile';
+          a.href = '/spectate/' + encodeURIComponent(e.player_id) +
+                   '?name=' + encodeURIComponent(e.display_name);
+          a.innerHTML = (
+            '<div class="name">' + escape(e.display_name) + '</div>' +
+            '<div class="row"><span>Room</span><span>' + e.room_index + ' / 11</span></div>' +
+            '<div class="row"><span>Elapsed</span><span>' + fmtMs(e.elapsed_ms) + '</span></div>' +
+            '<div class="row"><span>Watching</span><span>' + e.spectator_count + '</span></div>'
+          );
+          gridEl.appendChild(a);
+        }
+      }
+      metaEl.textContent = entries.length + ' live · refreshed ' + new Date().toLocaleTimeString();
+    } catch (err) {
+      metaEl.textContent = 'Error loading live games: ' + err.message;
+    }
+  }
+
+  load();
+  setInterval(load, 2000);
+</script>
+</body>
+</html>

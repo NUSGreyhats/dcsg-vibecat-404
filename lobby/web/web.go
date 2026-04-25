@@ -5,3 +5,6 @@ import _ "embed"
 
 //go:embed leaderboard.html
 var LeaderboardHTML []byte
+
+//go:embed spectate.html
+var SpectateHTML []byte
