@@ -178,7 +178,7 @@ Greenfield. Nothing in the current server or client implements shop, coins, trai
 When implementing, the following appends are also required:
 
 - [foundations/02-protocol.md](../foundations/02-protocol.md): extend `C2S_INTERACT` payload with `claimed_type uint8`; add `C2S_SHOP_PURCHASE` (suggested code `0x09`) row.
-- [foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md): append `Coins`, `SpeedStacks`, `FireRateStacks`, `DamageStacks`, `AmmoStacks` to the `PlayerState` block, citing this spec; note that stacks zero on run reset.
+- [foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md): append `Coins`, `SpeedStacks`, `FireRateStacks`, and `DamageStacks` to the `PlayerState` block, citing this spec; note that stacks zero on run reset.
 - [features/pickups.md](pickups.md): add Coin (Type 3) row to the pickup-types table; cross-link BUG-12; correct the existing "auto-trigger Coin" mention in its data-flow paragraph (coins use the manual `C2S_INTERACT` path so BUG-12 applies).
 - [bugs.md](../bugs.md): append BUG-12 row to the index; update the synergy diagram with a `BUG-05 → BUG-12` edge.
 - [client/04-scenes.md](../client/04-scenes.md): append `ShopMenu` row.
