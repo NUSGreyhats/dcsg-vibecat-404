@@ -11,20 +11,20 @@
         reverse_proxy game-server:8080
     }
 
-    # Identity endpoints live on the lobby (Phase 1 of the lobby split,
-    # see issue #21). The /register HTML page is served by the lobby too.
-    @lobby_identity path /api/register /api/login /api/verify /api/health
-    handle @lobby_identity {
+    # Lobby owns identity endpoints (#21), the /register page, the public
+    # leaderboard webapp (#22), and replay download.
+    @lobby_api path /api/register /api/login /api/verify /api/health /api/leaderboard /api/replay/*
+    handle @lobby_api {
         reverse_proxy lobby:3001
     }
 
-    @register path /register
-    handle @register {
+    @lobby_pages path /register /leaderboard
+    handle @lobby_pages {
         reverse_proxy lobby:3001
     }
 
-    # All other /api/* (notably /api/leaderboard until Phase 2 #22) still
-    # hits the game server.
+    # Remaining /api/* still hits the game server (none today; spectator
+    # endpoints arrive in Phase 3 #23).
     @api path /api/*
     handle @api {
         reverse_proxy game-server:8080

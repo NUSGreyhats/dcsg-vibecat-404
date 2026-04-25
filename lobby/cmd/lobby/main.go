@@ -1,22 +1,27 @@
 // Package main is the lobby service entry point.
 //
-// Phase 1 of the lobby split (see issue #21) hosts identity HTTP serving
-// here. Later phases add leaderboard, spectator selector, source serving,
-// admin panel, and the FIFO queue.
+// Phase 1 (#21) hosts identity HTTP serving. Phase 2 (#22) adds the public
+// leaderboard webapp + replay download. Later phases add spectator
+// selector, source serving, admin panel, and the FIFO queue.
 //
 // Spec: docs/specs/foundations/04-lobby.md.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/greyhats/defcon-game/lobby/internal/leaderboard"
+	"github.com/greyhats/defcon-game/lobby/web"
 	"github.com/greyhats/defcon-game/pkg/identity"
 )
 
@@ -25,6 +30,7 @@ func main() {
 
 	addr := envDefault("LISTEN_ADDR", ":3001")
 	identityDBPath := envDefault("IDENTITY_DB", "/data/identity.db")
+	gameDBPath := envDefault("GAME_DB", "/data/game.db")
 
 	identityDB, err := identity.OpenDB(identityDBPath)
 	if err != nil {
@@ -32,11 +38,76 @@ func main() {
 	}
 	defer identityDB.Close()
 
+	gameDB, err := leaderboard.Open(gameDBPath)
+	if err != nil {
+		log.Fatalf("open game db: %v", err)
+	}
+	defer gameDB.Close()
+
 	identitySvc := identity.NewService(identityDB)
 
 	mux := http.NewServeMux()
 	identitySvc.Register(mux)
 	mux.HandleFunc("/register", serveRegisterPage)
+	mux.HandleFunc("/leaderboard", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(web.LeaderboardHTML)
+	})
+	mux.HandleFunc("/api/leaderboard", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		limit := 10
+		if v := r.URL.Query().Get("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+				limit = n
+			}
+		}
+		entries, err := leaderboard.TopRuns(gameDB, limit)
+		if err != nil {
+			log.Printf("leaderboard: top: %v", err)
+			http.Error(w, "leaderboard unavailable", http.StatusInternalServerError)
+			return
+		}
+		if entries == nil {
+			entries = []leaderboard.Entry{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"entries": entries})
+	})
+	mux.HandleFunc("/api/replay/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/api/replay/")
+		if id == "" || strings.Contains(id, "/") {
+			http.Error(w, "invalid replay id", http.StatusBadRequest)
+			return
+		}
+		replay, err := leaderboard.GetReplay(gameDB, id)
+		if err != nil {
+			if errors.Is(err, leaderboard.ErrNotFound) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			if errors.Is(err, leaderboard.ErrChecksumMismatch) {
+				log.Printf("leaderboard: replay %s: checksum mismatch", id)
+				http.Error(w, "replay integrity check failed", http.StatusInternalServerError)
+				return
+			}
+			log.Printf("leaderboard: replay %s: %v", id, err)
+			http.Error(w, "replay unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(replay)
+	})
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -51,7 +122,7 @@ func main() {
 	defer cancel()
 
 	go func() {
-		log.Printf("lobby: listening on %s (identity_db=%s)", addr, identityDBPath)
+		log.Printf("lobby: listening on %s (identity_db=%s game_db=%s)", addr, identityDBPath, gameDBPath)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen: %v", err)
 		}

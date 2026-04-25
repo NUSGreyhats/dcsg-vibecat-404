@@ -2,7 +2,10 @@ module github.com/greyhats/defcon-game/lobby
 
 go 1.25.0
 
-require github.com/greyhats/defcon-game/pkg v0.0.0
+require (
+	github.com/greyhats/defcon-game/pkg v0.0.0
+	modernc.org/sqlite v1.49.1
+)
 
 replace github.com/greyhats/defcon-game/pkg => ../pkg
 
@@ -17,5 +20,4 @@ require (
 	modernc.org/libc v1.72.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.49.1 // indirect
 )

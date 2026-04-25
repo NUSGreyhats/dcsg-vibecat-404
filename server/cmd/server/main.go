@@ -93,25 +93,10 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
-	// Identity HTTP endpoints (/api/register, /api/login, /api/verify) and the
-	// /register page now live on the lobby service. The game server still
-	// imports pkg/identity for WS-time Lookup in authCheck above.
-	//
-	// Dev-only: the lobby service is spec'd to host /api/leaderboard, but
-	// the lobby read-through hasn't shipped yet (Phase 2 of the lobby split,
-	// see issue #22). Expose a read-through here so local testers can view
-	// results without finishing a run.
-	mux.HandleFunc("/api/leaderboard", func(w http.ResponseWriter, r *http.Request) {
-		limit := 10
-		if v := r.URL.Query().Get("limit"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
-				limit = n
-			}
-		}
-		entries := lbSvc.Top(limit)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"entries": entries})
-	})
+	// Identity HTTP endpoints, /register, /api/leaderboard, and /api/replay/:id
+	// all live on the lobby service. The game server still imports
+	// pkg/identity for WS-time Lookup in authCheck above and writes to
+	// game.db via the leaderboard goroutine started below.
 
 	srv := &http.Server{
 		Addr:              addr,

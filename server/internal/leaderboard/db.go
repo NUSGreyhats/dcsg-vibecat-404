@@ -12,8 +12,12 @@ import (
 
 // OpenDB opens the leaderboard SQLite database at path and ensures the
 // schema from docs/specs/foundations/08-leaderboard-replay.md exists.
+//
+// WAL mode + a 5 s busy timeout let the lobby's read-only connection
+// (lobby/internal/leaderboard) co-exist with the game server's writer
+// goroutine without lock contention.
 func OpenDB(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
