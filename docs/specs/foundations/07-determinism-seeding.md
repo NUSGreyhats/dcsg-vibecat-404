@@ -36,7 +36,7 @@ Determinism requires the order of RNG calls to be fixed. When the server loads a
 2. **For each declared wave in the room, in wave-slot order (0..N-1):**
    1. If `floor(InitialPop * WaveTriggers[slot]) < 1`: **skip — consume no RNG**.
    2. Otherwise consume 1 `MobRNG.Intn(2 * WaveArmJitterMs)` call (arm-delay jitter).
-   3. For each mob in `WaveDef.anchors` (ascending declaration order), consume the same 7-step block as step 1.i–1.v above.
+   3. For each mob in `WaveDef.Mobs` (in declaration order), consume the same 7-step block as step 1.i–1.v above. Wave mobs do not have pre-assigned `EntityID`s — IDs are allocated at fire time, so ordering follows declaration position rather than ID.
 
 This order must never change. Changing it silently breaks existing leaderboard runs and invalidates every seed ever analyzed by a tool author.
 
@@ -72,7 +72,7 @@ Important: per-tick mob behavior (current aim, movement decisions) must be deriv
 
 ## Implementation status
 
-Greenfield. Current server (`server/main.go`) has no RNG-driven mob spawning; rooms are static Tiled JSON. A future migration will introduce `MobRNG` and the consumption ordering above.
+Implemented. `RunState.MobRNG` is a `*rand.Rand` seeded from `start_time`, consumed at room load by `LoadRoom` in `server/internal/game/rooms.go` and `SeedMob` in `server/internal/game/mobai.go`. The wave-RNG extension (step 2 above) is consumed by `seedWaves` in `server/internal/game/waves.go`. The consumption order is locked by `TestLoadRoomRNGConsumptionInvariant` (`server/internal/game/waves_test.go`), which records eight post-load `Intn(1_000_000)` values against a known seed.
 
 ## Intentional bugs in this area
 

@@ -194,7 +194,7 @@ func TestBroadcastPackAggro(t *testing.T) {
 	if dead.AIState != AIDead {
 		t.Errorf("dead mob should stay AIDead; got %v", dead.AIState)
 	}
-	if victim.AIState != AIPatrol {
-		t.Errorf("victim is not self-aggro'd by pack broadcast; got %v", victim.AIState)
+	if victim.AIState != AIAggro {
+		t.Errorf("victim should flip to AIAggro on damage broadcast; got %v", victim.AIState)
 	}
 }

@@ -208,19 +208,22 @@ func near(ax, ay, bx, by, eps float32) bool {
 }
 
 // BroadcastPackAggro flips every non-aggro, non-dead enemy within
-// PackAggroRadius of (victimX, victimY) to AIAggro. No LOS check — "they
-// heard you." The victim itself is skipped; it will flip to Aggro on its
-// own via the normal aggro-range check on the next tick.
+// PackAggroRadius of (victimX, victimY) to AIAggro — including the damaged
+// mob itself (its distance to itself is 0, always inside the radius). No
+// LOS check — "they heard you."
+//
+// Including the victim is load-bearing: a mob shot from beyond its own
+// AggroRange would otherwise stay on patrol because the per-tick aggro flip
+// gates on `dist < AggroRange`. Pack-aggro on damage is the only path that
+// guarantees a damaged mob always reacts.
 //
 // Consumes no RNG. Called from the single damage site in ResolveCollisions.
 // If further damage sources are added (melee, AoE, etc.), they must call
 // this helper for the mechanic to remain consistent.
 func BroadcastPackAggro(r *RoomState, victimX, victimY float32, victimID uint32) {
+	_ = victimID // kept for callers; victim is included in the sweep.
 	rSq := PackAggroRadius * PackAggroRadius
 	for _, other := range r.Enemies {
-		if other.EntityID == victimID {
-			continue
-		}
 		if other.AIState == AIDead || other.AIState == AIAggro {
 			continue
 		}

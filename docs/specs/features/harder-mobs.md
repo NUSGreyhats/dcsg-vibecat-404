@@ -40,22 +40,28 @@ Changing any of these is a balance change. Changing `WaveArmJitterMs` is **also*
 
 ### Room template additions
 
+Waves live on the server-side `RoomTemplate` (`server/internal/game/rooms_data.go`), **not** on the wire `RoomData`. The client never sees the wave definition list — wave mobs surface in the next `S2C_STATE` snapshot once they fire, and the existing entity-ID reconciliation treats them as fresh spawns.
+
 ```go
-RoomData {
-    room_index  uint8
-    tilemap_id  string
-    enemies     []EnemySpawn   // initial population (unchanged)
-    waves       []WaveDef      // NEW — 0..len(WaveTriggers) entries
-    pickups     []PickupSpawn
-    doors       []DoorDef
+RoomTemplate {
+    TilemapID string
+    Enemies   []EnemySpawnDef
+    Waves     []WaveDef          // NEW — 0..len(WaveTriggers) entries
+    Pickups   []PickupSpawnDef
+    Doors     []DoorDef
 }
 
 WaveDef {
-    anchors []EnemySpawn   // same shape as initial enemies
+    Mobs []WaveMobDef
+}
+
+WaveMobDef {
+    Type uint8
+    X, Y float32
 }
 ```
 
-Wave slot `i` uses `WaveTriggers[i]`. A room with only 1 wave uses `WaveTriggers[0]`. Rooms may declare 0 waves.
+Wave slot `i` uses `WaveTriggers[i]`. A room with only 1 wave uses `WaveTriggers[0]`. Rooms may declare 0 waves. Wave mobs do not carry pre-assigned `EntityID`s — IDs are allocated at fire time from `RoomState.NextEnemyID` (initialized to `WaveEntityIDBase + RoomIndex*WaveEntityIDStep`).
 
 ### Runtime state additions
 
@@ -65,7 +71,8 @@ Wave slot `i` uses `WaveTriggers[i]`. A room with only 1 wave uses `WaveTriggers
 RoomState {
     // ... existing fields ...
     InitialPop    int             // NEW — len(enemies) captured at room load
-    PendingWaves  []PendingWave   // NEW — one entry per declared wave
+    PendingWaves  []PendingWave   // NEW — one entry per declared, non-skipped wave
+    NextEnemyID   uint32          // NEW — allocator for wave-spawned mob IDs
 }
 
 PendingWave {
@@ -78,16 +85,19 @@ PendingWave {
 }
 
 PrecomputedMob {
-    Type             uint8
-    BaseX, BaseY     float32         // from template anchor
-    OffsetX, OffsetY float32         // from MobRNG
-    PatrolPath       []Vec2
+    Type uint8
+    Seed MobSeed                     // post-RNG, pre-instantiation data
+}
+
+MobSeed {
+    SpawnX, SpawnY   float32         // wall-snapped via NearestNonWall
+    PatrolPath       []Vec2          // wall-snapped
     JitterX, JitterY float32
     FirstAttackDelay int              // ms
 }
 ```
 
-`PendingWave.Mobs` is fully populated at room load — same RNG recipe as initial enemies. The wave only defers **instantiation into `RoomState.Enemies`**, not the RNG consumption.
+`PendingWave.Mobs` is fully populated at room load — same RNG recipe as initial enemies, with all wall snapping done up-front. The wave only defers **instantiation into `RoomState.Enemies`**, not the RNG consumption.
 
 ## Wave pipeline
 
@@ -190,12 +200,8 @@ Triggered on any damage event against a mob — projectile hit, melee, kamikaze 
 ```go
 const PackAggroRadius = 250.0
 
-func broadcastPackAggro(r *RoomState, victim *EnemyState) {
-    vx, vy := victim.X, victim.Y
+func broadcastPackAggro(r *RoomState, vx, vy float32) {
     for _, other := range r.Enemies {
-        if other.EntityID == victim.EntityID {
-            continue
-        }
         if other.AIState == Dead || other.AIState == Aggro {
             continue
         }
@@ -210,19 +216,19 @@ func broadcastPackAggro(r *RoomState, victim *EnemyState) {
 - **No LOS.** Walls don't block; the signal is "heard," not "seen."
 - **No RNG consumed.** Pure reactive state change.
 - **State flip only.** Once a mob is Aggro'd (via any path — range, pack, or prior), pack aggro is a no-op for it.
-- **The victim itself** is not special-cased — it will also flip to Aggro in the normal tick that follows (chase_vec uses the attacker, typically the player).
+- **The victim itself is included in the broadcast.** Distance to itself is 0, always inside `PackAggroRadius`. This is load-bearing: the per-tick aggro flip in `UpdateEnemy` gates on `dist < AggroRange`, so a mob shot from beyond its own aggro range would otherwise stay on patrol after taking damage. Pack aggro on damage is the only path that guarantees the damaged mob always reacts.
 
 ## Data flow
 
-- `S2C_ROOM_LOAD` now carries `RoomData.waves`. Client caches anchors for optional telegraph rendering.
-- Wave firing broadcasts the new mobs via the next `S2C_STATE` tick (new `EntitySnapshot`s with fresh entity IDs). Clients render appearing entity IDs as spawns.
-- **Optional protocol addition** (deferred): `S2C_WAVE_ARMED { wave_index, fire_at }` to let clients play a pre-spawn telegraph (glow at anchors, warning SFX). Not required for correctness — the state snapshot remains authoritative.
+- **Waves are server-side state only.** They live in the per-template `RoomTemplate.Waves` declaration on the server (`rooms_data.go`) and are not shipped on the wire `RoomData`. The client has no advance knowledge of wave anchors.
+- Wave firing surfaces new mobs via the next `S2C_STATE` tick — a new `EntitySnapshot` with a fresh `EntityID` (from the per-room `WaveEntityIDBase` allocator). Clients render appearing entity IDs as spawns via existing reconciliation logic; no protocol change required.
+- **Deferred:** `S2C_WAVE_ARMED { wave_index, fire_at }` for pre-spawn telegraphs (glow at anchors, warning SFX). Would require wire-level wave anchor data the client currently lacks. Not required for correctness — the state snapshot remains authoritative.
 - Pack aggro produces no new packets; aggro state flips surface in the next `EntitySnapshot`'s `AIState` field.
 
 ## Client interactions
 
-- `roomLayout.ts` — consume `RoomData.waves` into a deferred-spawn list for telegraphing.
-- Wave mob sprites should appear with a brief spawn-in animation so players can distinguish "always was here" from "just arrived."
+- No client wave-awareness in the current implementation. Wave mobs appear in the next state snapshot exactly like any other entity-ID change.
+- A future spawn-in animation (distinguishing "always was here" from "just arrived") would benefit from the deferred `S2C_WAVE_ARMED` packet but is not blocked on it — the client can detect new IDs from snapshot diffs.
 - No client logic arms or fires waves; the client only reacts to server state.
 
 ## Implementation notes
@@ -230,13 +236,13 @@ func broadcastPackAggro(r *RoomState, victim *EnemyState) {
 - Package: `internal/game/mobai` (extend) and `internal/game/rooms` (extend).
 - Keep `instantiateEnemy` as a single helper used by both initial-pop seeding and wave fire, so the `EnemyState` shape is identical regardless of origin.
 - Wave RNG consumption at room load must happen **after** all initial enemies are seeded and **in wave declaration order**, including the skip rule. Unit test: record the first N RNG values for each canned room config and lock them against regression.
-- Pack aggro is called from exactly three sites: projectile-enemy collision, kamikaze splash, and boss AoE. Audit damage paths when adding any new damage source.
+- Pack aggro is currently called from a **single site**: the projectile-enemy collision pass in `ResolveCollisions` (`combat.go`). Kamikaze contact damage and any future melee/AoE sources do NOT yet broadcast — when those damage paths are added, they MUST call `BroadcastPackAggro` for the mechanic to remain consistent. Track this in code review when adding new damage sites.
 - `livingCount(r)` counts only initial + already-fired wave mobs. Pending (unfired) mobs don't count — otherwise `TriggerRemaining` math is wrong.
 - Never call `MobRNG` from a tick handler — waves arm and fire off deterministic clock + kill input, not RNG.
 
 ## Implementation status
 
-Greenfield. Current server has no reinforcement logic and no pack aggro. Current `rooms_data.go` has base `enemies` only; `waves` field and per-room wave declarations are new work on `feat/harder-mobs`.
+Implemented on `feat/harder-mobs`. Wave seeding + arm/fire pipeline live in `server/internal/game/waves.go`; pack aggro broadcast in `server/internal/game/mobai.go`; per-room HP/Speed scaling and per-archetype melee damage in `mobai.go` + `loop.go`. Wave authoring complete for rooms 1–10; room 11 (boss) has its own three-phase wave fight (boss + ring → mid-distance runners → perimeter kamikazes). Tests in `server/internal/game/waves_test.go` lock the RNG consumption order and exercise the arm/fire latches and pack-aggro filters.
 
 ## Intentional bugs in this area
 
