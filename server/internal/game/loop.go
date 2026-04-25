@@ -225,7 +225,7 @@ func (e *Engine) stepTick(now time.Time) {
 	dt := float32(TickDuration.Seconds())
 
 	e.drainInput(now)
-	e.advancePlayer(dt)
+	e.advancePlayer(dt, now)
 	deaths := e.advanceEnemies(dt, now)
 	hits := AdvanceProjectiles(e.room, dt, now)
 	deaths = append(deaths, ResolveCollisions(e.room, hits, now)...)
@@ -435,8 +435,8 @@ func (e *Engine) transitionToRoom(nextRoom uint8, now time.Time) {
 	}
 }
 
-func (e *Engine) advancePlayer(dt float32) {
-	speed := PlayerSpeed * EffectiveSpeedMult(e.player, time.Now())
+func (e *Engine) advancePlayer(dt float32, now time.Time) {
+	speed := PlayerSpeed * EffectiveSpeedMult(e.player, now)
 
 	const hw float32 = 10 // player half-width used for wall collision
 	const hh float32 = 10
