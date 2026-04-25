@@ -15,6 +15,15 @@ import {
   buildRoom,
   type BuiltRoom,
 } from "../world/roomLayout";
+import {
+  cameraShake,
+  FX_COLOR,
+  spawnImpactBurst,
+  spawnMuzzleFlash,
+  triggerHitstop,
+  WEAPON_FX,
+} from "../fx";
+import { WEAPON_STATS } from "../weapons";
 import { createControls, type Controls } from "./utils/Controls";
 import type {
   RoomData,
@@ -47,6 +56,15 @@ export class Game extends Phaser.Scene {
   inputSendAcc = 0;
   private requestedPickupIds = new Set<number>();
   private requestedDoorIds = new Set<number>();
+  /** Read by fx.isHitstopped — entity ticks halt while non-zero. */
+  hitstopUntil = 0;
+  /** Last seen player HP, used to detect damage and play hurt fx. */
+  private prevPlayerHp = -1;
+  /** Local cooldown gate for shoot fx so cooldown-clicks don't spam. */
+  private nextShootFxAt = 0;
+  /** Positions where enemies took damage this tick — used to suppress
+   *  redundant wall sparks at projectile despawn. */
+  private hitPositionsThisFrame: { x: number; y: number }[] = [];
 
   constructor() {
     super({ key: "Game" });
@@ -79,6 +97,10 @@ export class Game extends Phaser.Scene {
     sync.state.on("entityDied", this.onEntityDied, this);
     sync.state.on("runComplete", this.onRunComplete, this);
 
+    // Enemies emit this on HP decrease so we can play impact fx at the
+    // hit location without the entity needing a back-pointer here.
+    this.events.on("enemyHit", this.onEnemyHit, this);
+
     this.events.on("shutdown", this.cleanup, this);
   }
 
@@ -105,6 +127,24 @@ export class Game extends Phaser.Scene {
       const angle = this.controls.aimAngle(this.player.x, this.player.y);
       sync.sendShoot(angle);
       this.player.triggerShootAnim();
+
+      // Muzzle flash + camera shake, throttled by the weapon cooldown so
+      // mashing the click during cooldown doesn't strobe the screen.
+      const now = this.time.now;
+      const weaponId = this.player.currentWeaponId;
+      const cooldownMs = WEAPON_STATS[weaponId].cooldownMs;
+      if (now >= this.nextShootFxAt) {
+        this.nextShootFxAt = now + cooldownMs;
+        const fx = WEAPON_FX[weaponId];
+        const barrelLen = 22;
+        const bx = this.player.x + Math.cos(angle) * barrelLen;
+        const by = this.player.y + Math.sin(angle) * barrelLen;
+        spawnMuzzleFlash(this, bx, by, angle, {
+          length: fx.muzzleLength,
+          thickness: fx.muzzleThickness,
+        });
+        cameraShake(this, fx.shakeMs, fx.shakeIntensity);
+      }
     }
 
     const slot = this.controls.weaponSwitchPressed();
@@ -140,8 +180,16 @@ export class Game extends Phaser.Scene {
   }
 
   private onServerState(payload: StatePayload): void {
-    // Player
+    // Reset per-tick fx accumulators before re-emitting events.
+    this.hitPositionsThisFrame = [];
+
+    // Player damage detection — first snapshot just primes prevPlayerHp.
     if (this.player && payload.player) {
+      const newHp = payload.player.hp;
+      if (this.prevPlayerHp >= 0 && newHp < this.prevPlayerHp) {
+        triggerHitstop(this, 60);
+      }
+      this.prevPlayerHp = newHp;
       this.player.applySnapshot(payload.player);
     }
 
@@ -173,9 +221,18 @@ export class Game extends Phaser.Scene {
       }
       bullet.applySnapshot(p);
     }
-    // Despawn missing projectiles.
+    // Despawn missing projectiles. If the despawn doesn't line up with a
+    // same-frame enemy hit, treat it as a wall absorb and spark there.
     for (const [id, bullet] of this.projectiles) {
       if (!seenProjIds.has(id)) {
+        if (!this.bulletEndedOnHit(bullet.x, bullet.y)) {
+          spawnImpactBurst(this, bullet.x, bullet.y, {
+            color: FX_COLOR.spark,
+            count: 4,
+            speed: 60,
+            lifeMs: 180,
+          });
+        }
         bullet.destroy();
         this.projectiles.delete(id);
       }
@@ -237,8 +294,40 @@ export class Game extends Phaser.Scene {
   }
 
   private onEntityDied(entityId: number): void {
-    this.enemies.get(entityId)?.markDead();
+    const enemy = this.enemies.get(entityId);
+    if (enemy) {
+      // Beefier burst on a kill so it reads as more than a damage tick.
+      spawnImpactBurst(this, enemy.x, enemy.y, {
+        color: FX_COLOR.blood,
+        count: 12,
+        speed: 140,
+        lifeMs: 320,
+        sizeMin: 2,
+        sizeMax: 4,
+      });
+      enemy.markDead();
+    }
     this.pickups.get(entityId)?.setConsumed();
+  }
+
+  private onEnemyHit(x: number, y: number, _entityId: number): void {
+    spawnImpactBurst(this, x, y, {
+      color: FX_COLOR.blood,
+      count: 7,
+      speed: 100,
+    });
+    triggerHitstop(this, 40);
+    this.hitPositionsThisFrame.push({ x, y });
+  }
+
+  private bulletEndedOnHit(bx: number, by: number): boolean {
+    const r2 = 40 * 40;
+    for (const p of this.hitPositionsThisFrame) {
+      const dx = p.x - bx;
+      const dy = p.y - by;
+      if (dx * dx + dy * dy <= r2) return true;
+    }
+    return false;
   }
 
   private onRunComplete(
@@ -298,6 +387,9 @@ export class Game extends Phaser.Scene {
     sync.state.off("doorUnlocked", this.onDoorUnlocked, this);
     sync.state.off("entityDied", this.onEntityDied, this);
     sync.state.off("runComplete", this.onRunComplete, this);
+    this.events.off("enemyHit", this.onEnemyHit, this);
+    this.hitstopUntil = 0;
+    this.prevPlayerHp = -1;
 
     for (const obj of this.backgroundObjs) obj.destroy();
     this.backgroundObjs = [];

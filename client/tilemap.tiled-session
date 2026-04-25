@@ -1,6 +1,10 @@
 {
-    "activeFile": "",
+    "activeFile": "public/assets/rooms/room-3.json",
     "expandedProjectPaths": [
+        "public",
+        "public/assets/rooms",
+        ".",
+        "public/assets"
     ],
     "fileStates": {
         "": {
@@ -47,7 +51,7 @@
                 3
             ],
             "scale": 1.016796875,
-            "selectedLayer": 1,
+            "selectedLayer": 2,
             "viewCenter": {
                 "x": 750.395697272378,
                 "y": 600.4149058778332
@@ -133,17 +137,28 @@
         }
     },
     "openFiles": [
-    ],
-    "project": "tilemap.tiled-project",
-    "recentFiles": [
-        "public/assets/rooms/room-7.json",
+        "public/assets/rooms/room-1.json",
+        "public/assets/rooms/room-2.json",
         "public/assets/rooms/room-3.json",
+        "public/assets/rooms/room-4.json",
+        "public/assets/rooms/room-5.json",
         "public/assets/rooms/room-6.json",
         "public/assets/rooms/room-8.json",
         "public/assets/rooms/room-9.json",
+        "public/assets/rooms/room-10.json",
+        "public/assets/rooms/room-7.json"
+    ],
+    "project": "tilemap.tiled-project",
+    "recentFiles": [
+        "public/assets/rooms/room-1.json",
         "public/assets/rooms/room-2.json",
+        "public/assets/rooms/room-7.json",
+        "public/assets/rooms/room-10.json",
+        "public/assets/rooms/room-9.json",
+        "public/assets/rooms/room-8.json",
+        "public/assets/rooms/room-6.json",
         "public/assets/rooms/room-5.json",
         "public/assets/rooms/room-4.json",
-        "public/assets/rooms/room-10.json"
+        "public/assets/rooms/room-3.json"
     ]
 }

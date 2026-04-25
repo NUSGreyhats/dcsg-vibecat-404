@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 
 import type { ProjSnapshot } from "../../net/packet";
+import { isHitstopped } from "../fx";
 import { TRACER_YELLOW } from "../ui/tokens";
 
 const LERP_FACTOR = 0.4;
@@ -58,6 +59,7 @@ export class Bullet extends Phaser.GameObjects.Container {
   }
 
   tick(_dt: number): void {
+    if (isHitstopped(this.scene)) return;
     this.x = Phaser.Math.Linear(this.x, this.targetX, LERP_FACTOR);
     this.y = Phaser.Math.Linear(this.y, this.targetY, LERP_FACTOR);
   }

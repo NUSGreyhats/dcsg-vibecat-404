@@ -135,6 +135,7 @@ type ProjectileState struct {
 	VelX, VelY float32
 	Damage     int16
 	OwnerID    uint32
+	WeaponID   uint8
 	SpawnedAt  time.Time
 }
 

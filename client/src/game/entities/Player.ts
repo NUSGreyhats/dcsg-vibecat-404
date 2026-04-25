@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 
 import { PLAYER_MAX_HEALTH } from "../constants";
+import { isHitstopped } from "../fx";
 import { directionFromVector, type Direction8 } from "../ui/anims";
 import { WEAPON_STATS, weaponFromServerId, type WeaponId } from "../weapons";
 import {
@@ -45,6 +46,15 @@ export class Player extends Phaser.GameObjects.Container {
   private moving = false;
   private aimAngle = 0;
   private weaponId: WeaponId = "pistol";
+
+  /** Currently equipped weapon (driven by server snapshots). */
+  get currentWeaponId(): WeaponId {
+    return this.weaponId;
+  }
+  /** Current aim angle in world-space radians, polled by Game for fx. */
+  get currentAimAngle(): number {
+    return this.aimAngle;
+  }
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y);
@@ -151,13 +161,20 @@ export class Player extends Phaser.GameObjects.Container {
   tick(_dt: number): void {
     // Aim toward the pointer in world-space coords. Re-projecting per
     // frame guards against camera scroll changing the relationship
-    // between screen pixels and world coords.
+    // between screen pixels and world coords. Always update aim — we
+    // want the cursor to feel responsive even during a hitstop freeze.
     const pointer = this.scene.input.activePointer;
     const cam = this.scene.cameras.main;
     if (cam) pointer.updateWorldPoint(cam);
     const worldX = Number.isFinite(pointer.worldX) ? pointer.worldX : pointer.x;
     const worldY = Number.isFinite(pointer.worldY) ? pointer.worldY : pointer.y;
     this.aimAngle = Math.atan2(worldY - this.y, worldX - this.x);
+
+    if (isHitstopped(this.scene)) {
+      // Keep weapon glued to the player but skip lerp so the freeze reads.
+      this.updateWeaponSprite();
+      return;
+    }
 
     // Smooth toward the server-authoritative target position.
     const dx = this.targetX - this.x;

@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 
 import type { EntitySnapshot } from "../../net/packet";
+import { flashSpriteWhite, isHitstopped } from "../fx";
 import { directionFromVector, type Direction8 } from "../ui/anims";
 import { BONE_WHITE, HP_AMBER, HP_GREEN, HP_RED } from "../ui/tokens";
 
@@ -107,13 +108,21 @@ export class Enemy extends Phaser.GameObjects.Container {
     this.targetX = snap.x;
     this.targetY = snap.y;
     if (snap.hp !== this.currentHp) {
+      const tookDamage = snap.hp < this.currentHp;
       this.currentHp = snap.hp;
       this.drawHpBar();
+      if (tookDamage) {
+        flashSpriteWhite(this.sprite, 70, tintForType(this.enemyType));
+        // Lets the Game scene spawn impact fx + hitstop without
+        // needing a back-pointer here.
+        this.scene.events.emit("enemyHit", this.x, this.y, this.entityId);
+      }
     }
   }
 
   tick(_dt: number): void {
     if (this.dying) return;
+    if (isHitstopped(this.scene)) return;
 
     const dx = this.targetX - this.x;
     const dy = this.targetY - this.y;
