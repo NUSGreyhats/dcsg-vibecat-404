@@ -62,7 +62,6 @@ export class GameHUD extends Phaser.Scene {
   private timeText?: Phaser.GameObjects.Text;
   private timePanel?: Phaser.GameObjects.Rectangle;
   private roomText?: Phaser.GameObjects.Text;
-  private roomPanel?: Phaser.GameObjects.Rectangle;
   private hpBarBg?: Phaser.GameObjects.Rectangle;
   private hpBarFill?: Phaser.GameObjects.Rectangle;
   private weaponText?: Phaser.GameObjects.Text;
@@ -99,13 +98,13 @@ export class GameHUD extends Phaser.Scene {
       .setDepth(DEPTH_HUD_FILL);
     this.timePanel = this.makePanelBehind(this.timeText);
 
-    // -- Top-right: current room --
+    // -- Top-right: current room -- (no backdrop; the splits panel
+    // immediately below already provides one for this column).
     this.roomText = this.add
       .text(w - GUTTER_MEDIUM, 10, `Room 1/${ROOM_COUNT}`, HUD_TEXT_STYLE)
       .setOrigin(1, 0)
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD_FILL);
-    this.roomPanel = this.makePanelBehind(this.roomText);
 
     this.buildSplitsPanel(w);
 
@@ -175,7 +174,6 @@ export class GameHUD extends Phaser.Scene {
     if (this.roomText) {
       const cur = state.currentRoom ?? 1;
       this.roomText.setText(`Room ${cur}/${ROOM_COUNT}`);
-      this.fitPanelTo(this.roomPanel, this.roomText);
     }
 
     this.refreshSplits(state.splits);
@@ -251,13 +249,26 @@ export class GameHUD extends Phaser.Scene {
   }
 
   private refreshSplits(splits: ReadonlyArray<SplitData>): void {
-    if (!this.splitsHeader || !this.splitsPanel) return;
-    const visible = splits.length > 0;
-    this.splitsHeader.setVisible(visible && this.hudVisible);
-    this.splitsPanel.setVisible(visible && this.hudVisible);
+    if (!this.splitsHeader || !this.splitsPanel || !this.roomText) return;
+    const hasSplits = splits.length > 0;
+    this.splitsHeader.setVisible(hasSplits && this.hudVisible);
+    // Panel is always visible when HUD is on so it backs the room
+    // counter even before the first split lands (room 1 has no splits).
+    this.splitsPanel.setVisible(this.hudVisible);
 
-    let maxRowWidth = this.splitsHeader.displayWidth;
-    let lastRowBottom = this.splitsHeader.y + this.splitsHeader.displayHeight;
+    let maxRowWidth = Math.max(
+      this.roomText.displayWidth,
+      this.splitsHeader.displayWidth,
+    );
+    // Default the bottom to the room text's bottom edge so the empty
+    // panel still wraps the room counter; expanded below per split row.
+    let lastRowBottom = this.roomText.y + this.roomText.displayHeight;
+    if (hasSplits) {
+      lastRowBottom = Math.max(
+        lastRowBottom,
+        this.splitsHeader.y + this.splitsHeader.displayHeight,
+      );
+    }
 
     for (let i = 0; i < this.splitsRows.length; i++) {
       const row = this.splitsRows[i];
@@ -291,13 +302,11 @@ export class GameHUD extends Phaser.Scene {
       }
     }
 
-    if (visible) {
-      const w = maxRowWidth + PANEL_PAD_X * 2;
-      const top = this.splitsHeader.y - PANEL_PAD_Y;
-      const h = lastRowBottom - top + PANEL_PAD_Y;
-      this.splitsPanel.setSize(w, h);
-      this.splitsPanel.setPosition(this.splitsHeader.x + PANEL_PAD_X, top);
-    }
+    const top = this.roomText.y - PANEL_PAD_Y;
+    const w = maxRowWidth + PANEL_PAD_X * 2;
+    const h = lastRowBottom - top + PANEL_PAD_Y;
+    this.splitsPanel.setSize(w, h);
+    this.splitsPanel.setPosition(this.roomText.x + PANEL_PAD_X, top);
   }
 
   private refreshWeapon(weaponId: number, ammo: number): void {
@@ -376,7 +385,6 @@ export class GameHUD extends Phaser.Scene {
     this.timeText?.setVisible(v);
     this.timePanel?.setVisible(v);
     this.roomText?.setVisible(v);
-    this.roomPanel?.setVisible(v);
     this.hpBarBg?.setVisible(v);
     this.hpBarFill?.setVisible(v);
     this.weaponText?.setVisible(v);
@@ -404,7 +412,6 @@ export class GameHUD extends Phaser.Scene {
     this.timeText?.destroy();
     this.timePanel?.destroy();
     this.roomText?.destroy();
-    this.roomPanel?.destroy();
     this.hpBarBg?.destroy();
     this.hpBarFill?.destroy();
     this.weaponText?.destroy();
@@ -419,7 +426,6 @@ export class GameHUD extends Phaser.Scene {
     this.timeText = undefined;
     this.timePanel = undefined;
     this.roomText = undefined;
-    this.roomPanel = undefined;
     this.hpBarBg = undefined;
     this.hpBarFill = undefined;
     this.weaponText = undefined;
