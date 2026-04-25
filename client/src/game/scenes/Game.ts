@@ -16,6 +16,7 @@ import {
   type BuiltRoom,
 } from "../world/roomLayout";
 import { createControls, type Controls } from "./utils/Controls";
+import { WEAPON_STATS, weaponFromServerId } from "../weapons";
 import type {
   RoomData,
   EntitySnapshot,
@@ -47,6 +48,7 @@ export class Game extends Phaser.Scene {
   backgroundObjs: Phaser.GameObjects.GameObject[] = [];
   controls!: Controls;
   inputSendAcc = 0;
+  private nextShootAt = 0;
   private requestedPickupIds = new Set<number>();
   private requestedDoorIds = new Set<number>();
 
@@ -103,10 +105,21 @@ export class Game extends Phaser.Scene {
       this.inputSendAcc = 0;
     }
 
-    if (this.controls.shootPressed() && this.player) {
-      const angle = this.controls.aimAngle(this.player.x, this.player.y);
-      sync.sendShoot(angle);
-      this.player.triggerShootAnim();
+    if (this.controls.shootHeld()) {
+      const sp = sync.state.player;
+      const now = this.time.now;
+      if (this.player && sp && now >= this.nextShootAt) {
+        const angle = this.controls.aimAngle(this.player.x, this.player.y);
+        sync.sendShoot(angle);
+        this.player.triggerShootAnim();
+        const id = weaponFromServerId(sp.weapon_id);
+        const baseCd = WEAPON_STATS[id].cooldownMs;
+        const stacks = sp.fire_rate_stacks ?? 0;
+        this.nextShootAt = now + baseCd / (1 + 0.1 * stacks);
+      }
+    } else {
+      // Release resets the gate so the next click fires instantly.
+      this.nextShootAt = 0;
     }
 
     const slot = this.controls.weaponSwitchPressed();

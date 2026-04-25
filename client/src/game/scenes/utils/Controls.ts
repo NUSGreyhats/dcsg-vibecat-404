@@ -5,7 +5,6 @@ export type MovementInput = { dx: number; dy: number };
 export type Controls = {
   movement(): MovementInput;
   aimAngle(pivotX: number, pivotY: number): number;
-  shootPressed(): boolean;
   shootHeld(): boolean;
   interactPressed(): boolean;
   inventoryPressed(): boolean;
@@ -45,7 +44,6 @@ export function createControls(scene: Phaser.Scene): Controls {
     return {
       movement: () => ({ dx: 0, dy: 0 }),
       aimAngle: () => 0,
-      shootPressed: () => false,
       shootHeld: () => false,
       interactPressed: () => false,
       inventoryPressed: () => false,
@@ -73,15 +71,6 @@ export function createControls(scene: Phaser.Scene): Controls {
     three: kb.addKey(Phaser.Input.Keyboard.KeyCodes.THREE),
   };
 
-  // Phaser's pointer API doesn't expose a frame-bounded "just pressed"
-  // for the main button, so we track the edge ourselves.
-  let shootEdge = false;
-  scene.input.on(Phaser.Input.Events.POINTER_DOWN, (p: Phaser.Input.Pointer) => {
-    if (p.leftButtonDown()) {
-      shootEdge = true;
-    }
-  });
-
   const justDown = Phaser.Input.Keyboard.JustDown;
 
   return {
@@ -105,13 +94,6 @@ export function createControls(scene: Phaser.Scene): Controls {
       const worldX = Number.isFinite(p.worldX) ? p.worldX : p.x;
       const worldY = Number.isFinite(p.worldY) ? p.worldY : p.y;
       return Math.atan2(worldY - pivotY, worldX - pivotX);
-    },
-    shootPressed(): boolean {
-      if (shootEdge) {
-        shootEdge = false;
-        return true;
-      }
-      return false;
     },
     shootHeld(): boolean {
       return scene.input.activePointer.leftButtonDown();

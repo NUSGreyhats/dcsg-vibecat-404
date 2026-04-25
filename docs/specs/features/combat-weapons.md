@@ -135,7 +135,7 @@ Both `PlayerState.HP` and `EnemyState.HP` are `int16`. Go performs silent wrapar
 
 - `client/src/game/weapons.ts` — mirrors `weaponSpecs` for UI (weapon icons, cooldown bars).
 - `client/src/game/entities/Bullet.ts` — renders projectiles from `ProjSnapshot`.
-- Fire input → `C2S_SHOOT { aim_angle }`. No client-side cooldown enforcement beyond visual polish; the server is authoritative.
+- Fire input → `C2S_SHOOT { aim_angle }`. The stock client emits shoots while the left mouse is held, throttled to the equipped weapon's effective cooldown — same `cooldown / (1 + 0.1 * fire_rate_stacks)` formula used here — so it never sends faster than the server would accept. See [client/07-input-controls.md](../client/07-input-controls.md#shoot-throttle). The throttle is a bandwidth shaper only; the server cooldown is still authoritative and BUG-04 / BUG-07 remain reachable from the stock client.
 
 ## Implementation notes
 
