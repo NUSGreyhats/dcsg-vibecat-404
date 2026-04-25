@@ -25,9 +25,9 @@ func setWallGridForTest(t *testing.T, roomIndex uint8, walls map[[2]int]cellKind
 
 // abs is provided in walls.go.
 
-// manhattan computes the expected tile-step distance for an empty grid
-// (no walls), as a 4-neighbourhood BFS would yield.
-func manhattan(ar, ac, br, bc int) int {
+// chebyshev computes the expected tile-step distance for an empty grid
+// (no walls), as an 8-neighbourhood BFS with unit-cost diagonals yields.
+func chebyshev(ar, ac, br, bc int) int {
 	d := ar - br
 	if d < 0 {
 		d = -d
@@ -36,20 +36,23 @@ func manhattan(ar, ac, br, bc int) int {
 	if e < 0 {
 		e = -e
 	}
-	return d + e
+	if d > e {
+		return d
+	}
+	return e
 }
 
-// TestBFS_EmptyRoom_ManhattanDistances asserts that on an empty grid
-// (room 11, no tilemap), BFS distances equal Manhattan distances on a
-// 4-neighbourhood — the algorithm reduces to plain Manhattan when no
-// walls are present.
-func TestBFS_EmptyRoom_ManhattanDistances(t *testing.T) {
+// TestBFS_EmptyRoom_ChebyshevDistances asserts that on an empty grid
+// (room 11, no tilemap), BFS distances equal Chebyshev distances — the
+// algorithm reduces to max(|dr|,|dc|) under unit-cost 8-neighbour BFS
+// when no walls are present.
+func TestBFS_EmptyRoom_ChebyshevDistances(t *testing.T) {
 	const room uint8 = 11 // nil grid → cellEmpty everywhere; no tilemap loaded
 	const sr, sc = 12, 20
 	f := BFSFromTile(room, sr, sc)
 	for r := 0; r < GridRows; r++ {
 		for c := 0; c < GridCols; c++ {
-			want := uint16(manhattan(r, c, sr, sc))
+			want := uint16(chebyshev(r, c, sr, sc))
 			if got := f[r][c]; got != want {
 				t.Fatalf("empty BFS: f[%d][%d]=%d, want %d", r, c, got, want)
 			}
@@ -81,15 +84,14 @@ func TestBFS_UShape_RoutesAround(t *testing.T) {
 	const playerR, playerC = 7, 12 // inside the U
 	f := BFSFromTile(room, playerR, playerC)
 
-	// Mob is below the U bottom, dead-centre. Manhattan distance is 5
+	// Mob is below the U bottom, dead-centre. Chebyshev distance is 5
 	// (rows 12 → 7), but the direct path is blocked by row 10 cols 10..14.
-	// The BFS must route around — minimum extra distance is 4 tiles
-	// (down to row 10, around col 9 or 15, back up).
+	// The BFS must route around — meaning a longer-than-Chebyshev path.
 	const mobR, mobC = 12, 12
-	mh := uint16(manhattan(mobR, mobC, playerR, playerC))
+	cb := uint16(chebyshev(mobR, mobC, playerR, playerC))
 	got := f[mobR][mobC]
-	if got <= mh {
-		t.Fatalf("U-shape: expected BFS distance > manhattan(%d), got %d (mob trapped or impossibly short)", mh, got)
+	if got <= cb {
+		t.Fatalf("U-shape: expected BFS distance > chebyshev(%d), got %d (mob trapped or impossibly short)", cb, got)
 	}
 	// Sanity-bound: shouldn't be absurdly long for a 40×24 grid.
 	if got >= FlowFieldSentinel {
@@ -101,7 +103,7 @@ func TestBFS_UShape_RoutesAround(t *testing.T) {
 	// #19 demands.
 	r, c := mobR, mobC
 	for step := 0; step < 200; step++ {
-		nr, nc := NextStepTile(f, r, c)
+		nr, nc := NextStepTile(f, room, r, c)
 		if nr == r && nc == c {
 			break
 		}
@@ -121,48 +123,94 @@ func TestBFS_UShape_RoutesAround(t *testing.T) {
 	}
 }
 
-// TestNextStepTile_TieBreakingNESW asserts that when multiple neighbours
-// have equal lowest distance, the picker prefers N, then E, then S, then
-// W. This is a determinism invariant — replays depend on it.
-func TestNextStepTile_TieBreakingNESW(t *testing.T) {
-	// Hand-built field: mob at (5, 5), neighbours all at distance 1
-	// except west which is sentinel (wall). Expected pick: N.
-	var f FlowField
-	for r := 0; r < GridRows; r++ {
-		for c := 0; c < GridCols; c++ {
-			f[r][c] = FlowFieldSentinel
+// TestNextStepTile_TieBreakingClockwise asserts that when multiple
+// neighbours have equal lowest distance, the picker prefers them in
+// clockwise order from N: N, NE, E, SE, S, SW, W, NW. This is a
+// determinism invariant — replays depend on it.
+func TestNextStepTile_TieBreakingClockwise(t *testing.T) {
+	const room uint8 = 11 // empty room — no corner-cut interference
+	// Hand-built field: mob at (5, 5) with all 8 neighbours at distance 1
+	// and the mob's own tile at 2. Removing one neighbour at a time should
+	// shift the pick to the next direction in clockwise order.
+	reset := func() *FlowField {
+		var f FlowField
+		for r := 0; r < GridRows; r++ {
+			for c := 0; c < GridCols; c++ {
+				f[r][c] = FlowFieldSentinel
+			}
+		}
+		f[5][5] = 2
+		f[4][5] = 1 // N
+		f[4][6] = 1 // NE
+		f[5][6] = 1 // E
+		f[6][6] = 1 // SE
+		f[6][5] = 1 // S
+		f[6][4] = 1 // SW
+		f[5][4] = 1 // W
+		f[4][4] = 1 // NW
+		return &f
+	}
+
+	cases := []struct {
+		drop   []struct{ r, c int } // tiles set back to sentinel
+		wantR  int
+		wantC  int
+		expect string
+	}{
+		{nil, 4, 5, "N"},
+		{[]struct{ r, c int }{{4, 5}}, 4, 6, "NE"},
+		{[]struct{ r, c int }{{4, 5}, {4, 6}}, 5, 6, "E"},
+		{[]struct{ r, c int }{{4, 5}, {4, 6}, {5, 6}}, 6, 6, "SE"},
+		{[]struct{ r, c int }{{4, 5}, {4, 6}, {5, 6}, {6, 6}}, 6, 5, "S"},
+		{[]struct{ r, c int }{{4, 5}, {4, 6}, {5, 6}, {6, 6}, {6, 5}}, 6, 4, "SW"},
+		{[]struct{ r, c int }{{4, 5}, {4, 6}, {5, 6}, {6, 6}, {6, 5}, {6, 4}}, 5, 4, "W"},
+		{[]struct{ r, c int }{{4, 5}, {4, 6}, {5, 6}, {6, 6}, {6, 5}, {6, 4}, {5, 4}}, 4, 4, "NW"},
+	}
+	for _, tc := range cases {
+		f := reset()
+		for _, d := range tc.drop {
+			f[d.r][d.c] = FlowFieldSentinel
+		}
+		r, c := NextStepTile(f, room, 5, 5)
+		if r != tc.wantR || c != tc.wantC {
+			t.Errorf("expect %s=(%d,%d), got (%d,%d) after dropping %v", tc.expect, tc.wantR, tc.wantC, r, c, tc.drop)
 		}
 	}
-	f[5][5] = 2
-	f[4][5] = 1 // N
-	f[5][6] = 1 // E
-	f[6][5] = 1 // S
-	// W = sentinel
-	r, c := NextStepTile(&f, 5, 5)
-	if r != 4 || c != 5 {
-		t.Fatalf("tie N/E/S: expected N=(4,5), got (%d,%d)", r, c)
+}
+
+// TestBFS_NoCornerCut asserts that two diagonally-adjacent walls touching
+// at a corner cannot be squeezed through diagonally. Layout:
+//
+//	(5, 6) wall, (6, 5) wall — these form a corner the mob would otherwise
+//	clip through with a NE step from (6, 6) to (5, 5). With corner-cut
+//	prevention, that step is forbidden, so the path from (6, 6) to (5, 5)
+//	must route around (going N then W via two cardinal steps, or further
+//	around if those are also blocked).
+func TestBFS_NoCornerCut(t *testing.T) {
+	const room uint8 = 0
+	walls := map[[2]int]cellKind{
+		{5, 6}: cellSolid,
+		{6, 5}: cellSolid,
+	}
+	setWallGridForTest(t, room, walls)
+
+	f := BFSFromTile(room, 5, 5)
+	// Without corner-cut prevention, BFS would assign distance 1 to (6,6).
+	// With prevention, the only reachable path goes via a longer route —
+	// must be > 1.
+	if f[6][6] <= 1 {
+		t.Fatalf("corner-cut prevention failed: (6,6) should be > 1 (forced around walls), got %d", f[6][6])
+	}
+	// And (6,6) must still be reachable (open neighbours exist).
+	if f[6][6] >= FlowFieldSentinel {
+		t.Fatalf("corner-cut: (6,6) should still be reachable around the corner, got sentinel")
 	}
 
-	// N out, E and S tied → expect E.
-	f[4][5] = FlowFieldSentinel
-	r, c = NextStepTile(&f, 5, 5)
-	if r != 5 || c != 6 {
-		t.Fatalf("tie E/S: expected E=(5,6), got (%d,%d)", r, c)
-	}
-
-	// E out, S and W tied → expect S.
-	f[5][6] = FlowFieldSentinel
-	f[5][4] = 1
-	r, c = NextStepTile(&f, 5, 5)
-	if r != 6 || c != 5 {
-		t.Fatalf("tie S/W: expected S=(6,5), got (%d,%d)", r, c)
-	}
-
-	// S out, only W reachable.
-	f[6][5] = FlowFieldSentinel
-	r, c = NextStepTile(&f, 5, 5)
-	if r != 5 || c != 4 {
-		t.Fatalf("only W: expected W=(5,4), got (%d,%d)", r, c)
+	// NextStepTile from (6,6) must not pick the diagonal NW step (5,5)
+	// even though its distance is the lowest in the field.
+	r, c := NextStepTile(f, room, 6, 6)
+	if r == 5 && c == 5 {
+		t.Fatalf("corner-cut: NextStepTile picked the corner-cut diagonal (5,5)")
 	}
 }
 
@@ -174,7 +222,7 @@ func TestNextStepTile_LocalMinimumHolds(t *testing.T) {
 	const sr, sc = 6, 6
 	f := BFSFromTile(room, sr, sc)
 	// Mob is on the source tile.
-	r, c := NextStepTile(f, sr, sc)
+	r, c := NextStepTile(f, room, sr, sc)
 	if r != sr || c != sc {
 		t.Fatalf("on source: expected hold (%d,%d), got (%d,%d)", sr, sc, r, c)
 	}
@@ -204,7 +252,7 @@ func TestNextStepTile_UnreachablePocketHolds(t *testing.T) {
 	if f[mobR][mobC] != FlowFieldSentinel {
 		t.Fatalf("unreachable pocket: expected sentinel at mob, got %d", f[mobR][mobC])
 	}
-	r, c := NextStepTile(f, mobR, mobC)
+	r, c := NextStepTile(f, room, mobR, mobC)
 	if r != mobR || c != mobC {
 		t.Fatalf("unreachable: expected hold, got step to (%d,%d)", r, c)
 	}
@@ -398,7 +446,7 @@ func TestIssue19_Regression_BoundaryAnchoredAlcove(t *testing.T) {
 	r, c := mobR, mobC
 	prevDist := f[r][c]
 	for step := 0; step < 200; step++ {
-		nr, nc := NextStepTile(f, r, c)
+		nr, nc := NextStepTile(f, room, r, c)
 		if nr == r && nc == c {
 			break // reached source (or local minimum at source)
 		}
