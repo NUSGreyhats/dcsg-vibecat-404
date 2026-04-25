@@ -98,6 +98,7 @@ export class Game extends Phaser.Scene {
     sync.state.on("doorUnlocked", this.onDoorUnlocked, this);
     sync.state.on("entityDied", this.onEntityDied, this);
     sync.state.on("runComplete", this.onRunComplete, this);
+    sync.state.on("error", this.onSyncError, this);
 
     // Enemies emit this on HP decrease so we can play impact fx at the
     // hit location without the entity needing a back-pointer here.
@@ -345,6 +346,25 @@ export class Game extends Phaser.Scene {
     this.scene.start("WinScreen", { outcome });
   }
 
+  private onSyncError(err: { code: string; message: string }): void {
+    // Mid-run WS drop without a RUN_COMPLETE — most commonly the death
+    // path before the server fully drained, but also any network blip.
+    // Fall back to the WinScreen as a failed run so the player isn't
+    // staring at a frozen room with no way out.
+    if (err.code !== "disconnected") return;
+    const state = getSync().state;
+    if (state.runFinished) return; // RUN_COMPLETE already handled.
+    // RUN_COMPLETE never landed, so totalMs is undefined — seed it from
+    // the most recent STATE snapshot's elapsed counter. Mark the run as
+    // finished to mirror the normal completion path (and prevent re-entry
+    // if the error event fires more than once).
+    state.totalMs = state.elapsedMs;
+    state.runFinished = true;
+    state.runOutcome = RunOutcomeValue.FAILED;
+    this.scene.stop("GameHUD");
+    this.scene.start("WinScreen", { outcome: RunOutcomeValue.FAILED });
+  }
+
   private nearestPickupId(
     x: number,
     y: number,
@@ -392,6 +412,7 @@ export class Game extends Phaser.Scene {
     sync.state.off("doorUnlocked", this.onDoorUnlocked, this);
     sync.state.off("entityDied", this.onEntityDied, this);
     sync.state.off("runComplete", this.onRunComplete, this);
+    sync.state.off("error", this.onSyncError, this);
     this.events.off("enemyHit", this.onEnemyHit, this);
     this.hitstopUntil = 0;
     this.prevPlayerHp = -1;

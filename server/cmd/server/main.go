@@ -160,15 +160,29 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 
 	engine := game.NewEngine(inCh, outCh, lb.Submit, authCheck)
 
+	writerDone := make(chan struct{})
 	go connReader(connCtx, conn, inCh, cancel)
-	go connWriter(connCtx, conn, outCh, cancel)
+	go func() {
+		defer close(writerDone)
+		connWriter(connCtx, conn, outCh, cancel)
+	}()
 
 	go func() {
 		defer cancel()
 		defer releaseSlot()
-		defer conn.Close(websocket.StatusNormalClosure, "bye")
 
 		engine.Run(connCtx)
+
+		// Engine has emitted any final messages (notably RUN_COMPLETE on
+		// death). Close outCh so the writer drains the buffer instead of
+		// being killed mid-flush by conn.Close, then wait briefly for it
+		// to finish so the client actually sees the terminal envelope.
+		close(outCh)
+		select {
+		case <-writerDone:
+		case <-time.After(500 * time.Millisecond):
+		}
+		conn.Close(websocket.StatusNormalClosure, "bye")
 
 		if engine.PlayerID != "" {
 			lb.Unregister(engine.PlayerID)
