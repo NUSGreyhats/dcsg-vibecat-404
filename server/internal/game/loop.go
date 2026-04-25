@@ -227,11 +227,11 @@ func (e *Engine) awaitAuth(ctx context.Context) bool {
 			} else if e.DisplayName == "" {
 				e.DisplayName = pkt.PlayerID
 			}
-			// Make the engine reachable from /ws/spectate now that we have
-			// a player_id. Unregister happens in Run's deferred cleanup.
-			if e.Engines != nil {
-				e.Engines.Register(e.PlayerID, e.RegisterCh)
-			}
+			// Engines.Register is deliberately deferred until initRun:
+			// pre-run engines have no cached RUN_STARTED/ROOM_LOAD/STATE,
+			// so a spectator attaching during the post-AUTH / pre-START
+			// window would hang waiting for catchup that can't be sent
+			// and would consume per-game cap until the run started.
 			e.send(protocol.S2CAuthOk, protocol.AuthOkData{DisplayName: e.DisplayName})
 			return true
 		}
@@ -304,6 +304,15 @@ func (e *Engine) initRun(startTime int64) bool {
 		Seed: startTime,
 		Room: roomData,
 	})
+	// Make the engine reachable from /ws/spectate. We delayed this from
+	// the AUTH handshake so spectators only ever attach to engines with
+	// a cached catchup payload (RUN_STARTED has just been emit-and-
+	// cached above, so any spectator that registers between this line
+	// and the next tick will see the catchup). Unregister fires in
+	// finishRun and in Run's deferred cleanup as belt-and-braces.
+	if e.Engines != nil {
+		e.Engines.Register(e.PlayerID, e.RegisterCh)
+	}
 	return true
 }
 
@@ -791,6 +800,13 @@ func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {
 	// their outChs to close after SPECTATOR_CATCHUP_MS so the connWriter
 	// has a chance to flush before the WS shuts.
 	e.closeSpectators()
+	// Stop accepting new spectators on this engine — the run is over and
+	// any incoming /ws/spectate request should hit the 404-no-live-run
+	// path instead of attaching to a dying engine. Run's deferred
+	// Unregister is the belt for the disconnect-without-finishRun path.
+	if e.Engines != nil && e.PlayerID != "" {
+		e.Engines.Unregister(e.PlayerID)
+	}
 }
 
 // sendState builds the S2C_STATE snapshot from the authoritative state.

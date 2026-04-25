@@ -15,11 +15,13 @@ const OutChBuf = 64
 type Conn struct {
 	OutCh chan protocol.S2CEnvelope
 	Seq   uint32
-	// Closed is set by the engine when it closes OutCh (after run end's
-	// 500 ms flush window). The accept-side cap accounting reads this
-	// to release the global slot. atomic.Bool would be tidier but a
-	// simple boolean is fine — the only writers are the engine
-	// goroutine and the time.AfterFunc closure that closes OutCh.
+	// Closed is set by the engine after closeSpectators schedules the
+	// outCh to be closed (post run-end, after the 500 ms flush window).
+	// Read by the engine itself: fan-out skips closed Conns, and
+	// publishLiveSummary excludes them from the spectator_count surfaced
+	// on /api/live. NOT used for global cap accounting — that lives on
+	// the writer goroutine in handleSpectateWS, which calls
+	// caps.ReleaseGlobal exactly once on its own exit.
 	Closed bool
 }
 
