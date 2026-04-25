@@ -7,6 +7,10 @@ import { TRACER_YELLOW } from "../ui/tokens";
 const LERP_FACTOR = 0.4;
 const FALLBACK_WIDTH = 8;
 const FALLBACK_HEIGHT = 4;
+// Tracer is a fading polyline through the last N rendered positions —
+// 6 samples at ~60 fps reads as a ~100 ms streak.
+const TRAIL_LEN = 6;
+const TRAIL_WIDTH = 2;
 
 /**
  * Projectile sprite. Server-authoritative — we lerp toward the last
@@ -22,6 +26,10 @@ export class Bullet extends Phaser.GameObjects.Container {
   targetX: number;
   targetY: number;
   private readonly visual: Phaser.GameObjects.Sprite | Phaser.GameObjects.Rectangle;
+  // Tracer trail — drawn in world space, not parented to this container,
+  // so the line doesn't rotate/translate with the bullet sprite.
+  private readonly trail: Phaser.GameObjects.Graphics;
+  private readonly trailPts: { x: number; y: number }[] = [];
 
   constructor(scene: Phaser.Scene, snap: ProjSnapshot) {
     super(scene, snap.x, snap.y);
@@ -29,6 +37,10 @@ export class Bullet extends Phaser.GameObjects.Container {
     this.ownerId = snap.owner;
     this.targetX = snap.x;
     this.targetY = snap.y;
+
+    this.trail = scene.add.graphics();
+    this.trail.setDepth(1);
+    this.trail.setBlendMode(Phaser.BlendModes.ADD);
 
     if (scene.textures.exists("bullets")) {
       const frame = frameForOwner(snap.owner);
@@ -62,6 +74,32 @@ export class Bullet extends Phaser.GameObjects.Container {
     if (isHitstopped(this.scene)) return;
     this.x = Phaser.Math.Linear(this.x, this.targetX, LERP_FACTOR);
     this.y = Phaser.Math.Linear(this.y, this.targetY, LERP_FACTOR);
+    this.pushTrail();
+  }
+
+  private pushTrail(): void {
+    this.trailPts.push({ x: this.x, y: this.y });
+    if (this.trailPts.length > TRAIL_LEN) this.trailPts.shift();
+    this.redrawTrail();
+  }
+
+  private redrawTrail(): void {
+    this.trail.clear();
+    if (this.trailPts.length < 2) return;
+    // Draw segment-by-segment so each step can fade independently. Older
+    // samples (lower index) are more transparent than newer ones.
+    for (let i = 1; i < this.trailPts.length; i++) {
+      const t = i / (this.trailPts.length - 1); // 0..1, newer = higher
+      this.trail.lineStyle(TRAIL_WIDTH, TRACER_YELLOW, t * 0.55);
+      const a = this.trailPts[i - 1];
+      const b = this.trailPts[i];
+      this.trail.lineBetween(a.x, a.y, b.x, b.y);
+    }
+  }
+
+  destroy(fromScene?: boolean): void {
+    this.trail.destroy();
+    super.destroy(fromScene);
   }
 }
 
