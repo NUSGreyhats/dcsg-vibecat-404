@@ -62,6 +62,13 @@ export class GameStateSync {
 
   close(): void {
     if (this.ws) {
+      // Detach the close handler before calling close() — this is an
+      // intentional teardown (Restart Run / Log Out / Play Again), not a
+      // network drop, so we don't want the synthetic 'disconnected'
+      // error to fire and trip Game's run-failed fallback.
+      this.ws.onclose = null;
+      this.ws.onerror = null;
+      this.ws.onmessage = null;
       try {
         this.ws.close();
       } catch {
