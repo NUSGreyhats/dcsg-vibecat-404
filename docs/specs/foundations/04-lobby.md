@@ -122,7 +122,15 @@ Spectators receive a near-identical packet stream to the player — enough to re
 
 ## Implementation status
 
-**Greenfield.** The lobby service does not exist yet — the current repo is monolithic and hosts identity endpoints inside `server/main.go` + `server/identity.go`. Splitting into a separate service is later work.
+Lobby split rolling out in five phases under epic #26:
+
+- **Phase 1 (#21, merged):** `lobby/` service stood up; identity HTTP serving (`/api/register`, `/api/login`, `/api/verify`, `/api/health`, `/register`) extracted from the monolith. Caddy routes identity endpoints to lobby.
+- **Phase 2 (#22, merged):** public leaderboard + replay download. Lobby owns `/api/leaderboard`, `/api/replay/:replay_id`, and the `/leaderboard` HTML page; reads `game.db` over WAL alongside the game-server writer. Replay download verifies the stored checksum on read.
+- **Phase 3 (#23, in flight):** live spectating. Lobby owns `/api/live` and the `/spectate` selector page; `/spectate/:player_id` viewer URLs serve a static spectator client bundle from the client container. Game server adds `/internal/live-games` (loopback) and `/ws/spectate` upgrade with caps + per-IP rate limit + read-only enforcement; per-engine spectator fan-out with non-blocking drop-on-full + catchup snapshot on register.
+- **Phase 4 (#24, not started):** source serving + non-queue admin (`/source/*`, `/admin/leaderboard`, `/admin/winners`).
+- **Phase 5 (#25, not started):** FIFO queue + slot handoff via `allowlist.json`. Only required when `MAX_CONCURRENT=4` for prod.
+
+The two-repo target in [01-architecture.md](./01-architecture.md) was relaxed to a single repo with three modules (`server/`, `lobby/`, `pkg/`) coordinated via `go.work` + `replace` directives. Both binaries open the same `/data/identity.db` (SQLite WAL).
 
 ## Intentional bugs in this area
 
