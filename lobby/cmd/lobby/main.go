@@ -58,6 +58,10 @@ func main() {
 		_, _ = w.Write(web.LeaderboardHTML)
 	})
 	mux.HandleFunc("/api/leaderboard", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		limit := 10
 		if v := r.URL.Query().Get("limit"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
@@ -77,6 +81,10 @@ func main() {
 		_ = json.NewEncoder(w).Encode(map[string]any{"entries": entries})
 	})
 	mux.HandleFunc("/api/replay/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		id := strings.TrimPrefix(r.URL.Path, "/api/replay/")
 		if id == "" || strings.Contains(id, "/") {
 			http.Error(w, "invalid replay id", http.StatusBadRequest)
@@ -86,6 +94,11 @@ func main() {
 		if err != nil {
 			if errors.Is(err, leaderboard.ErrNotFound) {
 				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			if errors.Is(err, leaderboard.ErrChecksumMismatch) {
+				log.Printf("leaderboard: replay %s: checksum mismatch", id)
+				http.Error(w, "replay integrity check failed", http.StatusInternalServerError)
 				return
 			}
 			log.Printf("leaderboard: replay %s: %v", id, err)

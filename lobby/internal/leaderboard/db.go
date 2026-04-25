@@ -6,6 +6,7 @@
 package leaderboard
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,10 @@ import (
 
 // ErrNotFound is returned when a replay_id doesn't exist.
 var ErrNotFound = errors.New("leaderboard: replay not found")
+
+// ErrChecksumMismatch is returned when the stored checksum doesn't match
+// SHA256(seed || input_log) — i.e. game.db was tampered with at rest.
+var ErrChecksumMismatch = errors.New("leaderboard: replay checksum mismatch")
 
 // Open opens game.db with WAL + a busy timeout so reads can co-exist with
 // the game server's writer goroutine. WAL is durable across opens; the
@@ -116,20 +121,27 @@ type Replay struct {
 }
 
 // GetReplay fetches a single completed run by replay_id. Returns ErrNotFound
-// if the row doesn't exist.
+// if the row doesn't exist, or ErrChecksumMismatch if the stored checksum
+// doesn't match SHA256(seed || input_log) — see
+// docs/specs/foundations/08-leaderboard-replay.md.
 func GetReplay(db *sql.DB, replayID string) (*Replay, error) {
 	var r Replay
+	var stored []byte
 	err := db.QueryRow(
-		`SELECT replay_id, player_id, display_name, total_ms, seed, input_log
+		`SELECT replay_id, player_id, display_name, total_ms, seed, input_log, checksum
            FROM completed_runs
           WHERE replay_id = ?`,
 		replayID,
-	).Scan(&r.ReplayID, &r.PlayerID, &r.DisplayName, &r.TotalMs, &r.Seed, &r.InputLog)
+	).Scan(&r.ReplayID, &r.PlayerID, &r.DisplayName, &r.TotalMs, &r.Seed, &r.InputLog, &stored)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("leaderboard: get replay: %w", err)
+	}
+	got := Checksum(r.Seed, r.InputLog)
+	if subtle.ConstantTimeCompare(stored, got[:]) != 1 {
+		return nil, ErrChecksumMismatch
 	}
 	return &r, nil
 }

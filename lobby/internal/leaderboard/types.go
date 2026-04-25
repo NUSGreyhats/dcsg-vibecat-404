@@ -12,8 +12,8 @@ type Entry struct {
 	ReplayID    string  `json:"replay_id"`
 }
 
-// Split mirrors protocol.SplitData. See game-server's
-// internal/protocol/packets.go for the source of truth.
+// Split mirrors protocol.SplitData. See
+// server/internal/protocol/packets.go for the source of truth.
 type Split struct {
 	RoomIndex uint8 `json:"room_index"`
 	TimeMs    int64 `json:"time_ms"`
