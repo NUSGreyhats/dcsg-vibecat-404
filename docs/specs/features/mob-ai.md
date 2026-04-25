@@ -158,7 +158,7 @@ Flow field handles arbitrary wall topology — multi-tile slabs, U-shapes, L-sha
 
 ## Implementation status
 
-Mob AI and RNG-driven spawns are implemented (waves, pack aggro, per-room scaling all live). Aggro chase currently uses greedy direct-vector pursuit with axis-separated wall sliding (`moveTowardWithWalls` in `server/internal/game/mobai.go`); the flow-field replacement specified above is **planned** in response to [issue #19](https://github.com/NUSGreyhats/DEFCON-Game-Jon/issues/19) (mobs parking against concave wall geometry). Until the flow field lands, the existing chase remains in place and rooms with multi-tile-thick walls or boundary-anchored wall structures may exhibit stuck mobs.
+Mob AI and RNG-driven spawns are implemented (waves, pack aggro, per-room scaling all live). Aggro chase uses the flow-field gradient described above (`server/internal/game/flowfield.go` + the `AIAggro` branch of `UpdateEnemy` in `mobai.go`), shipped in [PR #32](https://github.com/NUSGreyhats/DEFCON-Game-Jon/pull/32) for [issue #19](https://github.com/NUSGreyhats/DEFCON-Game-Jon/issues/19) (mobs parking against concave wall geometry). The pixel-precision `moveTowardWithWalls` is retained for sub-tile motion + axis-separated wall slide; its step is clamped to the remaining distance so a mob whose aim is closer than one tick's step settles on the aim instead of overshooting it ([issue #34](https://github.com/NUSGreyhats/DEFCON-Game-Jon/issues/34)).
 
 ## Intentional bugs in this area
 
