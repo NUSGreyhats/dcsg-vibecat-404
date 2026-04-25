@@ -29,8 +29,11 @@ PickupState {
     X, Y         float32
     Consumed     bool
     RespawnAt    time.Time   // zero for non-respawning
+    ExpiresAt    time.Time   // zero for never expires; non-zero = despawn deadline (see shop.md)
 }
 ```
+
+`ExpiresAt` is set by runtime-spawned pickups (currently coin drops — see [shop.md](shop.md)) to `now.Add(30s)` at spawn. The per-tick pickup pass marks any unconsumed pickup with `now.After(ExpiresAt)` as `Consumed = true`. Room-templated pickups leave `ExpiresAt` as the zero value and never auto-despawn.
 
 ### Pickup types
 
@@ -40,8 +43,9 @@ Current shipping set:
 | ---- | ----------------- | ------------------------------------------------------------ |
 | 1    | Health potion     | `ApplyHeal(+20)`.                                            |
 | 2    | Ammo crate        | `+20` ammo for current weapon (clamped to `AmmoMax`).        |
+| 3    | Coin              | `+1` to `PlayerState.Coins`. See [shop.md](shop.md).         |
 
-Removed (formerly types 3–5): Speed boost, Damage boost, and Heart (large, `+30000 HP`). See [bugs.md — currently disabled](../bugs.md#currently-disabled): the Heart pickup was the payload for [BUG-08](combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max), and the boost pickups were judged low-value. The pickup-type constants for the removed types are no longer declared in `pickups.go` — if they return, they'll get new (or recycled) IDs.
+Type 3 is **recycled** from the formerly-removed Speed boost — see [shop.md](shop.md) for the rationale. Removed (formerly types 4–5): Damage boost and Heart (large, `+30000 HP`). See [bugs.md — currently disabled](../bugs.md#currently-disabled): the Heart pickup was the payload for [BUG-08](combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max), and the boost pickups were judged low-value.
 
 ## Interact handler
 
@@ -54,7 +58,7 @@ func handleInteract(p *PlayerState, r *RoomState, pkt InteractPacket) {
     dx := pickup.X - p.X
     dy := pickup.Y - p.Y
     if math.Abs(dx) < interactRange && math.Abs(dy) < interactRange {
-        applyPickup(p, pickup)
+        applyPickup(p, pickup, pkt.ClaimedType, now)   // dispatch on ClaimedType, NOT pk.Type — BUG-12
         pickup.Consumed = true
     }
 }
@@ -65,10 +69,12 @@ The check is **square-axis** (`abs(dx) < r && abs(dy) < r`) rather than radial, 
 ## Data flow
 
 - Room load: `RoomData.pickups []PickupSpawn` arrives in `S2C_RUN_STARTED` / `S2C_ROOM_LOAD` → server instantiates `PickupState` entries in `RoomState.Pickups`.
-- `C2S_INTERACT { target_id }` → server looks up pickup → applies if in (buggy) range.
-- On apply: pickup is marked `Consumed = true`; server broadcasts an updated `S2C_STATE` with the modified `PlayerSnapshot` (and the pickup absent from `entities`).
+- Runtime spawns (currently only coin drops on enemy death) append directly to `RoomState.Pickups` and surface in the next `S2C_STATE.pickups`.
+- `C2S_INTERACT { target_id, claimed_type }` → server looks up pickup → checks (buggy) range → calls `applyPickup` dispatching on **`claimed_type`, not `pk.Type`** (this is [BUG-12](shop.md#bug-12-pickup-type-confusion)).
+- On apply: pickup is marked `Consumed = true`; server broadcasts an updated `S2C_STATE` with the modified `PlayerSnapshot` (and the pickup absent from `pickups`).
+- Despawn: the per-tick pickup pass marks any unconsumed pickup with `now.After(ExpiresAt)` as consumed and emits `S2C_ENTITY_DIED` so the client tears down the sprite.
 
-Per-tick collision scan also exists for pickups that auto-trigger on touch (e.g., `Coin`); that auto-trigger path is separate from the `C2S_INTERACT` buggy range. Only the `C2S_INTERACT` path carries BUG-05.
+All pickup types (including Coin) flow through the manual `C2S_INTERACT` path, so [BUG-05](#bug-05-interact-range-bug) and [BUG-12](shop.md#bug-12-pickup-type-confusion) both apply uniformly. There is **no** auto-on-touch pickup pipeline.
 
 ## Client interactions
 
@@ -84,7 +90,7 @@ Per-tick collision scan also exists for pickups that auto-trigger on touch (e.g.
 
 ## Implementation status
 
-Greenfield. Current server has a `Coins` counter on `gameState` but no pickup authoritative model; pickups exist only client-side in the current prototype.
+Implemented. `RoomState.Pickups` and `applyPickup` (`server/internal/game/pickups.go`) own pickup state; runtime coin drops live in the same registry (see [shop.md](shop.md)). The despawn pass in `server/internal/game/loop.go` (`stepTick`) handles `ExpiresAt` expiry.
 
 ## Intentional bugs in this area
 

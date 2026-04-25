@@ -91,6 +91,15 @@ type PlayerState struct {
 	DamageMultUntil time.Time
 	DamageMult      float32
 	ShieldUntil     time.Time
+
+	// Shop traits — permanent stackable buffs purchased from features/shop.md.
+	// Reset on death / new run. Effective multipliers are derived at read
+	// time, never cached on this struct. The shop's `ammo` purchase is a
+	// one-shot refill (not stackable) so there is no AmmoStacks counter.
+	Coins          int32
+	SpeedStacks    uint8
+	FireRateStacks uint8
+	DamageStacks   uint8
 }
 
 func NewPlayerState() *PlayerState {
@@ -143,6 +152,9 @@ type PickupState struct {
 	Type     uint8
 	X, Y     float32
 	Consumed bool
+	// Despawn deadline. Zero value means "never expires" (room-templated
+	// pickups). Coins set this 30s after spawn — see features/shop.md.
+	ExpiresAt time.Time
 }
 
 type DoorState struct {
@@ -165,6 +177,11 @@ type RoomState struct {
 	// Allocation counter for projectile IDs within the room.
 	NextProjID uint32
 
+	// Allocation counter for runtime-spawned non-enemy entity IDs (coin
+	// drops). Lazily initialised to 1_000_000 — well above WaveEntityIDBase
+	// (100_000) + max idx*step, so it cannot collide with wave-spawned IDs.
+	nextEntityID uint32
+
 	// --- Harder-mobs state. See docs/specs/features/harder-mobs.md. ---
 
 	// InitialPop is the initial enemy count captured at room load. Used as
@@ -178,6 +195,17 @@ type RoomState struct {
 
 	// NextEnemyID allocates IDs for wave-spawned mobs at fire time.
 	NextEnemyID uint32
+}
+
+// NextEntityID returns a fresh uint32 for runtime-spawned non-enemy
+// entities (coin drops). Counters are room-local; collisions across rooms
+// are fine because the client wipes its entity maps on every ROOM_LOAD.
+func (r *RoomState) NextEntityID() uint32 {
+	if r.nextEntityID == 0 {
+		r.nextEntityID = 1_000_000
+	}
+	r.nextEntityID++
+	return r.nextEntityID
 }
 
 // MobSeed holds the post-RNG, pre-instantiation data for a mob. All RNG is

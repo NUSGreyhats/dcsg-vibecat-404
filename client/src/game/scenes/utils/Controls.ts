@@ -9,6 +9,7 @@ export type Controls = {
   shootHeld(): boolean;
   interactPressed(): boolean;
   inventoryPressed(): boolean;
+  shopPressed(): boolean;
   pausePressed(): boolean;
   weaponSwitchPressed(): number | null;
 };
@@ -24,6 +25,7 @@ type KeyMap = {
   right: Phaser.Input.Keyboard.Key;
   interact: Phaser.Input.Keyboard.Key;
   inventory: Phaser.Input.Keyboard.Key;
+  shop: Phaser.Input.Keyboard.Key;
   pause: Phaser.Input.Keyboard.Key;
   one: Phaser.Input.Keyboard.Key;
   two: Phaser.Input.Keyboard.Key;
@@ -47,6 +49,7 @@ export function createControls(scene: Phaser.Scene): Controls {
       shootHeld: () => false,
       interactPressed: () => false,
       inventoryPressed: () => false,
+      shopPressed: () => false,
       pausePressed: () => false,
       weaponSwitchPressed: () => null,
     };
@@ -63,6 +66,7 @@ export function createControls(scene: Phaser.Scene): Controls {
     right: kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
     interact: kb.addKey(Phaser.Input.Keyboard.KeyCodes.E),
     inventory: kb.addKey(Phaser.Input.Keyboard.KeyCodes.I),
+    shop: kb.addKey(Phaser.Input.Keyboard.KeyCodes.B),
     pause: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
     one: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
     two: kb.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
@@ -117,6 +121,9 @@ export function createControls(scene: Phaser.Scene): Controls {
     },
     inventoryPressed(): boolean {
       return justDown(keys.inventory);
+    },
+    shopPressed(): boolean {
+      return justDown(keys.shop);
     },
     pausePressed(): boolean {
       return justDown(keys.pause);

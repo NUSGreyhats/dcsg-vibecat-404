@@ -13,7 +13,8 @@ The reference artifacts this doc is grounded in:
 | `art/enemy.aseprite` + `.png`    | Antagonist: white masked kitsune-cats with red markings, 32×32, 8 dir × (idle + move + attack) | Authored, **not wired** |
 | `art/weapon_*.aseprite`          | Pistol, rifle, shotgun sprites (32×16, idle + shoot) | Authored, PNG/JSON in `client/public/assets/`, **not loaded in Preloader** |
 | `art/bullets.png` / `.json`      | Per-weapon bullet atlas (8×8)              | Authored, **not wired**           |
-| `art/coin.png`, `art/heart.png`  | Pickup icons (16×16)                       | Authored, **not wired**           |
+| `art/coin.png`                   | Coin pickup icon (16×16)                   | Authored, wired in `Preloader.ts` as image key `"coin"`; rendered by `Pickup.ts` for type 3 |
+| `art/heart.png`                  | Health-pickup icon (16×16)                 | Authored, **not wired**           |
 | `art/tilemap.png`                | 32×32 tileset: grass/dirt/stone/water/walls/buildings/props | Wired (used by every room tilemap) |
 | `art/poster.jpg`                 | NUS Greyhats franchise poster (blue + orange tiger-cat + mouse) | Authored, out-of-game branding; not in the client bundle |
 
@@ -372,7 +373,7 @@ Files: `Preloader.ts`, `GameHUD.ts`, `Player.ts`, `Enemy.ts`.
 
 ### 9. Modal panel
 
-**Purpose:** foreground a decision (inventory, future pause/shop/confirm dialogs).
+**Purpose:** foreground a decision (inventory, shop, pause, future confirm dialogs).
 
 **Structure:**
 
@@ -386,11 +387,11 @@ Files: `Preloader.ts`, `GameHUD.ts`, `Player.ts`, `Enemy.ts`.
 
 **Close actions:** Esc, modal's toggle key (e.g. `I` for inventory), or Enter after a selection. `scene.resume("Game"); scene.stop();`.
 
-**Implementation:** `InventoryMenu.ts` is canonical. Future `PauseMenu` / `ShopMenu` follow.
+**Implementation:** `InventoryMenu.ts` is the canonical reference. `ShopMenu.ts` and `PauseMenu.ts` follow the same pattern.
 
 ### 10. Selectable list (vertical)
 
-**Purpose:** modal content — inventory, future shop rows, settings.
+**Purpose:** modal content — inventory rows, shop catalog rows, future settings.
 
 **States:**
 - **Default row:** `  item_name` (2-space prefix), Bone white.
@@ -556,7 +557,7 @@ Audit of what's authored vs. wired. Priority ordered.
 | `player.png` atlas                 | ✅        | ✅                                       | ✅                        | Single frame (no anim)   | P1       |
 | `enemy.png` + `.json`              | ✅        | ❌                                       | ❌                        | Color rect fallback      | **P0**   |
 | `bullets.png` + `.json`            | ✅        | ❌                                       | ❌                        | Yellow rect fallback     | P1       |
-| `coin.png`                         | ✅        | ❌                                       | ❌                        | Glyph fallback           | P1       |
+| `coin.png`                         | ✅        | ✅                                       | ✅                        | ✅ (`Pickup.ts` type 3)   | Done     |
 | `heart.png`                        | ✅        | ❌                                       | ❌                        | Glyph fallback           | P1       |
 | `weapon_pistol/_rifle/_shotgun.png` + `.json` | ✅ | ✅ (png + json)                     | ❌                        | ❌ (no weapon sprite yet) | P2       |
 | `player_hand.png`                  | ✅        | ❌                                       | ❌                        | ❌                        | P2       |
@@ -580,7 +581,7 @@ Audit of what's authored vs. wired. Priority ordered.
 **P1 (subsequent PR):**
 
 5. Export `art/bullets.png` + `bullets.json` → assets. Register atlas `"bullets"`. Update `Bullet.ts` to `scene.add.sprite(..., "bullets", frameForWeapon(ownerWeaponId))`.
-6. Export `art/coin.png` + `art/heart.png` → assets. Register images `"coin"` + `"heart"`. `Pickup.ts` already checks those keys.
+6. Export `art/heart.png` → assets. Register image `"heart"`. (`coin.png` already exported, loaded, and rendered by `Pickup.ts`.)
 7. Implement `Player` walk animation using the existing `player.json` frame durations + `scene.anims.create(...)` in `Preloader.create()`.
 
 **P2 (later):**
@@ -621,7 +622,7 @@ When adding a new component:
 
 - Palette migration: **not started.** Scenes use the prior `#ffcc33` + `#0d0d10` pair; mechanical retint pending per [Asset integration status](#asset-integration-status) P0 step 4.
 - Splash wiring: **not started.**
-- `Enemy` / `bullets` / `coin` / `heart` wiring: **not started.**
+- `Enemy` / `bullets` / `heart` wiring: **not started.** `coin` wired (Preloader + `Pickup.ts`).
 - Walk anim: **not started** (atlas loaded, no `anims.create`).
 - Weapon rendering: **not started.**
 - Centralized UIKit module: **not started.**

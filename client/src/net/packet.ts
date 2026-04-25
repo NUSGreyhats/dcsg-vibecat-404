@@ -7,6 +7,7 @@ export const C2SType = {
   INTERACT: 0x06,
   ENTER_DOOR: 0x07,
   USE_ITEM: 0x08,
+  SHOP_PURCHASE: 0x09,
 } as const;
 export type C2SType = (typeof C2SType)[keyof typeof C2SType];
 
@@ -48,12 +49,14 @@ export type C2SDataFor<T extends C2SType> = T extends typeof C2SType.AUTH
         : T extends typeof C2SType.SWITCH_WEAPON
           ? { weapon_id: number } // uint8
           : T extends typeof C2SType.INTERACT
-            ? { target_id: number } // entity_id (uint32)
+            ? { target_id: number; claimed_type: number } // claimed_type: BUG-12 substrate
             : T extends typeof C2SType.ENTER_DOOR
               ? { door_id: number }
               : T extends typeof C2SType.USE_ITEM
                 ? { item_name: string }
-                : never;
+                : T extends typeof C2SType.SHOP_PURCHASE
+                  ? { item_id: number } // uint8, 1-indexed into ShopCatalog
+                  : never;
 
 export type S2CDataFor<T extends S2CType> = T extends typeof S2CType.AUTH_OK
   ? { display_name: string }
@@ -65,6 +68,7 @@ export type S2CDataFor<T extends S2CType> = T extends typeof S2CType.AUTH_OK
           player: PlayerSnapshot;
           entities: EntitySnapshot[];
           projectiles: ProjSnapshot[];
+          pickups: PickupSpawn[];
         }
       : T extends typeof S2CType.ROOM_LOAD
         ? { room_index: number; room: RoomData; split_ms: number }
@@ -123,6 +127,10 @@ export type PlayerSnapshot = {
   weapon_id: number; // uint8
   ammo: number;
   inventory: string[];
+  coins: number; // int32, shop currency
+  speed_stacks: number; // uint8, +10% move speed each
+  fire_rate_stacks: number; // uint8, cooldown / (1 + 0.1 * stacks)
+  damage_stacks: number; // uint8, +10% damage each
 };
 
 export type EntitySnapshot = {

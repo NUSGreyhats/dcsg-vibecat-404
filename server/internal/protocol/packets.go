@@ -23,6 +23,10 @@ type SwitchWeaponPacket struct {
 
 type InteractPacket struct {
 	TargetID uint32 `json:"target_id"`
+	// ClaimedType is the pickup type the client says it's interacting
+	// with. The server does NOT cross-check this against pk.Type — see
+	// BUG-12 in docs/specs/features/shop.md. Old logs decode 0 (no-op).
+	ClaimedType uint8 `json:"claimed_type"`
 }
 
 type EnterDoorPacket struct {
@@ -31,6 +35,10 @@ type EnterDoorPacket struct {
 
 type UseItemPacket struct {
 	ItemName string `json:"item_name"`
+}
+
+type ShopPurchasePacket struct {
+	ItemID uint8 `json:"item_id"`
 }
 
 type EnemySpawn struct {
@@ -65,12 +73,16 @@ type RoomData struct {
 }
 
 type PlayerSnapshot struct {
-	X         float32  `json:"x"`
-	Y         float32  `json:"y"`
-	HP        int16    `json:"hp"`
-	WeaponID  uint8    `json:"weapon_id"`
-	Ammo      int      `json:"ammo"`
-	Inventory []string `json:"inventory"`
+	X              float32  `json:"x"`
+	Y              float32  `json:"y"`
+	HP             int16    `json:"hp"`
+	WeaponID       uint8    `json:"weapon_id"`
+	Ammo           int      `json:"ammo"`
+	Inventory      []string `json:"inventory"`
+	Coins          int32    `json:"coins"`
+	SpeedStacks    uint8    `json:"speed_stacks"`
+	FireRateStacks uint8    `json:"fire_rate_stacks"`
+	DamageStacks   uint8    `json:"damage_stacks"`
 }
 
 type EntitySnapshot struct {
@@ -119,6 +131,7 @@ type StateData struct {
 	Player      PlayerSnapshot   `json:"player"`
 	Entities    []EntitySnapshot `json:"entities"`
 	Projectiles []ProjSnapshot   `json:"projectiles"`
+	Pickups     []PickupSpawn    `json:"pickups"`
 }
 
 type RoomLoadData struct {

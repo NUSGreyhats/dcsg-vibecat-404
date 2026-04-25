@@ -22,6 +22,7 @@ export type Controls = {
     shootHeld(): boolean;        // pointer button currently down (polled)
     interactPressed(): boolean;  // Phaser JustDown on 'E'
     inventoryPressed(): boolean; // Phaser JustDown on 'I'
+    shopPressed(): boolean;      // Phaser JustDown on 'B' — opens ShopMenu
     weaponSwitchPressed(): number | null; // 1/2/3 just-pressed → 1/2/3, else null
 };
 ```
@@ -43,9 +44,11 @@ If `scene.input.keyboard` is null (Phaser's keyboard plugin disabled or unavaila
 | Aim                        | Mouse position                        | Polled each frame | Used as `aimAngle` argument to `shoot` |
 | Shoot                      | Left mouse button (just-pressed edge) | Edge-triggered   | `C2S_SHOOT { aim_angle }`               |
 | Weapon slot 1/2/3          | `1`, `2`, `3` (just-pressed)          | Just-pressed     | `C2S_SWITCH_WEAPON { weapon_id }`       |
-| Interact                   | `E`                                   | Just-pressed     | `C2S_INTERACT { target_id }` or `C2S_ENTER_DOOR { door_id }` (whichever is nearest) |
+| Interact                   | `E`                                   | Just-pressed     | `C2S_INTERACT { target_id, claimed_type }` or `C2S_ENTER_DOOR { door_id }` (whichever is nearest); `claimed_type` is the rendered pickup's type — see [features/shop.md BUG-12](../features/shop.md#bug-12-pickup-type-confusion) |
 | Open Inventory             | `I`                                   | Just-pressed     | `scene.launch("InventoryMenu")` (no C2S yet) |
+| Open Shop                  | `B`                                   | Just-pressed     | `scene.launch("ShopMenu")` (no `C2S_SHOP_OPEN`; the menu is fully client-side until purchase) |
 | Inventory: Up / Down / Enter / Esc / I | same keys (scene-local, in `InventoryMenu`) | Just-pressed | Use selected → `C2S_USE_ITEM`, or close menu |
+| Shop: Up / Down / Enter / Esc / B | same keys (scene-local, in `ShopMenu`)      | Just-pressed | Purchase selected → `C2S_SHOP_PURCHASE`, or close menu |
 
 Movement normalization: diagonal input is divided by `Math.hypot(dx, dy)` so the magnitude caps at 1. This is **client-side politeness** — the server is free to ignore or re-normalize. An exploiter who wants to send `dx=5, dy=5` just bypasses the client.
 
@@ -101,11 +104,12 @@ graph LR
     SW["Controls.weaponSwitchPressed()"] -->|slot ∈ 1/2/3| SEND_W["sync.sendSwitchWeapon(slot)"]
 
     IT["Controls.interactPressed()"] -->|true| NEAR_P{"nearestPickupId ≤ 80 px?"}
-    NEAR_P -->|yes| SEND_IT["sync.sendInteract(id)"]
+    NEAR_P -->|yes| SEND_IT["sync.sendInteract(id, type)"]
     NEAR_P -->|no| NEAR_D{"nearestUnlockedDoorId ≤ 80 px?"}
     NEAR_D -->|yes| SEND_D["sync.sendEnterDoor(id)"]
 
     INV["Controls.inventoryPressed()"] -->|true| OPEN["scene.launch('InventoryMenu')<br/>scene.pause()"]
+    SHP["Controls.shopPressed()"] -->|true| OPEN_SHOP["scene.launch('ShopMenu')<br/>scene.pause()"]
 
     style SEND_I fill:#3498db,color:#fff
     style SEND_S fill:#e67e22,color:#fff
@@ -134,15 +138,17 @@ Instead, visual feedback for cooldown (greyed-out weapon icon when on cooldown) 
 
 ```ts
 if (Controls.interactPressed()) {
-    const id = nearestPickupId(px, py, 80);
-    if (id !== null) {
-        sync.sendInteract(id);
+    const nearest = nearestPickup(px, py, 80);   // returns { id, type } | null
+    if (nearest !== null) {
+        sync.sendInteract(nearest.id, nearest.type);   // claimed_type = the type the client rendered
     } else {
         const doorId = nearestUnlockedDoorId(px, py, 80);
         if (doorId !== null) sync.sendEnterDoor(doorId);
     }
 }
 ```
+
+The honest client always sends `claimed_type = pickup.type` (the type stored client-side from `RoomData` / runtime spawns), so the [BUG-12](../features/shop.md#bug-12-pickup-type-confusion) substrate is invisible to a stock-client player. An exploiter who wants to mint coins from non-coin pickups builds a custom client that sends a different `claimed_type`.
 
 Pickup wins when there's both a pickup and an unlocked door within 80 px. Reason: the player is usually still fighting when doors unlock; they'll want to grab nearby loot before transitioning. If a level ever places a pickup directly on top of a door, the pickup-first rule means the player can grab it then press E again to enter.
 
@@ -180,6 +186,17 @@ if (Controls.inventoryPressed()) {
 ```
 
 The `I` key opens the inventory. `InventoryMenu` owns its own keys for while-open (Up/Down/Enter/Esc/I) — pressing `I` inside the menu closes it. See [04-scenes.md#inventorymenu-modal-overlay](./04-scenes.md#inventorymenu--modal-overlay).
+
+### Shop toggle
+
+```ts
+if (Controls.shopPressed()) {
+    scene.launch("ShopMenu");
+    scene.pause();
+}
+```
+
+The `B` key opens the shop. `ShopMenu` owns its own keys for while-open (Up/Down/Enter/Esc/B) and dispatches `C2S_SHOP_PURCHASE { item_id }` on Enter. The shop is fully client-side until purchase — there is no `C2S_SHOP_OPEN` packet. See [features/shop.md](../features/shop.md).
 
 ## No client-side gating
 

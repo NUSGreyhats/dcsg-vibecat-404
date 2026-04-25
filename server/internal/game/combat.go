@@ -63,11 +63,16 @@ func HandleShoot(p *PlayerState, r *RoomState, aimAngle float32, now time.Time) 
 		return
 	}
 
-	// Charge cooldown + ammo.
+	// Charge cooldown + ammo. Fire-rate stacks shorten the per-shot cooldown
+	// linearly: cooldown / (1 + 0.1 * stacks). See features/shop.md.
 	p.WeaponAmmo[wid] = ammo - 1
-	p.WeaponCooldown[wid] = now.Add(time.Duration(spec.CooldownMs) * time.Millisecond)
+	cooldown := time.Duration(spec.CooldownMs) * time.Millisecond
+	if p.FireRateStacks > 0 {
+		cooldown = time.Duration(float64(cooldown) / (1 + 0.1*float64(p.FireRateStacks)))
+	}
+	p.WeaponCooldown[wid] = now.Add(cooldown)
 
-	dmg := int16(float32(spec.Damage) * nonZeroDamageMult(p, now))
+	dmg := int16(float32(spec.Damage) * EffectiveDamageMult(p, now))
 
 	if wid == 3 {
 		// shotgun: 3 pellets in a ±10° spread.
@@ -110,6 +115,23 @@ func nonZeroDamageMult(p *PlayerState, now time.Time) float32 {
 	}
 	return 1
 }
+
+// EffectiveDamageMult composes the timed buff with the permanent shop
+// damage stacks: (1 + 0.1*stacks) * tempBuff. See features/shop.md.
+func EffectiveDamageMult(p *PlayerState, now time.Time) float32 {
+	return (1 + 0.1*float32(p.DamageStacks)) * nonZeroDamageMult(p, now)
+}
+
+// EffectiveSpeedMult composes the timed speed buff with the permanent
+// shop speed stacks: (1 + 0.1*stacks) * tempBuff.
+func EffectiveSpeedMult(p *PlayerState, now time.Time) float32 {
+	temp := float32(1)
+	if p.SpeedMult > 0 && now.Before(p.SpeedMultUntil) {
+		temp = p.SpeedMult
+	}
+	return (1 + 0.1*float32(p.SpeedStacks)) * temp
+}
+
 
 // AdvanceProjectiles steps every projectile, culls expired, and returns
 // the list of (projectile, enemy) collisions for the collision pass to
@@ -162,11 +184,13 @@ func ResolveCollisions(r *RoomState, hits []collisionHit, now time.Time) (deaths
 		// not just HP-changing ones — "they heard you" is the signal.
 		BroadcastPackAggro(r, h.enemy.X, h.enemy.Y, h.enemy.EntityID)
 	}
-	// Death pass — one entry per dead enemy.
+	// Death pass — one entry per dead enemy. Each dead enemy drops a coin
+	// at its last (X, Y); see features/shop.md.
 	for id, e := range r.Enemies {
 		if e.AIState != AIDead && e.HP <= 0 {
 			e.AIState = AIDead
 			deaths = append(deaths, id)
+			SpawnCoinDrop(r, e.X, e.Y, now)
 		}
 	}
 	return deaths

@@ -14,6 +14,7 @@ const (
 	C2SInteract     uint8 = 0x06
 	C2SEnterDoor    uint8 = 0x07
 	C2SUseItem      uint8 = 0x08
+	C2SShopPurchase uint8 = 0x09
 )
 
 const (
