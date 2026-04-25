@@ -23,7 +23,9 @@ import {
   triggerHitstop,
   WEAPON_FX,
 } from "../fx";
+import { maybeRecordPB } from "../prefs";
 import { WEAPON_STATS } from "../weapons";
+import { RunOutcome as RunOutcomeValue } from "../../net/packet";
 import { createControls, type Controls } from "./utils/Controls";
 import type {
   RoomData,
@@ -332,10 +334,13 @@ export class Game extends Phaser.Scene {
 
   private onRunComplete(
     outcome: RunOutcome,
-    _totalMs: number,
+    totalMs: number,
     _rank: number,
-    _splits: SplitData[],
+    splits: SplitData[],
   ): void {
+    if (outcome === RunOutcomeValue.COMPLETED) {
+      maybeRecordPB(totalMs, splits);
+    }
     this.scene.stop("GameHUD");
     this.scene.start("WinScreen", { outcome });
   }
