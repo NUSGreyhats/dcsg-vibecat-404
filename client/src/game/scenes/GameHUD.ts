@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { getSync } from "../net/runContext";
+import { getActiveState } from "../net/runContext";
 import { PLAYER_MAX_HEALTH, ROOM_COUNT } from "../constants";
 import { WEAPON_STATS, weaponFromServerId, type WeaponId } from "../weapons";
 import { formatTime } from "../ui/formatters";
@@ -121,14 +121,14 @@ export class GameHUD extends Phaser.Scene {
       .setDepth(DEPTH_HUD_BG)
       .setVisible(false);
 
-    const sync = getSync();
-    sync.state.on("runComplete", this.onRunComplete, this);
+    const state = getActiveState();
+    state.on("runComplete", this.onRunComplete, this);
 
     this.events.on("shutdown", this.cleanup, this);
   }
 
   update(): void {
-    const state = getSync().state;
+    const state = getActiveState();
 
     if (this.timeText) {
       const t =
@@ -246,8 +246,8 @@ export class GameHUD extends Phaser.Scene {
   }
 
   private cleanup(): void {
-    const sync = getSync();
-    sync.state.off("runComplete", this.onRunComplete, this);
+    const state = getActiveState();
+    state.off("runComplete", this.onRunComplete, this);
 
     this.timeText?.destroy();
     this.roomText?.destroy();

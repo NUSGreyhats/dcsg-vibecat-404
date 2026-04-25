@@ -35,6 +35,17 @@
         reverse_proxy game-server:8080
     }
 
+    # Spectator viewer URLs (/spectate/:player_id) serve the spectator
+    # bundle's spectate.html. Caddy rewrites the path before falling
+    # through to file_server — every viewer URL gets the same HTML, and
+    # the JS reads the player_id from window.location.pathname.
+    @spectate_viewer path /spectate/*
+    handle @spectate_viewer {
+        rewrite * /spectate.html
+        root * /srv
+        file_server
+    }
+
     handle {
         root * /srv
         # Hashed asset filenames (e.g. /assets/index-abc123.js) are safe to

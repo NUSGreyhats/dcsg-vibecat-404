@@ -44,7 +44,10 @@ export class Preloader extends Phaser.Scene {
 
     this.registerWeaponAnims();
 
-    this.scene.start("MainMenu");
+    // Spectator-mode bootstraps set this in registry before booting the
+    // scene; the player bundle leaves it unset and lands on MainMenu.
+    const next = (this.registry.get("nextScene") as string | undefined) ?? "MainMenu";
+    this.scene.start(next);
   }
 
   /**
