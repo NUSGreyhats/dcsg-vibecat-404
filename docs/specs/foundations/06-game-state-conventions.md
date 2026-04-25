@@ -110,7 +110,7 @@ EnemyState {
 }
 ```
 
-`HP int16` same as player; armor reduction arithmetic on `int16` is another half of [BUG-08](../features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max).
+`HP int16` same as player.
 
 ### `DoorState`
 
