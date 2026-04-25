@@ -29,10 +29,10 @@ type ShopOffer = {
 // Mirrors server/internal/game/shop.go:ShopCatalog. IDs and costs must
 // match the server. Display names/blurbs are client-only flavor.
 const SHOP_CATALOG: ShopOffer[] = [
-  { id: 1, name: "Ammo",     cost: 5, blurb: "+5 max ammo (per weapon)" },
-  { id: 2, name: "Speed",    cost: 5, blurb: "+10% move speed" },
-  { id: 3, name: "Fire Rate", cost: 5, blurb: "+10% fire rate" },
-  { id: 4, name: "Damage",   cost: 5, blurb: "+10% damage" },
+  { id: 1, name: "Ammo",     cost: 5,  blurb: "+5 max ammo (per weapon)" },
+  { id: 2, name: "Speed",    cost: 10, blurb: "+10% move speed" },
+  { id: 3, name: "Fire Rate", cost: 15, blurb: "+10% fire rate" },
+  { id: 4, name: "Damage",   cost: 20, blurb: "+10% damage" },
 ];
 
 /**

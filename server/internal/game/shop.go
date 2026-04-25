@@ -22,9 +22,9 @@ const (
 // server and client mirror it at startup.
 var ShopCatalog = []ShopOffer{
 	{ID: ShopItemAmmo, Name: "ammo", Cost: 5},
-	{ID: ShopItemSpeed, Name: "speed", Cost: 5},
-	{ID: ShopItemFireRate, Name: "fire_rate", Cost: 5},
-	{ID: ShopItemDamage, Name: "damage", Cost: 5},
+	{ID: ShopItemSpeed, Name: "speed", Cost: 10},
+	{ID: ShopItemFireRate, Name: "fire_rate", Cost: 15},
+	{ID: ShopItemDamage, Name: "damage", Cost: 20},
 }
 
 // HandleShopPurchase is the C2S_SHOP_PURCHASE handler. Validates the item
