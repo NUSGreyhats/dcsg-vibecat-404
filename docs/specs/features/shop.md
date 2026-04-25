@@ -66,7 +66,9 @@ Catalog is fixed at server startup; client mirrors the same IDs and costs. Dispa
 
 ### Coin drop policy
 
-When an enemy's HP reaches zero in `combat.go`'s damage-application path, register a new `PickupState` in `r.Pickups` with `Type=PickupCoin`, the enemy's last `(X, Y)`, a fresh `EntityID`, and `ExpiresAt = now.Add(30 * time.Second)`. `ExpiresAt` is a new field on `PickupState` (see [pickups.md](pickups.md) — `RespawnAt` is the existing time field; `ExpiresAt` is added for the despawn-on-timeout behavior coins need).
+When an enemy's HP reaches zero **in the projectile-damage death pass** (`ResolveCollisions` in `combat.go`), register a new `PickupState` in `r.Pickups` with `Type=PickupCoin`, the enemy's last `(X, Y)`, a fresh `EntityID`, and `ExpiresAt = now.Add(30 * time.Second)`. `ExpiresAt` is a new field on `PickupState` (see [pickups.md](pickups.md) — `RespawnAt` is the existing time field; `ExpiresAt` is added for the despawn-on-timeout behavior coins need).
+
+Kamikaze contact-deaths do **not** drop coins. `advanceEnemies` flips kamikazes to `AIDead` before the projectile death pass runs, so the `AIState != AIDead && HP <= 0` guard skips them. This is intentional — coins are a player-skill reward; self-destruct deaths cost the player HP and shouldn't also be funded.
 
 - Drop chance: 100%, 1 coin per enemy. Tunable.
 - Despawn at `ExpiresAt`: in the per-tick pickup pass, set `pk.Consumed = true` for any `pk` where `!pk.Consumed && !pk.ExpiresAt.IsZero() && now.After(pk.ExpiresAt)`. The existing pickup-broadcast logic drops consumed pickups from the next snapshot.
@@ -173,15 +175,19 @@ Effective values are derived at the point of use — **don't cache on `PlayerSta
 
 ## Implementation status
 
-Greenfield. Nothing in the current server or client implements shop, coins, trait stacks, or `claimed_type`. The `Coins` counter mentioned in [pickups.md — implementation status](pickups.md#implementation-status) is a leftover scaffold and is redefined by this feature.
+Implemented end-to-end:
 
-When implementing, the following appends are also required:
+- Server: `ShopOffer` / `ShopCatalog` / `HandleShopPurchase` in `server/internal/game/shop.go`; coin pickup type and `applyPickup` claimed-type dispatch in `server/internal/game/pickups.go`; coin drop on death in `server/internal/game/combat.go` (`ResolveCollisions`); coin despawn pass in `server/internal/game/loop.go` (`stepTick`). `PickupState.ExpiresAt`, `PlayerState.Coins`, and the three `*Stacks` fields are declared in `server/internal/game/state.go`. Effective-multiplier helpers are in `combat.go` (`EffectiveDamageMult`, `EffectiveSpeedMult`, plus the inline fire-rate divisor in `HandleShoot`).
+- Protocol: `InteractPacket.ClaimedType`, `ShopPurchasePacket`, and `C2SShopPurchase = 0x09` in `server/internal/protocol/packets.go` and `envelope.go`. `PlayerSnapshot` carries `coins / speed_stacks / fire_rate_stacks / damage_stacks`.
+- Client: `client/src/game/scenes/ShopMenu.ts` (modal), HUD coin counter and "B" keybind in `GameHUD.ts`, scene registered in `main.ts`. Coin sprite in `Preloader.ts`.
 
-- [foundations/02-protocol.md](../foundations/02-protocol.md): extend `C2S_INTERACT` payload with `claimed_type uint8`; add `C2S_SHOP_PURCHASE` (suggested code `0x09`) row.
-- [foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md): append `Coins`, `SpeedStacks`, `FireRateStacks`, and `DamageStacks` to the `PlayerState` block, citing this spec; note that stacks zero on run reset.
-- [features/pickups.md](pickups.md): add Coin (Type 3) row to the pickup-types table; cross-link BUG-12; correct the existing "auto-trigger Coin" mention in its data-flow paragraph (coins use the manual `C2S_INTERACT` path so BUG-12 applies).
-- [bugs.md](../bugs.md): append BUG-12 row to the index; update the synergy diagram with a `BUG-05 → BUG-12` edge.
-- [client/04-scenes.md](../client/04-scenes.md): append `ShopMenu` row.
+Cross-doc appends made when this feature landed (record kept here so the spec history stays readable):
+
+- [foundations/02-protocol.md](../foundations/02-protocol.md): `C2S_INTERACT` payload extended with `claimed_type`; `C2S_SHOP_PURCHASE` (`0x09`) row added; `PlayerSnapshot` sub-structure extended.
+- [foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md): `Coins`, `SpeedStacks`, `FireRateStacks`, `DamageStacks` listed on `PlayerState`; reset-on-run-end note added.
+- [features/pickups.md](pickups.md): Coin (Type 3) row, `ExpiresAt` field, BUG-12 cross-link, auto-trigger sentence corrected.
+- [bugs.md](../bugs.md): BUG-12 row added; synergy diagram extended with `BUG-05 → BUG-12`.
+- [client/04-scenes.md](../client/04-scenes.md): `ShopMenu` row added.
 - [foundations/08-leaderboard-replay.md](../foundations/08-leaderboard-replay.md): replay engine records `claimed_type` per interact.
 
 ## Intentional bugs in this area

@@ -14,7 +14,7 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 { "type": uint8, "seq": uint32, "ts": int64, "data": { ... } }
 ```
 
-- `type` — one of the C2S type codes (0x01–0x08).
+- `type` — one of the C2S type codes (0x01–0x09).
 - `seq` — uint32, monotonic per-connection, starts at 1.
 - `ts` — client wallclock ms (`Date.now()`). Used by the server for physics `deltaTime`. Validated ±2 s of `time.Now()` per packet. **No rate-of-progression check** — see [05-server-runtime.md#bug-02-drift-tick-stretching](./05-server-runtime.md#bug-02-drift-tick-stretching).
 - `data` — packet-specific payload (see registry below).
@@ -32,18 +32,21 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 
 ## Packet registry
 
-### C2S — append new rows below `0x08` when adding features
+### C2S — append new rows below `0x09` when adding features
 
-| Type | Name                | `data` Fields                  |
-| ---- | ------------------- | ------------------------------ |
-| 0x01 | `C2S_AUTH`          | `{ player_id: string }`        |
-| 0x02 | `C2S_START_RUN`     | `{ start_time: int64 }`        |
-| 0x03 | `C2S_INPUT`         | `{ dx: float32, dy: float32 }` |
-| 0x04 | `C2S_SHOOT`         | `{ aim_angle: float32 }`       |
-| 0x05 | `C2S_SWITCH_WEAPON` | `{ weapon_id: uint8 }`         |
-| 0x06 | `C2S_INTERACT`      | `{ target_id: uint32 }`        |
-| 0x07 | `C2S_ENTER_DOOR`    | `{ door_id: uint32 }`          |
-| 0x08 | `C2S_USE_ITEM`      | `{ item_name: string }`        |
+| Type | Name                | `data` Fields                                       |
+| ---- | ------------------- | --------------------------------------------------- |
+| 0x01 | `C2S_AUTH`          | `{ player_id: string }`                             |
+| 0x02 | `C2S_START_RUN`     | `{ start_time: int64 }`                             |
+| 0x03 | `C2S_INPUT`         | `{ dx: float32, dy: float32 }`                      |
+| 0x04 | `C2S_SHOOT`         | `{ aim_angle: float32 }`                            |
+| 0x05 | `C2S_SWITCH_WEAPON` | `{ weapon_id: uint8 }`                              |
+| 0x06 | `C2S_INTERACT`      | `{ target_id: uint32, claimed_type: uint8 }`        |
+| 0x07 | `C2S_ENTER_DOOR`    | `{ door_id: uint32 }`                               |
+| 0x08 | `C2S_USE_ITEM`      | `{ item_name: string }`                             |
+| 0x09 | `C2S_SHOP_PURCHASE` | `{ item_id: uint8 }`                                |
+
+`claimed_type` on `C2S_INTERACT` is the pickup type the *client* says it's interacting with. The server does **not** validate `claimed_type == pk.Type` — see [../features/shop.md#bug-12-pickup-type-confusion](../features/shop.md#bug-12-pickup-type-confusion).
 
 ### S2C — append new rows below `0x89` when adding features
 
@@ -51,7 +54,7 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 | ---- | ------------------- | ----------------------------------------------------------------------- |
 | 0x81 | `S2C_AUTH_OK`       | `{ display_name }`                                                      |
 | 0x82 | `S2C_RUN_STARTED`   | `{ seed: int64, room: RoomData }`                                       |
-| 0x83 | `S2C_STATE`         | `{ elapsed_ms, player: PlayerSnapshot, entities: [], projectiles: [] }` |
+| 0x83 | `S2C_STATE`         | `{ elapsed_ms, player: PlayerSnapshot, entities: [], projectiles: [], pickups: [] }` |
 | 0x84 | `S2C_ROOM_LOAD`     | `{ room_index, room: RoomData, split_ms }`                              |
 | 0x85 | `S2C_RUN_COMPLETE`  | `{ outcome: "completed" \| "failed", total_ms, rank, splits: [] }`      |
 | 0x86 | `S2C_LEADERBOARD`   | `{ entries: [] }`                                                       |
@@ -67,7 +70,7 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 | `EnemySpawn`       | `{ entity_id, type, x, y, hp }`                                                               |
 | `PickupSpawn`      | `{ entity_id, type, x, y }`                                                                   |
 | `DoorDef`          | `{ door_id, x, y, target_room, locked }`                                                      |
-| `PlayerSnapshot`   | `{ x, y, hp, weapon_id, ammo, inventory: []string }`                                          |
+| `PlayerSnapshot`   | `{ x, y, hp, weapon_id, ammo, inventory: []string, coins: int32, speed_stacks: uint8, fire_rate_stacks: uint8, damage_stacks: uint8 }` |
 | `EntitySnapshot`   | `{ entity_id, type, x, y, hp, state }`                                                        |
 | `ProjSnapshot`     | `{ proj_id, x, y, angle, owner }`                                                             |
 | `SplitData`        | `{ room_index, time_ms, kills }`                                                              |
