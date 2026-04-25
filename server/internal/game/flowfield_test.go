@@ -580,6 +580,60 @@ func TestUpdateEnemy_AggroJitterBias(t *testing.T) {
 	}
 }
 
+// TestUpdateEnemy_NoOvershootOscillation reproduces issue #34. A mob whose
+// aim point is closer than one tick's step must not overshoot it: doing so
+// puts the mob on the far side of the aim, the next tick's pick (still the
+// same aim — mob's tile is unchanged) flips it back, and the mob bounces
+// across the target every tick. The visible symptom is a mob "toggling on
+// the spot" while in attack range, or jittering up/down across a tile
+// center while chasing.
+func TestUpdateEnemy_NoOvershootOscillation(t *testing.T) {
+	const room uint8 = 11 // empty room
+	playerX, playerY := TileCenter(5, 5)
+	p := &PlayerState{X: playerX, Y: playerY, HP: 100, MaxHP: 100}
+
+	// Mob 1 px diagonally off the tile center — well inside one tick's
+	// step (4.75 px for a grunt at 95 px/s × 50 ms). Same tile as the
+	// player, no jitter bias, so the BFS source is the mob's own tile and
+	// the aim point is the mob's own tile center.
+	e := &EnemyState{
+		EntityID:   1,
+		Type:       EnemyGrunt,
+		X:          playerX - 1,
+		Y:          playerY - 1,
+		HP:         3,
+		MaxHP:      3,
+		AIState:    AIAggro,
+		AggroRange: 2000,
+		Speed:      Archetypes[EnemyGrunt].Speed,
+		JitterX:    0.5,
+		JitterY:    0.5,
+	}
+
+	dt := float32(TickDuration.Seconds())
+	now := time.Unix(1_700_000_000, 0)
+
+	// One tick: mob converges onto the aim point, not past it.
+	UpdateEnemy(e, p, room, dt, now, NewFlowFieldCache(room))
+
+	const eps float32 = 0.01
+	if dx, dy := e.X-playerX, e.Y-playerY; dx*dx+dy*dy > eps*eps {
+		t.Fatalf("mob overshoots aim: pos=(%v,%v), expected ≈(%v,%v)", e.X, e.Y, playerX, playerY)
+	}
+
+	// Subsequent ticks: position is stable. Without the step clamp, the
+	// mob would bounce on a diagonal of 4.75 px every tick.
+	for tick := 0; tick < 10; tick++ {
+		prevX, prevY := e.X, e.Y
+		now = now.Add(TickDuration)
+		UpdateEnemy(e, p, room, dt, now, NewFlowFieldCache(room))
+		ddx, ddy := e.X-prevX, e.Y-prevY
+		if ddx*ddx+ddy*ddy > eps*eps {
+			t.Fatalf("tick %d: mob moved (%v,%v) — should be stationary at aim", tick, ddx, ddy)
+		}
+	}
+}
+
 // TestBFS_StraightDivider_NoBypass — a wall that fully bisects the room
 // (col 10, all rows) must yield a sentinel for any tile on the far side.
 // This is intentional: the spec says fully separated regions are correctly

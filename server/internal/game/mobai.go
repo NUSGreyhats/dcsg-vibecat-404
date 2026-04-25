@@ -197,6 +197,12 @@ func moveToward(e *EnemyState, tx, ty, dt float32) {
 
 // moveTowardWithWalls is moveToward with axis-separated wall checks so
 // enemies slide along walls instead of tunneling through them.
+//
+// Step is clamped to the remaining distance so the mob settles on the aim
+// point instead of overshooting it. Without this clamp, when the aim is
+// closer than one step (e.g. mob has crossed into the BFS source tile and
+// the new aim is its own tile center), the mob overshoots, the next tick's
+// aim flips it back, and it oscillates across the target — issue #34.
 func moveTowardWithWalls(e *EnemyState, tx, ty, dt float32, roomIndex uint8) {
 	dx := tx - e.X
 	dy := ty - e.Y
@@ -205,6 +211,9 @@ func moveTowardWithWalls(e *EnemyState, tx, ty, dt float32, roomIndex uint8) {
 		return
 	}
 	step := e.Speed * dt
+	if step > mag {
+		step = mag
+	}
 	const hw float32 = 12
 	const hh float32 = 12
 	newX := e.X + dx/mag*step
