@@ -20,6 +20,10 @@ RoomData {
 }
 ```
 
+**Reinforcement waves are server-authoritative and do not appear in the wire `RoomData`.** Wave anchors live in the server-side `RoomTemplate` (`rooms_data.go`) and are pre-seeded into `RoomState.PendingWaves` at room load. When a wave fires, its mobs are added to `RoomState.Enemies` with freshly-allocated `EntityID`s and surface to the client through the next `S2C_STATE` snapshot — the existing client-side reconciliation treats unknown entity IDs as new spawns. A future `S2C_WAVE_ARMED` packet to drive pre-fire telegraphs is deferred (see [harder-mobs.md](./harder-mobs.md)).
+
+Wave mobs count toward `AllEnemiesDead` — doors unlock only after all initial *and* wave mobs are dead, gated on `AllWavesFired(r) == true`.
+
 Server-side per-room state is `RoomState` from [../foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md):
 
 ```go
@@ -136,3 +140,4 @@ Client has 10 room tilemaps (`room-1.json` through `room-10.json`); an 11th (bos
 - [../foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md) — `DoorState`, `RoomState`.
 - [pickups.md](pickups.md) — pickup interactions within rooms.
 - [mob-ai.md](mob-ai.md) — enemy spawn before doors unlock.
+- [harder-mobs.md](harder-mobs.md) — `WaveDef` shape and firing rules.

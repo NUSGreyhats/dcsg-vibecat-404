@@ -157,6 +157,10 @@ func ResolveCollisions(r *RoomState, hits []collisionHit, now time.Time) (deaths
 		}
 		TakeDamage(h.enemy, h.proj.Damage)
 		delete(r.Projectiles, h.projID)
+		// Pack aggro: any damage to a mob alerts nearby non-aggro mobs.
+		// See docs/specs/features/harder-mobs.md. Fires on every hit,
+		// not just HP-changing ones — "they heard you" is the signal.
+		BroadcastPackAggro(r, h.enemy.X, h.enemy.Y, h.enemy.EntityID)
 	}
 	// Death pass — one entry per dead enemy.
 	for id, e := range r.Enemies {

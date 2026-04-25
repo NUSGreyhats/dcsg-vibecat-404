@@ -15,7 +15,13 @@ func CheckRoomClear(r *RoomState) bool {
 // AllEnemiesDead when reality exceeds what CheckRoomClear could see. This is
 // the BUG-11 recovery path — without it, a lost append would softlock the
 // room.
+//
+// Gated on AllWavesFired so the reconciliation backstop never unlocks doors
+// while legitimate reinforcements are still incoming.
 func ReconcileKillLog(r *RoomState) {
+	if !AllWavesFired(r) {
+		return
+	}
 	actualDead := 0
 	for _, e := range r.Enemies {
 		if e.HP <= 0 || e.AIState == AIDead {
