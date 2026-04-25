@@ -176,21 +176,62 @@ type RoomState struct {
 	KillLog        []KillRecord
 	// Allocation counter for projectile IDs within the room.
 	NextProjID uint32
-	// Allocation counter for runtime-spawned entity IDs (e.g. coin drops).
-	// Starts above the templated entity-ID range so it never collides with
-	// pickups/enemies authored into the room.
+
+	// Allocation counter for runtime-spawned non-enemy entity IDs (coin
+	// drops). Lazily initialised to 1_000_000 — well above WaveEntityIDBase
+	// (100_000) + max idx*step, so it cannot collide with wave-spawned IDs.
 	nextEntityID uint32
+
+	// --- Harder-mobs state. See docs/specs/features/harder-mobs.md. ---
+
+	// InitialPop is the initial enemy count captured at room load. Used as
+	// the denominator for per-wave trigger thresholds.
+	InitialPop int
+
+	// PendingWaves holds one entry per declared wave whose threshold
+	// rounded to ≥1 living remaining. Skipped waves consume no RNG and
+	// produce no PendingWave entry.
+	PendingWaves []PendingWave
+
+	// NextEnemyID allocates IDs for wave-spawned mobs at fire time.
+	NextEnemyID uint32
 }
 
-// NextEntityID returns a fresh uint32 for runtime-spawned entities (coin
-// drops, etc.). Counters are room-local; collisions across rooms are fine
-// because the client wipes its entity maps on every ROOM_LOAD.
+// NextEntityID returns a fresh uint32 for runtime-spawned non-enemy
+// entities (coin drops). Counters are room-local; collisions across rooms
+// are fine because the client wipes its entity maps on every ROOM_LOAD.
 func (r *RoomState) NextEntityID() uint32 {
 	if r.nextEntityID == 0 {
 		r.nextEntityID = 1_000_000
 	}
 	r.nextEntityID++
 	return r.nextEntityID
+}
+
+// MobSeed holds the post-RNG, pre-instantiation data for a mob. All RNG is
+// consumed into this struct at room load so no RNG is needed at wave fire.
+type MobSeed struct {
+	SpawnX, SpawnY   float32 // wall-snapped
+	PatrolPath       []Vec2  // wall-snapped
+	JitterX, JitterY float32
+	FirstAttackDelay int // ms, added to the instantiation `now`
+}
+
+// PrecomputedMob pairs a seeded mob with its archetype, ready to be turned
+// into an EnemyState at wave fire without touching MobRNG.
+type PrecomputedMob struct {
+	Type uint8
+	Seed MobSeed
+}
+
+// PendingWave tracks one reinforcement wave through its arm/fire lifecycle.
+type PendingWave struct {
+	TriggerRemaining int              // arms when livingCount ≤ this
+	ArmDelayJitter   int              // ms, signed offset from WaveArmDelayMs
+	Mobs             []PrecomputedMob // pre-seeded; instantiated on fire
+	Armed            bool             // one-way latch
+	FireAt           time.Time        // set when Armed flips true
+	Fired            bool             // one-way latch
 }
 
 func NewRoomState(idx uint8) *RoomState {
@@ -201,5 +242,6 @@ func NewRoomState(idx uint8) *RoomState {
 		Projectiles: map[uint32]*ProjectileState{},
 		Doors:       map[uint32]*DoorState{},
 		NextProjID:  1,
+		NextEnemyID: WaveEntityIDBase + uint32(idx)*WaveEntityIDStep,
 	}
 }

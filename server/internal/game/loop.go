@@ -234,6 +234,12 @@ func (e *Engine) stepTick(now time.Time) {
 		e.send(protocol.S2CEntityDied, protocol.EntityDiedData{EntityID: id})
 	}
 
+	// Wave pass — runs after death pass so livingCount reflects this tick's
+	// kills. Armed waves whose FireAt has elapsed instantiate their pre-
+	// computed mobs directly into r.Enemies; sendState below surfaces them
+	// in the next S2C_STATE snapshot.
+	AdvanceWaves(e.room, now)
+
 	// Player-death pass — signed HP<=0 against int16 so a BUG-08 wrap
 	// to negative trips it. Runs after the drain (heals applied) and
 	// enemy-death pass (kamikaze self-destruct resolved), before the
@@ -453,10 +459,14 @@ func (e *Engine) advanceEnemies(dt float32, now time.Time) []uint32 {
 	var deaths []uint32
 	for id, en := range e.room.Enemies {
 		if UpdateEnemy(en, e.player, e.run.CurrentRoom, dt, now) {
-			// Enemy landed an attack: tiny damage. Shield halves it.
-			dmg := int16(5)
+			// Per-archetype melee damage. Shield halves it (integer divide,
+			// floor 1) so boss/tank hits scale proportionally.
+			dmg := Archetypes[en.Type].MeleeDamage
 			if now.Before(e.player.ShieldUntil) {
-				dmg = 2
+				dmg /= 2
+				if dmg < 1 {
+					dmg = 1
+				}
 			}
 			e.player.HP -= dmg
 			e.player.DamageTaken += int32(dmg)
