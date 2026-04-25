@@ -1,6 +1,8 @@
 import Phaser from "phaser";
 import { getSync } from "../net/runContext";
 import { PLAYER_MAX_HEALTH, ROOM_COUNT } from "../constants";
+import { getStoredPB, isHudVisible } from "../prefs";
+import type { SplitData } from "../../net/packet";
 import { WEAPON_STATS, weaponFromServerId, type WeaponId } from "../weapons";
 import { formatTime } from "../ui/formatters";
 import {
@@ -8,8 +10,10 @@ import {
   BONE_WHITE,
   DEPTH_HUD_BG,
   DEPTH_HUD_FILL,
+  ERROR,
   FONT_FAMILY,
   FONT_SIZE_CAPTION,
+  FONT_SIZE_MICRO,
   FONT_SIZE_SMALL,
   GUTTER_MEDIUM,
   HP_AMBER,
@@ -17,6 +21,7 @@ import {
   HP_RED,
   HUD_TEXT_STYLE,
   MIDNIGHT,
+  SUCCESS,
   TEXT_MUTED,
   TEXT_PRIMARY,
   TEXT_STROKE,
@@ -30,6 +35,9 @@ const HP_BAR_HEIGHT = 16;
 const SPLITS_ROW_HEIGHT = 18;
 const SPLITS_RIGHT_GUTTER = GUTTER_MEDIUM;
 const SPLITS_TOP_OFFSET = 36;
+// Ghost-delta column sits to the LEFT of the split-time text. Width is
+// fixed so rows don't reflow as the time number changes width.
+const SPLITS_DELTA_GAP = 8;
 
 // Weapon sprites are authored at 32×16, so the icon area mirrors that
 // 2:1 aspect ratio.
@@ -41,23 +49,37 @@ const WEAPON_ICON_GAP = 8;
 // idle pose we want for the static HUD icon. See Preloader anims setup.
 const WEAPON_ICON_FRAME = "0";
 
+// Background panel padding around each cluster of HUD elements.
+const PANEL_PAD_X = 8;
+const PANEL_PAD_Y = 4;
+const PANEL_ALPHA = 0.45;
+
 /**
  * Heads-up display overlay. Launched alongside the Game scene. Reads state
  * directly from the sync on every tick — no input handling here.
  */
 export class GameHUD extends Phaser.Scene {
   private timeText?: Phaser.GameObjects.Text;
+  private timePanel?: Phaser.GameObjects.Rectangle;
   private roomText?: Phaser.GameObjects.Text;
+  private roomPanel?: Phaser.GameObjects.Rectangle;
   private hpBarBg?: Phaser.GameObjects.Rectangle;
   private hpBarFill?: Phaser.GameObjects.Rectangle;
   private weaponText?: Phaser.GameObjects.Text;
   private weaponIcon?: Phaser.GameObjects.Sprite;
+  private weaponPanel?: Phaser.GameObjects.Rectangle;
   private splitsHeader?: Phaser.GameObjects.Text;
+  private splitsPanel?: Phaser.GameObjects.Rectangle;
   private splitsRows: Phaser.GameObjects.Text[] = [];
+  private splitsDeltas: Phaser.GameObjects.Text[] = [];
   private currentWeaponKey?: string;
   // Once the run finishes the timer latches at the server's authoritative
   // total so it doesn't keep ticking past the final split.
   private latchedTotalMs?: number;
+  // Snapshot of the user's PB splits captured at scene-start. Compared
+  // per-row in refreshSplits to render the dim ghost delta.
+  private pbSplits: SplitData[] = [];
+  private hudVisible = true;
 
   constructor() {
     super({ key: "GameHUD" });
@@ -67,19 +89,27 @@ export class GameHUD extends Phaser.Scene {
     const w = this.scale.width;
     const h = this.scale.height;
 
+    this.pbSplits = getStoredPB()?.splits ?? [];
+    this.hudVisible = isHudVisible();
+
+    // -- Top-left: timer -- (panel built around the text after we know its size)
     this.timeText = this.add
       .text(GUTTER_MEDIUM, 10, "00:00.000", HUD_TEXT_STYLE)
       .setScrollFactor(0)
-      .setDepth(DEPTH_HUD_BG);
+      .setDepth(DEPTH_HUD_FILL);
+    this.timePanel = this.makePanelBehind(this.timeText);
 
+    // -- Top-right: current room --
     this.roomText = this.add
       .text(w - GUTTER_MEDIUM, 10, `Room 1/${ROOM_COUNT}`, HUD_TEXT_STYLE)
       .setOrigin(1, 0)
       .setScrollFactor(0)
-      .setDepth(DEPTH_HUD_BG);
+      .setDepth(DEPTH_HUD_FILL);
+    this.roomPanel = this.makePanelBehind(this.roomText);
 
     this.buildSplitsPanel(w);
 
+    // -- Bottom-left: HP --
     this.hpBarBg = this.add
       .rectangle(GUTTER_MEDIUM, h - 20, HP_BAR_WIDTH, HP_BAR_HEIGHT, MIDNIGHT, 0.6)
       .setOrigin(0, 0.5)
@@ -93,25 +123,36 @@ export class GameHUD extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD_FILL);
 
+    // -- Bottom-right: weapon name + ammo + icon --
     this.weaponText = this.add
       .text(w - GUTTER_MEDIUM, h - 24, "Pistol  —", HUD_TEXT_STYLE)
       .setOrigin(1, 0.5)
       .setScrollFactor(0)
-      .setDepth(DEPTH_HUD_BG);
+      .setDepth(DEPTH_HUD_FILL);
 
-    // Weapon icon to the left of the weapon text. Texture is set in the
-    // first update() once the player snapshot resolves the equipped slot.
     this.weaponIcon = this.add
       .sprite(0, h - 24, "__fallback_pixel")
       .setOrigin(1, 0.5)
       .setScrollFactor(0)
-      .setDepth(DEPTH_HUD_BG)
+      .setDepth(DEPTH_HUD_FILL)
       .setVisible(false);
+
+    // Single panel covering icon + text region. Sized in refreshWeapon.
+    this.weaponPanel = this.add
+      .rectangle(w - GUTTER_MEDIUM, h - 24, 1, 1, MIDNIGHT, PANEL_ALPHA)
+      .setOrigin(1, 0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_BG);
 
     const sync = getSync();
     sync.state.on("runComplete", this.onRunComplete, this);
 
     this.events.on("shutdown", this.cleanup, this);
+    // The PauseMenu emits this on the cross-scene game registry so the HUD
+    // can react to a toggle without needing a back-pointer.
+    this.game.events.on("hudVisibilityChanged", this.onHudVisibilityChanged, this);
+
+    this.applyHudVisibility();
   }
 
   update(): void {
@@ -128,11 +169,13 @@ export class GameHUD extends Phaser.Scene {
           ? hex(ACCENT_PRIMARY)
           : hex(TEXT_PRIMARY),
       );
+      this.fitPanelTo(this.timePanel, this.timeText);
     }
 
     if (this.roomText) {
       const cur = state.currentRoom ?? 1;
       this.roomText.setText(`Room ${cur}/${ROOM_COUNT}`);
+      this.fitPanelTo(this.roomPanel, this.roomText);
     }
 
     this.refreshSplits(state.splits);
@@ -159,6 +202,15 @@ export class GameHUD extends Phaser.Scene {
       })
       .setOrigin(1, 0)
       .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_FILL)
+      .setVisible(false);
+
+    // Background panel covers header + all rows. Sized in refreshSplits
+    // once we know how many rows are populated.
+    this.splitsPanel = this.add
+      .rectangle(x, SPLITS_TOP_OFFSET, 1, 1, MIDNIGHT, PANEL_ALPHA)
+      .setOrigin(1, 0)
+      .setScrollFactor(0)
       .setDepth(DEPTH_HUD_BG)
       .setVisible(false);
 
@@ -176,30 +228,80 @@ export class GameHUD extends Phaser.Scene {
         })
         .setOrigin(1, 0)
         .setScrollFactor(0)
-        .setDepth(DEPTH_HUD_BG)
+        .setDepth(DEPTH_HUD_FILL)
         .setVisible(false);
       this.splitsRows.push(row);
+
+      // Delta text sits to the LEFT of the row, anchored by the row's
+      // left edge each frame.
+      const delta = this.add
+        .text(x, startY + i * SPLITS_ROW_HEIGHT + 2, "", {
+          fontFamily: FONT_FAMILY,
+          fontSize: FONT_SIZE_MICRO,
+          color: hex(TEXT_MUTED),
+          stroke: hex(TEXT_STROKE),
+          strokeThickness: 2,
+        })
+        .setOrigin(1, 0)
+        .setScrollFactor(0)
+        .setDepth(DEPTH_HUD_FILL)
+        .setVisible(false);
+      this.splitsDeltas.push(delta);
     }
   }
 
-  private refreshSplits(splits: ReadonlyArray<{ room_index: number; time_ms: number }>): void {
-    if (!this.splitsHeader) return;
+  private refreshSplits(splits: ReadonlyArray<SplitData>): void {
+    if (!this.splitsHeader || !this.splitsPanel) return;
     const visible = splits.length > 0;
-    this.splitsHeader.setVisible(visible);
+    this.splitsHeader.setVisible(visible && this.hudVisible);
+    this.splitsPanel.setVisible(visible && this.hudVisible);
+
+    let maxRowWidth = this.splitsHeader.displayWidth;
+    let lastRowBottom = this.splitsHeader.y + this.splitsHeader.displayHeight;
+
     for (let i = 0; i < this.splitsRows.length; i++) {
       const row = this.splitsRows[i];
+      const delta = this.splitsDeltas[i];
       const split = splits[i];
       if (split) {
         row.setText(`Rm ${split.room_index}  ${formatTime(split.time_ms)}`);
-        row.setVisible(true);
+        row.setVisible(this.hudVisible);
+
+        const pb = this.pbSplits[i];
+        if (pb && pb.room_index === split.room_index) {
+          const diff = split.time_ms - pb.time_ms;
+          delta.setText(formatDelta(diff));
+          delta.setColor(diff <= 0 ? hex(SUCCESS) : hex(ERROR));
+          delta.setAlpha(0.75);
+          // Position delta just left of the split row's left edge.
+          delta.setX(row.x - row.displayWidth - SPLITS_DELTA_GAP);
+          delta.setVisible(this.hudVisible);
+          maxRowWidth = Math.max(
+            maxRowWidth,
+            row.displayWidth + SPLITS_DELTA_GAP + delta.displayWidth,
+          );
+        } else {
+          delta.setVisible(false);
+          maxRowWidth = Math.max(maxRowWidth, row.displayWidth);
+        }
+        lastRowBottom = row.y + row.displayHeight;
       } else {
         row.setVisible(false);
+        delta.setVisible(false);
       }
+    }
+
+    if (visible) {
+      const w = maxRowWidth + PANEL_PAD_X * 2;
+      const top = this.splitsHeader.y - PANEL_PAD_Y;
+      const h = lastRowBottom - top + PANEL_PAD_Y;
+      this.splitsPanel.setSize(w, h);
+      this.splitsPanel.setPosition(this.splitsHeader.x + PANEL_PAD_X, top);
     }
   }
 
   private refreshWeapon(weaponId: number, ammo: number): void {
-    if (!this.weaponText || !this.weaponIcon) return;
+    if (!this.weaponText || !this.weaponIcon || !this.weaponPanel) return;
 
     const id: WeaponId = weaponFromServerId(weaponId);
     const stats = WEAPON_STATS[id];
@@ -207,21 +309,83 @@ export class GameHUD extends Phaser.Scene {
     this.weaponText.setText(`${name}  ${ammo}`);
 
     const spriteKey = stats?.spriteKey;
-    if (!spriteKey || !this.textures.exists(spriteKey)) {
+    let iconShown = false;
+    if (spriteKey && this.textures.exists(spriteKey)) {
+      if (this.currentWeaponKey !== spriteKey) {
+        this.weaponIcon.setTexture(spriteKey, WEAPON_ICON_FRAME);
+        this.weaponIcon.setDisplaySize(WEAPON_ICON_WIDTH, WEAPON_ICON_HEIGHT);
+        this.currentWeaponKey = spriteKey;
+      }
+      this.weaponIcon.setVisible(this.hudVisible);
+      iconShown = this.hudVisible;
+      // Right-edge of the icon sits to the left of the weapon text.
+      const textLeft = this.weaponText.x - this.weaponText.displayWidth;
+      this.weaponIcon.setX(textLeft - WEAPON_ICON_GAP);
+    } else {
       this.weaponIcon.setVisible(false);
-      return;
     }
-    if (this.currentWeaponKey !== spriteKey) {
-      this.weaponIcon.setTexture(spriteKey, WEAPON_ICON_FRAME);
-      this.weaponIcon.setDisplaySize(WEAPON_ICON_WIDTH, WEAPON_ICON_HEIGHT);
-      this.currentWeaponKey = spriteKey;
-    }
-    this.weaponIcon.setVisible(true);
 
-    // Right-edge of the icon sits to the left of the weapon text. Polled
-    // each frame because the text width changes with the weapon name.
-    const textLeft = this.weaponText.x - this.weaponText.displayWidth;
-    this.weaponIcon.setX(textLeft - WEAPON_ICON_GAP);
+    // Panel wraps icon (if shown) + text. Anchored to the text's right edge.
+    const totalWidth = iconShown
+      ? WEAPON_ICON_WIDTH + WEAPON_ICON_GAP + this.weaponText.displayWidth
+      : this.weaponText.displayWidth;
+    const totalHeight = Math.max(
+      WEAPON_ICON_HEIGHT,
+      this.weaponText.displayHeight,
+    );
+    this.weaponPanel.setSize(totalWidth + PANEL_PAD_X * 2, totalHeight + PANEL_PAD_Y * 2);
+    this.weaponPanel.setVisible(this.hudVisible);
+  }
+
+  private makePanelBehind(text: Phaser.GameObjects.Text): Phaser.GameObjects.Rectangle {
+    // Origin matches the text so the panel grows in the same direction
+    // when the text width changes (top-right HUD anchors right-edge etc).
+    const panel = this.add
+      .rectangle(text.x, text.y, 1, 1, MIDNIGHT, PANEL_ALPHA)
+      .setOrigin(text.originX, text.originY)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_BG);
+    this.fitPanelTo(panel, text);
+    return panel;
+  }
+
+  private fitPanelTo(
+    panel: Phaser.GameObjects.Rectangle | undefined,
+    text: Phaser.GameObjects.Text,
+  ): void {
+    if (!panel) return;
+    panel.setSize(
+      text.displayWidth + PANEL_PAD_X * 2,
+      text.displayHeight + PANEL_PAD_Y * 2,
+    );
+    // Recenter origin offset: shift panel by pad in the direction opposite
+    // to the origin so the text ends up centered within the padded panel.
+    panel.setPosition(
+      text.x - PANEL_PAD_X * (1 - 2 * text.originX),
+      text.y - PANEL_PAD_Y * (1 - 2 * text.originY),
+    );
+  }
+
+  private onHudVisibilityChanged(visible: boolean): void {
+    this.hudVisible = visible;
+    this.applyHudVisibility();
+  }
+
+  private applyHudVisibility(): void {
+    const v = this.hudVisible;
+    this.timeText?.setVisible(v);
+    this.timePanel?.setVisible(v);
+    this.roomText?.setVisible(v);
+    this.roomPanel?.setVisible(v);
+    this.hpBarBg?.setVisible(v);
+    this.hpBarFill?.setVisible(v);
+    this.weaponText?.setVisible(v);
+    this.weaponIcon?.setVisible(v && !!this.currentWeaponKey);
+    this.weaponPanel?.setVisible(v);
+    this.splitsHeader?.setVisible(false); // refreshSplits will re-show
+    this.splitsPanel?.setVisible(false);
+    for (const r of this.splitsRows) r.setVisible(false);
+    for (const d of this.splitsDeltas) d.setVisible(false);
   }
 
   private onRunComplete(_outcome: string, totalMs: number): void {
@@ -231,26 +395,52 @@ export class GameHUD extends Phaser.Scene {
   private cleanup(): void {
     const sync = getSync();
     sync.state.off("runComplete", this.onRunComplete, this);
+    this.game.events.off(
+      "hudVisibilityChanged",
+      this.onHudVisibilityChanged,
+      this,
+    );
 
     this.timeText?.destroy();
+    this.timePanel?.destroy();
     this.roomText?.destroy();
+    this.roomPanel?.destroy();
     this.hpBarBg?.destroy();
     this.hpBarFill?.destroy();
     this.weaponText?.destroy();
     this.weaponIcon?.destroy();
+    this.weaponPanel?.destroy();
     this.splitsHeader?.destroy();
+    this.splitsPanel?.destroy();
     for (const r of this.splitsRows) r.destroy();
+    for (const d of this.splitsDeltas) d.destroy();
     this.splitsRows = [];
+    this.splitsDeltas = [];
     this.timeText = undefined;
+    this.timePanel = undefined;
     this.roomText = undefined;
+    this.roomPanel = undefined;
     this.hpBarBg = undefined;
     this.hpBarFill = undefined;
     this.weaponText = undefined;
     this.weaponIcon = undefined;
+    this.weaponPanel = undefined;
     this.splitsHeader = undefined;
+    this.splitsPanel = undefined;
     this.currentWeaponKey = undefined;
     this.latchedTotalMs = undefined;
   }
+}
+
+function formatDelta(diffMs: number): string {
+  const sign = diffMs <= 0 ? "−" : "+";
+  const abs = Math.abs(diffMs);
+  const mins = Math.floor(abs / 60000);
+  const secs = (abs - mins * 60000) / 1000;
+  if (mins > 0) {
+    return `${sign}${mins}:${secs.toFixed(2).padStart(5, "0")}`;
+  }
+  return `${sign}${secs.toFixed(2)}`;
 }
 
 export default GameHUD;
