@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { getSync } from "../net/runContext";
 import { PLAYER_MAX_HEALTH, ROOM_COUNT } from "../constants";
-import { getStoredPB, isHudVisible } from "../prefs";
+import { getStoredPB, isTimingsVisible } from "../prefs";
 import type { SplitData } from "../../net/packet";
 import { WEAPON_STATS, weaponFromServerId, type WeaponId } from "../weapons";
 import { formatTime } from "../ui/formatters";
@@ -78,7 +78,10 @@ export class GameHUD extends Phaser.Scene {
   // Snapshot of the user's PB splits captured at scene-start. Compared
   // per-row in refreshSplits to render the dim ghost delta.
   private pbSplits: SplitData[] = [];
-  private hudVisible = true;
+  // Controls only the speedrun-related HUD (timer + splits column). HP,
+  // weapon, and room counter ignore this — toggling Hide Timings doesn't
+  // strip out information you'd want to keep visible mid-run.
+  private timingsVisible = true;
 
   constructor() {
     super({ key: "GameHUD" });
@@ -89,7 +92,7 @@ export class GameHUD extends Phaser.Scene {
     const h = this.scale.height;
 
     this.pbSplits = getStoredPB()?.splits ?? [];
-    this.hudVisible = isHudVisible();
+    this.timingsVisible = isTimingsVisible();
 
     // -- Top-left: timer -- (panel built around the text after we know its size)
     this.timeText = this.add
@@ -149,9 +152,13 @@ export class GameHUD extends Phaser.Scene {
     this.events.on("shutdown", this.cleanup, this);
     // The PauseMenu emits this on the cross-scene game registry so the HUD
     // can react to a toggle without needing a back-pointer.
-    this.game.events.on("hudVisibilityChanged", this.onHudVisibilityChanged, this);
+    this.game.events.on(
+      "timingsVisibilityChanged",
+      this.onTimingsVisibilityChanged,
+      this,
+    );
 
-    this.applyHudVisibility();
+    this.applyTimingsVisibility();
   }
 
   update(): void {
@@ -168,7 +175,9 @@ export class GameHUD extends Phaser.Scene {
           ? hex(ACCENT_PRIMARY)
           : hex(TEXT_PRIMARY),
       );
+      this.timeText.setVisible(this.timingsVisible);
       this.fitPanelTo(this.timePanel, this.timeText);
+      this.timePanel?.setVisible(this.timingsVisible);
     }
 
     if (this.roomText) {
@@ -250,20 +259,19 @@ export class GameHUD extends Phaser.Scene {
 
   private refreshSplits(splits: ReadonlyArray<SplitData>): void {
     if (!this.splitsHeader || !this.splitsPanel || !this.roomText) return;
-    const hasSplits = splits.length > 0;
-    this.splitsHeader.setVisible(hasSplits && this.hudVisible);
-    // Panel is always visible when HUD is on so it backs the room
-    // counter even before the first split lands (room 1 has no splits).
-    this.splitsPanel.setVisible(this.hudVisible);
+    // Splits header / rows / deltas are speedrun timings, gated by the
+    // toggle. The panel itself is always visible because it backs the
+    // room counter (which is not gated).
+    const showRows = splits.length > 0 && this.timingsVisible;
+    this.splitsHeader.setVisible(showRows);
+    this.splitsPanel.setVisible(true);
 
-    let maxRowWidth = Math.max(
-      this.roomText.displayWidth,
-      this.splitsHeader.displayWidth,
-    );
-    // Default the bottom to the room text's bottom edge so the empty
-    // panel still wraps the room counter; expanded below per split row.
+    let maxRowWidth = this.roomText.displayWidth;
+    if (this.timingsVisible) {
+      maxRowWidth = Math.max(maxRowWidth, this.splitsHeader.displayWidth);
+    }
     let lastRowBottom = this.roomText.y + this.roomText.displayHeight;
-    if (hasSplits) {
+    if (showRows) {
       lastRowBottom = Math.max(
         lastRowBottom,
         this.splitsHeader.y + this.splitsHeader.displayHeight,
@@ -274,9 +282,9 @@ export class GameHUD extends Phaser.Scene {
       const row = this.splitsRows[i];
       const delta = this.splitsDeltas[i];
       const split = splits[i];
-      if (split) {
+      if (split && this.timingsVisible) {
         row.setText(`Rm ${split.room_index}  ${formatTime(split.time_ms)}`);
-        row.setVisible(this.hudVisible);
+        row.setVisible(true);
 
         const pb = this.pbSplits[i];
         if (pb && pb.room_index === split.room_index) {
@@ -286,7 +294,7 @@ export class GameHUD extends Phaser.Scene {
           delta.setAlpha(0.75);
           // Position delta just left of the split row's left edge.
           delta.setX(row.x - row.displayWidth - SPLITS_DELTA_GAP);
-          delta.setVisible(this.hudVisible);
+          delta.setVisible(true);
           maxRowWidth = Math.max(
             maxRowWidth,
             row.displayWidth + SPLITS_DELTA_GAP + delta.displayWidth,
@@ -325,8 +333,8 @@ export class GameHUD extends Phaser.Scene {
         this.weaponIcon.setDisplaySize(WEAPON_ICON_WIDTH, WEAPON_ICON_HEIGHT);
         this.currentWeaponKey = spriteKey;
       }
-      this.weaponIcon.setVisible(this.hudVisible);
-      iconShown = this.hudVisible;
+      this.weaponIcon.setVisible(true);
+      iconShown = true;
       // Right-edge of the icon sits to the left of the weapon text.
       const textLeft = this.weaponText.x - this.weaponText.displayWidth;
       this.weaponIcon.setX(textLeft - WEAPON_ICON_GAP);
@@ -343,7 +351,7 @@ export class GameHUD extends Phaser.Scene {
       this.weaponText.displayHeight,
     );
     this.weaponPanel.setSize(totalWidth + PANEL_PAD_X * 2, totalHeight + PANEL_PAD_Y * 2);
-    this.weaponPanel.setVisible(this.hudVisible);
+    this.weaponPanel.setVisible(true);
   }
 
   private makePanelBehind(text: Phaser.GameObjects.Text): Phaser.GameObjects.Rectangle {
@@ -375,23 +383,19 @@ export class GameHUD extends Phaser.Scene {
     );
   }
 
-  private onHudVisibilityChanged(visible: boolean): void {
-    this.hudVisible = visible;
-    this.applyHudVisibility();
+  private onTimingsVisibilityChanged(visible: boolean): void {
+    this.timingsVisible = visible;
+    this.applyTimingsVisibility();
   }
 
-  private applyHudVisibility(): void {
-    const v = this.hudVisible;
+  private applyTimingsVisibility(): void {
+    // Only the run-timer + splits column hide. HP / weapon / room
+    // counter / splits backdrop stay visible — refreshSplits will
+    // re-show the per-row text and resize the panel on the next tick.
+    const v = this.timingsVisible;
     this.timeText?.setVisible(v);
     this.timePanel?.setVisible(v);
-    this.roomText?.setVisible(v);
-    this.hpBarBg?.setVisible(v);
-    this.hpBarFill?.setVisible(v);
-    this.weaponText?.setVisible(v);
-    this.weaponIcon?.setVisible(v && !!this.currentWeaponKey);
-    this.weaponPanel?.setVisible(v);
-    this.splitsHeader?.setVisible(false); // refreshSplits will re-show
-    this.splitsPanel?.setVisible(false);
+    this.splitsHeader?.setVisible(false);
     for (const r of this.splitsRows) r.setVisible(false);
     for (const d of this.splitsDeltas) d.setVisible(false);
   }
@@ -404,8 +408,8 @@ export class GameHUD extends Phaser.Scene {
     const sync = getSync();
     sync.state.off("runComplete", this.onRunComplete, this);
     this.game.events.off(
-      "hudVisibilityChanged",
-      this.onHudVisibilityChanged,
+      "timingsVisibilityChanged",
+      this.onTimingsVisibilityChanged,
       this,
     );
 

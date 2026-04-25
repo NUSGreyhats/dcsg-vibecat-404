@@ -8,7 +8,7 @@ import type { SplitData } from "../net/packet";
  */
 
 const PB_KEY = "vibecat:pb";
-const HUD_KEY = "vibecat:hud-visible";
+const TIMINGS_KEY = "vibecat:timings-visible";
 const PLAYER_ID_KEY = "vibecat:player-id";
 
 type StoredPB = {
@@ -59,16 +59,17 @@ export function maybeRecordPB(totalMs: number, splits: SplitData[]): boolean {
   return true;
 }
 
-export function isHudVisible(): boolean {
+export function isTimingsVisible(): boolean {
   // Default to visible. Stored as "0" / "1" so the value survives
-  // boolean-as-string round-trips.
-  const raw = safeGet(HUD_KEY);
+  // boolean-as-string round-trips. Controls only the speedrun timings
+  // (run timer + splits column) — HP / weapon / room counter ignore it.
+  const raw = safeGet(TIMINGS_KEY);
   if (raw === "0") return false;
   return true;
 }
 
-export function setHudVisible(visible: boolean): void {
-  safeSet(HUD_KEY, visible ? "1" : "0");
+export function setTimingsVisible(visible: boolean): void {
+  safeSet(TIMINGS_KEY, visible ? "1" : "0");
 }
 
 /**

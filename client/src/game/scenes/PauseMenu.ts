@@ -1,6 +1,10 @@
 import Phaser from "phaser";
 import { resetSync } from "../net/runContext";
-import { clearCachedPlayerId, isHudVisible, setHudVisible } from "../prefs";
+import {
+  clearCachedPlayerId,
+  isTimingsVisible,
+  setTimingsVisible,
+} from "../prefs";
 import {
   ACCENT_PRIMARY,
   DEPTH_HUD_BG,
@@ -22,7 +26,7 @@ import {
 type Page = "main" | "controls";
 
 type MainItem = {
-  key: "resume" | "toggleHud" | "controls" | "restart" | "logout";
+  key: "resume" | "toggleTimings" | "controls" | "restart" | "logout";
   label(): string;
 };
 
@@ -35,7 +39,7 @@ const CONTROL_BINDINGS: ReadonlyArray<readonly [string, string]> = [
   ["Switch weapon", "1 / 2 / 3"],
   ["Interact / enter door", "E"],
   ["Inventory", "I"],
-  ["Pause", "Esc"],
+  ["Menu", "Esc"],
 ];
 
 const PANEL_WIDTH = 480;
@@ -51,11 +55,12 @@ const BLUR_STEPS = 4;
 const BLURRED_SCENES = ["Game", "GameHUD"] as const;
 
 /**
- * Modal pause overlay. Pauses the Game scene while open; closes via Esc
- * (or the "Resume" entry) and resumes Game. Hosts a small page stack —
- * the "Controls" entry pushes a controls page that Esc pops. While open
- * the Game + GameHUD cameras get a Phaser post-FX blur so the menu
- * (drawn on a separate scene/camera) stays sharp on top.
+ * Modal in-game menu. Pauses the local Game scene rendering while open;
+ * the SERVER continues ticking, so this is not a true pause — the player
+ * can still take damage. Closes via Esc (or the "Close" entry). Hosts a
+ * small page stack — the "Controls" entry pushes a controls page that
+ * Esc pops. While open the Game + GameHUD cameras get a Phaser post-FX
+ * blur so the menu (drawn on a separate scene/camera) stays sharp on top.
  */
 export class PauseMenu extends Phaser.Scene {
   private page: Page = "main";
@@ -86,10 +91,11 @@ export class PauseMenu extends Phaser.Scene {
     this.applyCanvasBlur();
 
     this.items = [
-      { key: "resume", label: () => "Resume" },
+      { key: "resume", label: () => "Close" },
       {
-        key: "toggleHud",
-        label: () => (isHudVisible() ? "Hide HUD" : "Show HUD"),
+        key: "toggleTimings",
+        label: () =>
+          isTimingsVisible() ? "Hide Timings" : "Show Timings",
       },
       { key: "controls", label: () => "Controls" },
       { key: "restart", label: () => "Restart Run" },
@@ -137,7 +143,7 @@ export class PauseMenu extends Phaser.Scene {
 
     if (this.page === "main") {
       this.title = this.add
-        .text(cx, cy - 160, "Paused", {
+        .text(cx, cy - 160, "Menu", {
           fontFamily: FONT_FAMILY,
           fontSize: FONT_SIZE_HEADING,
           color: hex(ACCENT_PRIMARY),
@@ -149,7 +155,7 @@ export class PauseMenu extends Phaser.Scene {
         .text(
           cx,
           cy + 160,
-          "[Up/Down] select   [Enter] confirm   [Esc] resume",
+          "[Up/Down] select   [Enter] confirm   [Esc] close",
           {
             fontFamily: FONT_FAMILY,
             fontSize: FONT_SIZE_CAPTION,
@@ -233,11 +239,11 @@ export class PauseMenu extends Phaser.Scene {
       case "resume":
         this.close();
         return;
-      case "toggleHud": {
-        const next = !isHudVisible();
-        setHudVisible(next);
+      case "toggleTimings": {
+        const next = !isTimingsVisible();
+        setTimingsVisible(next);
         // Tell the HUD scene live — it listens on the global game events bus.
-        this.game.events.emit("hudVisibilityChanged", next);
+        this.game.events.emit("timingsVisibilityChanged", next);
         // Re-render so the menu label flips immediately.
         this.renderPage();
         return;
@@ -274,20 +280,17 @@ export class PauseMenu extends Phaser.Scene {
     // Mirror the WinScreen "Play Again" path: tear down the WS so the
     // server-side run state is dropped, then return to MainMenu where the
     // user re-auths and starts a fresh run. The blur is removed so the
-    // login form behind isn't smeared. WinScreen + InventoryMenu are
-    // stopped defensively so any overlay that was open under the pause
-    // doesn't bleed through to the main menu.
+    // login form behind isn't smeared. Other overlays are stopped
+    // defensively so nothing bleeds through to the main menu.
     //
-    // Order: stop scenes BEFORE resetSync so each scene's cleanup
-    // detaches its state listeners while the (still-live) WS hasn't
-    // emitted its synthetic 'disconnected' error yet. Otherwise Game's
-    // error handler could fire and falsely launch the WinScreen.
+    // We don't explicitly stop self — scene.start() handles that. Calling
+    // this.scene.stop() before this.scene.start() can leave the scene
+    // plugin in an awkward state where the start call no-ops.
     this.removeCanvasBlur();
     this.scene.stop("Game");
     this.scene.stop("GameHUD");
     this.scene.stop("InventoryMenu");
     this.scene.stop("WinScreen");
-    this.scene.stop();
     resetSync();
     this.scene.start("MainMenu");
   }
