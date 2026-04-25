@@ -13,7 +13,6 @@ import {
   FONT_SIZE_CAPTION,
   FONT_SIZE_SMALL,
   MID_BLUE,
-  NAVY,
   SUCCESS,
   TEXT_MUTED,
   TEXT_PRIMARY,
@@ -265,12 +264,12 @@ export class MainMenu extends Phaser.Scene {
     h: number,
     sponsor: SponsorSpec,
   ): void {
-    // NAVY card fill (one shade above the parent panel) so cards stay
-    // distinct against DEEP_NAVY without breaking the dark theme.
-    // Logos are HTML <img> overlays — browsers do high-quality
-    // downscaling that Phaser's NPOT textures don't.
+    // Transparent card — only the MID_BLUE stroke defines each slot;
+    // the parent DEEP_NAVY panel shows through. Logos are HTML <img>
+    // overlays for high-quality browser downscaling that Phaser's NPOT
+    // textures don't provide.
     this.add
-      .rectangle(x, y, w, h, NAVY, 1)
+      .rectangle(x, y, w, h, 0, 0)
       .setStrokeStyle(1, MID_BLUE)
       .setOrigin(0, 0);
 
