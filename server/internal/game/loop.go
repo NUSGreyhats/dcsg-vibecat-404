@@ -15,6 +15,17 @@ import (
 	"github.com/greyhats/defcon-game/server/internal/spectator"
 )
 
+// SpectatorPerGame is the maximum simultaneous spectators on a single
+// gameLoop. Mirrors SPECTATOR_PER_GAME from
+// docs/specs/foundations/04-lobby.md. Per-game enforcement lives on the
+// engine because it's the only goroutine that knows the current count.
+const SpectatorPerGame = 50
+
+// SpectatorCatchupGrace is the post-run flush window during which the
+// engine keeps spectator outChs open so the final S2C_RUN_COMPLETE has
+// time to flush over the WS. Mirrors SPECTATOR_CATCHUP_MS.
+const SpectatorCatchupGrace = 500 * time.Millisecond
+
 // Engine is the per-player game loop. It owns RunState, PlayerState, and
 // RoomState (sole-owner rule from docs/specs/foundations/06-game-state-conventions.md).
 // Lifecycle: one Engine per WebSocket connection, torn down on disconnect.
@@ -30,6 +41,10 @@ type Engine struct {
 	// May be nil — engines run fine without a live registry; the
 	// /internal/live-games endpoint just won't see them.
 	Live *spectator.LiveRegistry
+	// Engines is the global player_id → RegisterCh registry. The engine
+	// self-registers on auth and unregisters on run end. May be nil in
+	// tests; the engine just won't be reachable from /ws/spectate.
+	Engines *spectator.Engines
 
 	PlayerID    string
 	DisplayName string
@@ -42,15 +57,33 @@ type Engine struct {
 	tick         uint64
 	lastClientTs int64
 	dirtyInput   struct{ dx, dy float32 }
+
+	// RegisterCh receives spectator register/deregister verbs from the
+	// /ws/spectate accept handler. Drained at the start of each tick so
+	// catchup packets land before the next physics step. Buffered to
+	// absorb a small burst of accepts within one tick.
+	RegisterCh chan spectator.Req
+
+	// spectators is the engine-owned slice of attached spectators.
+	// Sole-owner rule: only the gameLoop goroutine reads/writes this.
+	spectators []*spectator.Conn
+
+	// Cached catchup data — refreshed in send() each time we emit one of
+	// these types. New spectators are warmed up from these on register
+	// so the viewer renders without waiting for the next tick.
+	lastRunStarted *protocol.RunStartedData
+	lastRoomLoad   *protocol.RoomLoadData
+	lastState      *protocol.StateData
 }
 
 // NewEngine constructs an engine bound to the per-connection channels.
 func NewEngine(in <-chan []byte, out chan<- protocol.S2CEnvelope, submit func(*leaderboard.CompletedRun) bool, authCheck func(string) (string, error)) *Engine {
 	return &Engine{
-		InCh:      in,
-		OutCh:     out,
-		Submit:    submit,
-		AuthCheck: authCheck,
+		InCh:       in,
+		OutCh:      out,
+		Submit:     submit,
+		AuthCheck:  authCheck,
+		RegisterCh: make(chan spectator.Req, 8),
 	}
 }
 
@@ -59,7 +92,20 @@ func NewEngine(in <-chan []byte, out chan<- protocol.S2CEnvelope, submit func(*l
 //
 //  1. pre-run: authenticate (C2S_AUTH) and then wait for C2S_START_RUN.
 //  2. tick loop: 20 Hz drain → physics → collision → death → door → timer → send.
+//
+// On exit, regardless of phase, we unregister from the spectator engines
+// registry and close any still-attached spectator outChs. The Live
+// registry removal is the caller's responsibility (main.go).
 func (e *Engine) Run(ctx context.Context) {
+	defer func() {
+		if e.Engines != nil && e.PlayerID != "" {
+			e.Engines.Unregister(e.PlayerID)
+		}
+		// Belt-and-braces: if Run exits without finishRun (e.g. ctx cancel
+		// during handshake or pre-finish disconnect), close any spectators
+		// that did manage to attach.
+		e.closeSpectators()
+	}()
 	if !e.handshake(ctx) {
 		return
 	}
@@ -68,12 +114,65 @@ func (e *Engine) Run(ctx context.Context) {
 
 // send pushes an envelope onto outCh, incrementing seq. If outCh is full
 // the envelope is dropped — the client will receive the next one.
+//
+// send is also the single fan-out point to attached spectators. We cache
+// the catchup-relevant payloads (RUN_STARTED, ROOM_LOAD, STATE) so a new
+// spectator can be warmed up on register, and we relay everything except
+// S2C_AUTH_OK with per-spectator seqs.
 func (e *Engine) send(typ uint8, data any) {
 	e.seq++
 	env := protocol.NewS2C(typ, e.seq, data)
 	select {
 	case e.OutCh <- env:
 	default:
+	}
+	e.cacheCatchup(typ, data)
+	e.fanOutToSpectators(typ, data)
+}
+
+// cacheCatchup stashes the latest payload for catchup-relevant types so
+// a freshly-registered spectator can render without waiting for the next
+// emission of the same type.
+func (e *Engine) cacheCatchup(typ uint8, data any) {
+	switch typ {
+	case protocol.S2CRunStarted:
+		if d, ok := data.(protocol.RunStartedData); ok {
+			c := d
+			e.lastRunStarted = &c
+		}
+	case protocol.S2CRoomLoad:
+		if d, ok := data.(protocol.RoomLoadData); ok {
+			c := d
+			e.lastRoomLoad = &c
+		}
+	case protocol.S2CState:
+		if d, ok := data.(protocol.StateData); ok {
+			c := d
+			e.lastState = &c
+		}
+	}
+}
+
+// fanOutToSpectators delivers every non-auth S2C type to every attached
+// spectator with a per-spectator seq. Sends are non-blocking; a slow
+// spectator gets the frame dropped (next tick will resync). This is the
+// drop-on-full discipline from
+// docs/specs/foundations/05-server-runtime.md#spectator-fan-out — a slow
+// spectator must never stall the gameLoop.
+func (e *Engine) fanOutToSpectators(typ uint8, data any) {
+	if typ == protocol.S2CAuthOk || len(e.spectators) == 0 {
+		return
+	}
+	for _, sp := range e.spectators {
+		if sp.Closed {
+			continue
+		}
+		sp.Seq++
+		env := protocol.NewS2C(typ, sp.Seq, data)
+		select {
+		case sp.OutCh <- env:
+		default:
+		}
 	}
 }
 
@@ -127,6 +226,11 @@ func (e *Engine) awaitAuth(ctx context.Context) bool {
 				e.DisplayName = displayName
 			} else if e.DisplayName == "" {
 				e.DisplayName = pkt.PlayerID
+			}
+			// Make the engine reachable from /ws/spectate now that we have
+			// a player_id. Unregister happens in Run's deferred cleanup.
+			if e.Engines != nil {
+				e.Engines.Register(e.PlayerID, e.RegisterCh)
 			}
 			e.send(protocol.S2CAuthOk, protocol.AuthOkData{DisplayName: e.DisplayName})
 			return true
@@ -229,6 +333,7 @@ func (e *Engine) stepTick(now time.Time) {
 	e.tick++
 	dt := float32(TickDuration.Seconds())
 
+	e.drainSpectatorRegister()
 	e.drainInput(now)
 	e.advancePlayer(dt, now)
 	deaths := e.advanceEnemies(dt, now)
@@ -300,16 +405,125 @@ func (e *Engine) publishLiveSummary() {
 	if e.Live == nil || e.run == nil || e.PlayerID == "" {
 		return
 	}
+	live := 0
+	for _, sp := range e.spectators {
+		if !sp.Closed {
+			live++
+		}
+	}
 	e.Live.Update(spectator.Summary{
-		PlayerID:    e.PlayerID,
-		DisplayName: e.DisplayName,
-		RoomIndex:   e.run.CurrentRoom,
-		ElapsedMs:   e.run.ElapsedMs,
-		// SpectatorCount is filled in once per-engine spectator fan-out
-		// lands (task #4). Until then it's always 0.
-		SpectatorCount: 0,
+		PlayerID:       e.PlayerID,
+		DisplayName:    e.DisplayName,
+		RoomIndex:      e.run.CurrentRoom,
+		ElapsedMs:      e.run.ElapsedMs,
+		SpectatorCount: live,
 		StartedAt:      e.run.RunStartTime.UnixMilli(),
 	})
+}
+
+// drainSpectatorRegister applies any pending register/deregister verbs.
+// Runs at the start of stepTick so a spectator who joined since the last
+// tick gets the catchup sequence before the next physics step lands a
+// fresh S2C_STATE on top of it.
+func (e *Engine) drainSpectatorRegister() {
+	for {
+		select {
+		case req := <-e.RegisterCh:
+			switch req.Action {
+			case spectator.ActionRegister:
+				e.handleRegister(req)
+			case spectator.ActionDeregister:
+				e.handleDeregister(req)
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (e *Engine) handleRegister(req spectator.Req) {
+	if req.Conn == nil {
+		if req.Reply != nil {
+			req.Reply <- false
+		}
+		return
+	}
+	live := 0
+	for _, sp := range e.spectators {
+		if !sp.Closed {
+			live++
+		}
+	}
+	if live >= SpectatorPerGame {
+		if req.Reply != nil {
+			req.Reply <- false
+		}
+		return
+	}
+	e.spectators = append(e.spectators, req.Conn)
+	if req.Reply != nil {
+		req.Reply <- true
+	}
+	e.sendCatchup(req.Conn)
+}
+
+func (e *Engine) handleDeregister(req spectator.Req) {
+	if req.Conn == nil {
+		return
+	}
+	for i, sp := range e.spectators {
+		if sp == req.Conn {
+			e.spectators = append(e.spectators[:i], e.spectators[i+1:]...)
+			return
+		}
+	}
+}
+
+// sendCatchup pushes the cached RUN_STARTED, ROOM_LOAD, and STATE to a
+// freshly-registered spectator with fresh per-spectator seqs. Each push
+// is non-blocking — a buffer-full failure here is unlikely (the channel
+// was just allocated) but we tolerate it: the next regular tick's
+// fan-out will resend STATE within 50 ms.
+func (e *Engine) sendCatchup(sp *spectator.Conn) {
+	push := func(typ uint8, data any) {
+		sp.Seq++
+		env := protocol.NewS2C(typ, sp.Seq, data)
+		select {
+		case sp.OutCh <- env:
+		default:
+		}
+	}
+	if e.lastRunStarted != nil {
+		push(protocol.S2CRunStarted, *e.lastRunStarted)
+	}
+	if e.lastRoomLoad != nil {
+		push(protocol.S2CRoomLoad, *e.lastRoomLoad)
+	}
+	if e.lastState != nil {
+		push(protocol.S2CState, *e.lastState)
+	}
+}
+
+// closeSpectators schedules every attached spectator's outCh to close
+// after the SpectatorCatchupGrace window. Called once from finishRun so
+// the final S2C_RUN_COMPLETE has time to flush. The closing goroutine
+// owns the slice copy from this point — the engine goroutine is exiting.
+func (e *Engine) closeSpectators() {
+	if len(e.spectators) == 0 {
+		return
+	}
+	conns := make([]*spectator.Conn, len(e.spectators))
+	copy(conns, e.spectators)
+	e.spectators = nil
+	go func() {
+		time.Sleep(SpectatorCatchupGrace)
+		for _, sp := range conns {
+			if !sp.Closed {
+				sp.Closed = true
+				close(sp.OutCh)
+			}
+		}
+	}()
 }
 
 // drainInput pulls every queued C2S packet and dispatches each with the
@@ -572,6 +786,10 @@ func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {
 		Rank:    0,
 		Splits:  e.run.Splits,
 	})
+	// Spectators have just received the RUN_COMPLETE via fan-out; schedule
+	// their outChs to close after SPECTATOR_CATCHUP_MS so the connWriter
+	// has a chance to flush before the WS shuts.
+	e.closeSpectators()
 }
 
 // sendState builds the S2C_STATE snapshot from the authoritative state.

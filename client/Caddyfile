@@ -6,7 +6,9 @@
 :3000 {
     encode gzip
 
-    @ws path /ws
+    # Game-server WebSockets: /ws is the player path, /ws/spectate is the
+    # read-only viewer path (spectator fan-out lives in the gameLoop).
+    @ws path /ws /ws/spectate
     handle @ws {
         reverse_proxy game-server:8080
     }

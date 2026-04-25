@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,6 +31,8 @@ func main() {
 	identityDBPath := envDefault("IDENTITY_DB", "identity.db")
 	allowlistPath := envDefault("ALLOWLIST_PATH", "/data/allowlist.json")
 	maxConcurrent := envInt("MAX_CONCURRENT", 64)
+	spectatorGlobal := envInt("SPECTATOR_GLOBAL", 200)
+	spectatorPerIP := envInt("SPECTATOR_PER_IP", 5)
 
 	db, err := leaderboard.OpenDB(dbPath)
 	if err != nil {
@@ -64,6 +68,13 @@ func main() {
 	liveReg := spectator.NewLiveRegistry(maxConcurrent)
 	liveReg.Start(ctx)
 
+	// Spectator engines registry + global+per-IP caps. The accept handler
+	// for /ws/spectate looks engines up by player_id from the URL and
+	// dispatches a register request. Per-game cap is enforced by each
+	// engine on the receiving side.
+	engineReg := spectator.NewEngines()
+	specCaps := spectator.NewCaps(spectatorGlobal, spectatorPerIP, time.Minute)
+
 	allowlist := auth.NewAllowlist(allowlistPath)
 
 	// Build the auth gate once so the WS handler doesn't re-derive it per
@@ -91,7 +102,10 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handleWS(ctx, w, r, sem, authCheck, lbSvc, liveReg)
+		handleWS(ctx, w, r, sem, authCheck, lbSvc, liveReg, engineReg)
+	})
+	mux.HandleFunc("/ws/spectate", func(w http.ResponseWriter, r *http.Request) {
+		handleSpectateWS(ctx, w, r, engineReg, specCaps)
 	})
 	mux.HandleFunc("/internal/slot-status", func(w http.ResponseWriter, _ *http.Request) {
 		used := len(sem)
@@ -137,7 +151,7 @@ func main() {
 	_ = srv.Shutdown(shutdownCtx)
 }
 
-func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem chan struct{}, authCheck func(string) (string, error), lb *leaderboard.Service, liveReg *spectator.LiveRegistry) {
+func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem chan struct{}, authCheck func(string) (string, error), lb *leaderboard.Service, liveReg *spectator.LiveRegistry, engineReg *spectator.Engines) {
 	select {
 	case sem <- struct{}{}:
 	default:
@@ -162,6 +176,7 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 
 	engine := game.NewEngine(inCh, outCh, lb.Submit, authCheck)
 	engine.Live = liveReg
+	engine.Engines = engineReg
 
 	go connReader(connCtx, conn, inCh, cancel)
 	go connWriter(connCtx, conn, outCh, cancel)
@@ -178,6 +193,170 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 			liveReg.Remove(engine.PlayerID)
 		}
 	}()
+}
+
+// SpectatorIdleTimeout closes a spectator WS that hasn't sent a control
+// frame (pong) in this long. We rely on the WS library's idle ping/pong
+// — there are no app-level pings from spectators (they're read-only).
+const SpectatorIdleTimeout = 60 * time.Second
+
+// SpectatorRegisterTimeout caps how long the accept handler waits on the
+// engine's register reply before giving up and returning 503. Shorter
+// than the engine's tick (50 ms) would race the drain; 1 s gives many
+// ticks of slack while still preventing zombie pending accepts.
+const SpectatorRegisterTimeout = 1 * time.Second
+
+func handleSpectateWS(ctx context.Context, w http.ResponseWriter, r *http.Request, engineReg *spectator.Engines, caps *spectator.Caps) {
+	playerID := r.URL.Query().Get("player_id")
+	if playerID == "" {
+		http.Error(w, "player_id required", http.StatusBadRequest)
+		return
+	}
+
+	if !caps.AllowIP(clientIP(r), time.Now()) {
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+		return
+	}
+
+	if !caps.AcquireGlobal() {
+		w.Header().Set("Retry-After", "5")
+		http.Error(w, "spectator capacity reached", http.StatusServiceUnavailable)
+		return
+	}
+	released := false
+	releaseGlobal := func() {
+		if !released {
+			released = true
+			caps.ReleaseGlobal()
+		}
+	}
+	defer releaseGlobal()
+
+	registerCh, ok := engineReg.Lookup(playerID)
+	if !ok {
+		http.Error(w, "no live run for player_id", http.StatusNotFound)
+		return
+	}
+
+	conn := spectator.NewConn()
+	reply := make(chan bool, 1)
+	select {
+	case registerCh <- spectator.Req{Action: spectator.ActionRegister, Conn: conn, Reply: reply}:
+	case <-time.After(SpectatorRegisterTimeout):
+		http.Error(w, "engine busy", http.StatusServiceUnavailable)
+		return
+	case <-ctx.Done():
+		http.Error(w, "shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	var accepted bool
+	select {
+	case accepted = <-reply:
+	case <-time.After(SpectatorRegisterTimeout):
+		http.Error(w, "engine busy", http.StatusServiceUnavailable)
+		return
+	case <-ctx.Done():
+		http.Error(w, "shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	if !accepted {
+		w.Header().Set("Retry-After", "5")
+		http.Error(w, "spectator capacity reached", http.StatusServiceUnavailable)
+		return
+	}
+	// From here on the engine owns conn; the global slot is released only
+	// when the connWriter exits.
+
+	wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		log.Printf("spectate accept: %v", err)
+		// Best-effort deregister + slot release; engine already accepted.
+		select {
+		case registerCh <- spectator.Req{Action: spectator.ActionDeregister, Conn: conn}:
+		default:
+		}
+		return
+	}
+
+	connCtx, cancel := context.WithCancel(ctx)
+
+	// Reader: spectator connections are read-only. Any frame at all closes
+	// the WS with code 1008 (policy violation) per
+	// docs/specs/foundations/02-protocol.md#read-only-enforcement.
+	go func() {
+		defer cancel()
+		for {
+			wsConn.SetReadLimit(1024)
+			readCtx, readCancel := context.WithTimeout(connCtx, SpectatorIdleTimeout)
+			_, _, err := wsConn.Read(readCtx)
+			readCancel()
+			if err != nil {
+				return
+			}
+			// Any inbound frame is a programming error or an attack. Send
+			// the typed error then close 1008.
+			env := protocol.NewS2C(protocol.S2CError, 0, protocol.ErrorData{
+				Code:    "SPECTATOR_READ_ONLY",
+				Message: "spectator connections are read-only",
+			})
+			if raw, err := json.Marshal(env); err == nil {
+				_ = wsConn.Write(connCtx, websocket.MessageText, raw)
+			}
+			_ = wsConn.Close(websocket.StatusPolicyViolation, "spectator_read_only")
+			return
+		}
+	}()
+
+	// Writer: drains conn.OutCh until close. On exit, deregister from the
+	// engine (if not already gone) and release the global slot.
+	go func() {
+		defer cancel()
+		defer releaseGlobal()
+		defer wsConn.Close(websocket.StatusNormalClosure, "bye")
+		defer func() {
+			select {
+			case registerCh <- spectator.Req{Action: spectator.ActionDeregister, Conn: conn}:
+			default:
+			}
+		}()
+		for {
+			select {
+			case <-connCtx.Done():
+				return
+			case env, ok := <-conn.OutCh:
+				if !ok {
+					return // engine closed our channel — clean shutdown
+				}
+				raw, err := json.Marshal(env)
+				if err != nil {
+					continue
+				}
+				if err := wsConn.Write(connCtx, websocket.MessageText, raw); err != nil {
+					return
+				}
+			}
+		}
+	}()
+}
+
+// clientIP returns the best-effort source IP for rate-limit bookkeeping.
+// Honours X-Forwarded-For (set by the Caddy reverse proxy) and falls
+// back to RemoteAddr.
+func clientIP(r *http.Request) string {
+	if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
+		if i := strings.IndexByte(xf, ','); i > 0 {
+			return strings.TrimSpace(xf[:i])
+		}
+		return strings.TrimSpace(xf)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func connReader(ctx context.Context, conn *websocket.Conn, inCh chan<- []byte, cancel context.CancelFunc) {
