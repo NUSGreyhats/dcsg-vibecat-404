@@ -36,10 +36,12 @@
     }
 
     # Spectator viewer URLs (/spectate/:player_id) serve the spectator
-    # bundle's spectate.html. Caddy rewrites the path before falling
-    # through to file_server — every viewer URL gets the same HTML, and
-    # the JS reads the player_id from window.location.pathname.
-    @spectate_viewer path /spectate/*
+    # bundle's spectate.html. The matcher is tight (single non-empty path
+    # segment after /spectate/) so a deep request like /spectate/abc/assets/x.js
+    # falls through to the static file_server instead of being rewritten
+    # to spectate.html. The HTML itself sets <base href="/"> as a belt
+    # against any future matcher slip.
+    @spectate_viewer path_regexp ^/spectate/[^/]+/?$
     handle @spectate_viewer {
         rewrite * /spectate.html
         root * /srv
