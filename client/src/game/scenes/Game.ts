@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { getSync } from "../net/runContext";
+import type { GameState } from "../net/GameState";
 import {
   ROOM_WIDTH,
   ROOM_HEIGHT,
@@ -67,6 +68,9 @@ export class Game extends Phaser.Scene {
   /** Positions where enemies took damage this tick — used to suppress
    *  redundant wall sparks at projectile despawn. */
   private hitPositionsThisFrame: { x: number; y: number }[] = [];
+  /** GameState captured at create() so cleanup detaches from the same
+   *  instance, even after resetSync() swaps in a new sync/state. */
+  private boundState?: GameState;
 
   constructor() {
     super({ key: "Game" });
@@ -93,6 +97,7 @@ export class Game extends Phaser.Scene {
     this.player = new Player(this, px, py);
     this.add.existing(this.player);
 
+    this.boundState = sync.state;
     sync.state.on("state", this.onServerState, this);
     sync.state.on("roomLoad", this.onRoomLoad, this);
     sync.state.on("doorUnlocked", this.onDoorUnlocked, this);
@@ -342,8 +347,7 @@ export class Game extends Phaser.Scene {
     if (outcome === RunOutcomeValue.COMPLETED) {
       maybeRecordPB(totalMs, splits);
     }
-    this.scene.stop("GameHUD");
-    this.scene.start("WinScreen", { outcome });
+    this.endRun(outcome);
   }
 
   private onSyncError(err: { code: string; message: string }): void {
@@ -361,8 +365,22 @@ export class Game extends Phaser.Scene {
     state.totalMs = state.elapsedMs;
     state.runFinished = true;
     state.runOutcome = RunOutcomeValue.FAILED;
+    this.endRun(RunOutcomeValue.FAILED);
+  }
+
+  /**
+   * Tear down every overlay scene that may be sitting on top of the
+   * gameplay (HUD, pause menu, inventory) before launching the WinScreen.
+   * Without stopping PauseMenu, a player who dies mid-pause sees the
+   * pause modal layered over the run-failed screen.
+   */
+  private endRun(outcome: RunOutcome): void {
+    // Stop PauseMenu first while the Game + GameHUD cameras are still
+    // live so its blur post-FX teardown finds something to remove.
+    this.scene.stop("PauseMenu");
+    this.scene.stop("InventoryMenu");
     this.scene.stop("GameHUD");
-    this.scene.start("WinScreen", { outcome: RunOutcomeValue.FAILED });
+    this.scene.start("WinScreen", { outcome });
   }
 
   private nearestPickupId(
@@ -406,13 +424,21 @@ export class Game extends Phaser.Scene {
   }
 
   private cleanup(): void {
-    const sync = getSync();
-    sync.state.off("state", this.onServerState, this);
-    sync.state.off("roomLoad", this.onRoomLoad, this);
-    sync.state.off("doorUnlocked", this.onDoorUnlocked, this);
-    sync.state.off("entityDied", this.onEntityDied, this);
-    sync.state.off("runComplete", this.onRunComplete, this);
-    sync.state.off("error", this.onSyncError, this);
+    // Use the captured state reference rather than getSync().state — the
+    // sync may have been reset (e.g. PauseMenu Restart Run), in which
+    // case getSync() now returns a fresh state and our listeners on the
+    // OLD state would otherwise leak. Stale listeners would fire on the
+    // old WS's onclose and falsely trigger the run-failed flow.
+    const state = this.boundState;
+    if (state) {
+      state.off("state", this.onServerState, this);
+      state.off("roomLoad", this.onRoomLoad, this);
+      state.off("doorUnlocked", this.onDoorUnlocked, this);
+      state.off("entityDied", this.onEntityDied, this);
+      state.off("runComplete", this.onRunComplete, this);
+      state.off("error", this.onSyncError, this);
+    }
+    this.boundState = undefined;
     this.events.off("enemyHit", this.onEnemyHit, this);
     this.hitstopUntil = 0;
     this.prevPlayerHp = -1;

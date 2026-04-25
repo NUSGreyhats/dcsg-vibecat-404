@@ -274,12 +274,21 @@ export class PauseMenu extends Phaser.Scene {
     // Mirror the WinScreen "Play Again" path: tear down the WS so the
     // server-side run state is dropped, then return to MainMenu where the
     // user re-auths and starts a fresh run. The blur is removed so the
-    // login form behind isn't smeared.
+    // login form behind isn't smeared. WinScreen + InventoryMenu are
+    // stopped defensively so any overlay that was open under the pause
+    // doesn't bleed through to the main menu.
+    //
+    // Order: stop scenes BEFORE resetSync so each scene's cleanup
+    // detaches its state listeners while the (still-live) WS hasn't
+    // emitted its synthetic 'disconnected' error yet. Otherwise Game's
+    // error handler could fire and falsely launch the WinScreen.
     this.removeCanvasBlur();
-    resetSync();
     this.scene.stop("Game");
     this.scene.stop("GameHUD");
+    this.scene.stop("InventoryMenu");
+    this.scene.stop("WinScreen");
     this.scene.stop();
+    resetSync();
     this.scene.start("MainMenu");
   }
 
@@ -309,7 +318,14 @@ export class PauseMenu extends Phaser.Scene {
 
   private removeCanvasBlur(): void {
     for (const { cam, fx } of this.appliedBlurs) {
-      cam.postFX?.remove(fx);
+      // The Game/GameHUD scene may have been stopped first (e.g. during
+      // an endRun teardown), in which case the camera is gone. Ignore
+      // any access errors — the FX is going away with the camera anyway.
+      try {
+        cam.postFX?.remove(fx);
+      } catch {
+        // ignore
+      }
     }
     this.appliedBlurs = [];
   }
