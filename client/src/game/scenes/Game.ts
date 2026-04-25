@@ -132,26 +132,33 @@ export class Game extends Phaser.Scene {
     }
 
     if (this.controls.shootPressed() && this.player) {
-      const angle = this.controls.aimAngle(this.player.x, this.player.y);
-      sync.sendShoot(angle);
-      this.player.triggerShootAnim();
+      // Out of ammo: skip the visuals AND the network message — the
+      // server already rejects empty-mag SHOOT packets, but a flash +
+      // shake on a no-op press would mislead the player into thinking
+      // the shot landed.
+      const ammo = sync.state.player?.ammo ?? 0;
+      if (ammo > 0) {
+        const angle = this.controls.aimAngle(this.player.x, this.player.y);
+        sync.sendShoot(angle);
+        this.player.triggerShootAnim();
 
-      // Muzzle flash + camera shake, throttled by the weapon cooldown so
-      // mashing the click during cooldown doesn't strobe the screen.
-      const now = this.time.now;
-      const weaponId = this.player.currentWeaponId;
-      const cooldownMs = WEAPON_STATS[weaponId].cooldownMs;
-      if (now >= this.nextShootFxAt) {
-        this.nextShootFxAt = now + cooldownMs;
-        const fx = WEAPON_FX[weaponId];
-        const barrelLen = 22;
-        const bx = this.player.x + Math.cos(angle) * barrelLen;
-        const by = this.player.y + Math.sin(angle) * barrelLen;
-        spawnMuzzleFlash(this, bx, by, angle, {
-          length: fx.muzzleLength,
-          thickness: fx.muzzleThickness,
-        });
-        cameraShake(this, fx.shakeMs, fx.shakeIntensity);
+        // Muzzle flash + camera shake, throttled by the weapon cooldown so
+        // mashing the click during cooldown doesn't strobe the screen.
+        const now = this.time.now;
+        const weaponId = this.player.currentWeaponId;
+        const cooldownMs = WEAPON_STATS[weaponId].cooldownMs;
+        if (now >= this.nextShootFxAt) {
+          this.nextShootFxAt = now + cooldownMs;
+          const fx = WEAPON_FX[weaponId];
+          const barrelLen = 22;
+          const bx = this.player.x + Math.cos(angle) * barrelLen;
+          const by = this.player.y + Math.sin(angle) * barrelLen;
+          spawnMuzzleFlash(this, bx, by, angle, {
+            length: fx.muzzleLength,
+            thickness: fx.muzzleThickness,
+          });
+          cameraShake(this, fx.shakeMs, fx.shakeIntensity);
+        }
       }
     }
 
