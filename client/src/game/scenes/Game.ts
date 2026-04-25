@@ -21,6 +21,7 @@ import type {
   EntitySnapshot,
   ProjSnapshot,
   PlayerSnapshot,
+  PickupSpawn,
   SplitData,
   RunOutcome,
 } from "../../net/packet";
@@ -30,6 +31,7 @@ type StatePayload = {
   player: PlayerSnapshot;
   entities: EntitySnapshot[];
   projectiles: ProjSnapshot[];
+  pickups: PickupSpawn[];
 };
 
 /**
@@ -111,10 +113,12 @@ export class Game extends Phaser.Scene {
     if (slot !== null) sync.sendSwitchWeapon(slot);
 
     if (this.player) {
-      const pickupId = this.nearestPickupId(this.player.x, this.player.y, 24);
-      if (pickupId !== null && !this.requestedPickupIds.has(pickupId)) {
-        this.requestedPickupIds.add(pickupId);
-        sync.sendInteract(pickupId);
+      const nearest = this.nearestPickup(this.player.x, this.player.y, 24);
+      if (nearest && !this.requestedPickupIds.has(nearest.id)) {
+        this.requestedPickupIds.add(nearest.id);
+        // Honest client: forward the pickup type as rendered. The server
+        // *trusts* this field (BUG-12) — exploits live in the wire layer.
+        sync.sendInteract(nearest.id, nearest.type);
       }
 
       const doorId = this.nearestUnlockedDoorId(
@@ -130,6 +134,11 @@ export class Game extends Phaser.Scene {
 
     if (this.controls.inventoryPressed()) {
       this.scene.launch("InventoryMenu");
+      this.scene.pause();
+    }
+
+    if (this.controls.shopPressed()) {
+      this.scene.launch("ShopMenu");
       this.scene.pause();
     }
 
@@ -181,8 +190,20 @@ export class Game extends Phaser.Scene {
       }
     }
 
-    // Drop enemies/pickups that the server marked dead.
+    // Spawn newly-revealed pickups (coin drops appear mid-room). Pickups
+    // that vanish from the snapshot are torn down via the deadEntities
+    // path below — same code that handles consumed health/ammo crates.
     const state = getSync().state;
+    if (payload.pickups) {
+      for (const snap of payload.pickups) {
+        if (state.deadEntities.has(snap.entity_id)) continue;
+        if (this.pickups.has(snap.entity_id)) continue;
+        const pickup = new Pickup(this, snap);
+        this.pickups.set(snap.entity_id, pickup);
+      }
+    }
+
+    // Drop enemies/pickups that the server marked dead.
     for (const id of state.deadEntities) {
       const e = this.enemies.get(id);
       if (e) {
@@ -251,12 +272,12 @@ export class Game extends Phaser.Scene {
     this.scene.start("WinScreen", { outcome });
   }
 
-  private nearestPickupId(
+  private nearestPickup(
     x: number,
     y: number,
     radius: number,
-  ): number | null {
-    let bestId: number | null = null;
+  ): { id: number; type: number } | null {
+    let best: { id: number; type: number } | null = null;
     let bestDist = radius * radius;
     for (const [id, pk] of this.pickups) {
       const dx = pk.x - x;
@@ -264,10 +285,10 @@ export class Game extends Phaser.Scene {
       const d2 = dx * dx + dy * dy;
       if (d2 <= bestDist) {
         bestDist = d2;
-        bestId = id;
+        best = { id, type: pk.pickupType };
       }
     }
-    return bestId;
+    return best;
   }
 
   private nearestUnlockedDoorId(

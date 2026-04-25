@@ -6,6 +6,7 @@ import { formatTime } from "../ui/formatters";
 import {
   ACCENT_PRIMARY,
   BONE_WHITE,
+  COIN_GOLD,
   DEPTH_HUD_BG,
   DEPTH_HUD_FILL,
   FONT_FAMILY,
@@ -48,6 +49,7 @@ const WEAPON_ICON_FRAME = "0";
 export class GameHUD extends Phaser.Scene {
   private timeText?: Phaser.GameObjects.Text;
   private roomText?: Phaser.GameObjects.Text;
+  private coinText?: Phaser.GameObjects.Text;
   private hpBarBg?: Phaser.GameObjects.Rectangle;
   private hpBarFill?: Phaser.GameObjects.Rectangle;
   private weaponText?: Phaser.GameObjects.Text;
@@ -74,6 +76,17 @@ export class GameHUD extends Phaser.Scene {
 
     this.roomText = this.add
       .text(w - GUTTER_MEDIUM, 10, `Room 1/${ROOM_COUNT}`, HUD_TEXT_STYLE)
+      .setOrigin(1, 0)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_BG);
+
+    // Coin counter sits below the room indicator on the right side. The
+    // shop opens with "B" — see ShopMenu.
+    this.coinText = this.add
+      .text(w - GUTTER_MEDIUM, 30, "$ 0", {
+        ...HUD_TEXT_STYLE,
+        color: hex(COIN_GOLD),
+      })
       .setOrigin(1, 0)
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD_BG);
@@ -133,6 +146,10 @@ export class GameHUD extends Phaser.Scene {
     if (this.roomText) {
       const cur = state.currentRoom ?? 1;
       this.roomText.setText(`Room ${cur}/${ROOM_COUNT}`);
+    }
+
+    if (this.coinText) {
+      this.coinText.setText(`$ ${state.player?.coins ?? 0}`);
     }
 
     this.refreshSplits(state.splits);
@@ -234,6 +251,7 @@ export class GameHUD extends Phaser.Scene {
 
     this.timeText?.destroy();
     this.roomText?.destroy();
+    this.coinText?.destroy();
     this.hpBarBg?.destroy();
     this.hpBarFill?.destroy();
     this.weaponText?.destroy();
@@ -243,6 +261,7 @@ export class GameHUD extends Phaser.Scene {
     this.splitsRows = [];
     this.timeText = undefined;
     this.roomText = undefined;
+    this.coinText = undefined;
     this.hpBarBg = undefined;
     this.hpBarFill = undefined;
     this.weaponText = undefined;

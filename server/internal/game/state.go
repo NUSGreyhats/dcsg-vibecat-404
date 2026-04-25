@@ -91,6 +91,15 @@ type PlayerState struct {
 	DamageMultUntil time.Time
 	DamageMult      float32
 	ShieldUntil     time.Time
+
+	// Shop traits — permanent stackable buffs purchased from features/shop.md.
+	// Reset on death / new run. Effective multipliers and caps are derived at
+	// read time, never cached on this struct.
+	Coins          int32
+	SpeedStacks    uint8
+	FireRateStacks uint8
+	DamageStacks   uint8
+	AmmoStacks     uint8
 }
 
 func NewPlayerState() *PlayerState {
@@ -143,6 +152,9 @@ type PickupState struct {
 	Type     uint8
 	X, Y     float32
 	Consumed bool
+	// Despawn deadline. Zero value means "never expires" (room-templated
+	// pickups). Coins set this 30s after spawn — see features/shop.md.
+	ExpiresAt time.Time
 }
 
 type DoorState struct {
@@ -164,6 +176,21 @@ type RoomState struct {
 	KillLog        []KillRecord
 	// Allocation counter for projectile IDs within the room.
 	NextProjID uint32
+	// Allocation counter for runtime-spawned entity IDs (e.g. coin drops).
+	// Starts above the templated entity-ID range so it never collides with
+	// pickups/enemies authored into the room.
+	nextEntityID uint32
+}
+
+// NextEntityID returns a fresh uint32 for runtime-spawned entities (coin
+// drops, etc.). Counters are room-local; collisions across rooms are fine
+// because the client wipes its entity maps on every ROOM_LOAD.
+func (r *RoomState) NextEntityID() uint32 {
+	if r.nextEntityID == 0 {
+		r.nextEntityID = 1_000_000
+	}
+	r.nextEntityID++
+	return r.nextEntityID
 }
 
 func NewRoomState(idx uint8) *RoomState {

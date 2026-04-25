@@ -258,6 +258,20 @@ func (e *Engine) stepTick(now time.Time) {
 		CheckAllEnemiesDead(e.room)
 	}
 
+	// Expire pickups whose ExpiresAt has passed (coin drops). Emit
+	// S2C_ENTITY_DIED for each one so the client tears down the sprite
+	// — coins live in the same registry as enemies/pickups, and the
+	// entity_died channel already carries pickup despawns.
+	for id, pk := range e.room.Pickups {
+		if pk.Consumed || pk.ExpiresAt.IsZero() {
+			continue
+		}
+		if now.After(pk.ExpiresAt) {
+			pk.Consumed = true
+			e.send(protocol.S2CEntityDied, protocol.EntityDiedData{EntityID: id})
+		}
+	}
+
 	for _, doorID := range UnlockDoorsIfClear(e.room) {
 		e.send(protocol.S2CDoorUnlocked, protocol.DoorUnlockedData{DoorID: doorID})
 	}
@@ -333,7 +347,7 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 		if err := json.Unmarshal(env.Data, &pkt); err != nil {
 			return
 		}
-		if consumed := HandleInteract(e.player, e.room, pkt.TargetID, now); consumed != nil {
+		if consumed := HandleInteract(e.player, e.room, pkt.TargetID, pkt.ClaimedType, now); consumed != nil {
 			e.send(protocol.S2CEntityDied, protocol.EntityDiedData{EntityID: pkt.TargetID})
 		}
 	case protocol.C2SEnterDoor:
@@ -344,6 +358,12 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 		e.tryEnterDoor(pkt.DoorID, now)
 	case protocol.C2SUseItem:
 		e.dispatchUseItem(env.Data, now)
+	case protocol.C2SShopPurchase:
+		var pkt protocol.ShopPurchasePacket
+		if err := json.Unmarshal(env.Data, &pkt); err != nil {
+			return
+		}
+		HandleShopPurchase(e.player, pkt.ItemID)
 	}
 }
 
@@ -410,10 +430,7 @@ func (e *Engine) transitionToRoom(nextRoom uint8, now time.Time) {
 }
 
 func (e *Engine) advancePlayer(dt float32) {
-	speed := PlayerSpeed
-	if e.player.SpeedMult > 0 && time.Now().Before(e.player.SpeedMultUntil) {
-		speed *= e.player.SpeedMult
-	}
+	speed := PlayerSpeed * EffectiveSpeedMult(e.player, time.Now())
 
 	const hw float32 = 10 // player half-width used for wall collision
 	const hh float32 = 10
@@ -533,6 +550,19 @@ func (e *Engine) sendState(now time.Time) {
 			State:    uint8(en.AIState),
 		})
 	}
+	pickups := make([]protocol.PickupSpawn, 0, len(e.room.Pickups))
+	for _, pk := range e.room.Pickups {
+		if pk.Consumed {
+			continue
+		}
+		pickups = append(pickups, protocol.PickupSpawn{
+			EntityID: pk.EntityID,
+			Type:     pk.Type,
+			X:        pk.X,
+			Y:        pk.Y,
+		})
+	}
+
 	projs := make([]protocol.ProjSnapshot, 0, len(e.room.Projectiles))
 	for _, pr := range e.room.Projectiles {
 		projs = append(projs, protocol.ProjSnapshot{
@@ -546,15 +576,21 @@ func (e *Engine) sendState(now time.Time) {
 	data := protocol.StateData{
 		ElapsedMs: e.run.ElapsedMs,
 		Player: protocol.PlayerSnapshot{
-			X:         e.player.X,
-			Y:         e.player.Y,
-			HP:        e.player.HP,
-			WeaponID:  e.player.CurrentWeapon,
-			Ammo:      e.player.WeaponAmmo[e.player.CurrentWeapon],
-			Inventory: append([]string(nil), e.player.Inventory...),
+			X:              e.player.X,
+			Y:              e.player.Y,
+			HP:             e.player.HP,
+			WeaponID:       e.player.CurrentWeapon,
+			Ammo:           e.player.WeaponAmmo[e.player.CurrentWeapon],
+			Inventory:      append([]string(nil), e.player.Inventory...),
+			Coins:          e.player.Coins,
+			SpeedStacks:    e.player.SpeedStacks,
+			FireRateStacks: e.player.FireRateStacks,
+			DamageStacks:   e.player.DamageStacks,
+			AmmoStacks:     e.player.AmmoStacks,
 		},
 		Entities:    entities,
 		Projectiles: projs,
+		Pickups:     pickups,
 	}
 	e.send(protocol.S2CState, data)
 }

@@ -6,6 +6,7 @@ import { MainMenu } from "./scenes/MainMenu";
 import { Game as MainGame } from "./scenes/Game";
 import { GameHUD } from "./scenes/GameHUD";
 import { InventoryMenu } from "./scenes/InventoryMenu";
+import { ShopMenu } from "./scenes/ShopMenu";
 import { PauseMenu } from "./scenes/PauseMenu";
 import { WinScreen } from "./scenes/WinScreen";
 import { hex, CANVAS_BG } from "./ui/tokens";
@@ -37,6 +38,7 @@ export function startGame(parentId: string): Phaser.Game {
       MainGame,
       GameHUD,
       InventoryMenu,
+      ShopMenu,
       PauseMenu,
       WinScreen,
     ],

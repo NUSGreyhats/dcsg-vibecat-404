@@ -1,0 +1,64 @@
+package game
+
+// ShopOffer is one row in the static shop catalog. Dispatch is by integer
+// ID, *not* string name — this deliberately keeps the shop path off the
+// AllowedItems string-keyed pipeline that historically hosted BUG-09/10.
+// See features/shop.md.
+type ShopOffer struct {
+	ID   uint8
+	Name string
+	Cost int32
+}
+
+// Shop item IDs. Stable wire constants — the client mirrors these.
+const (
+	ShopItemAmmo     uint8 = 1
+	ShopItemSpeed    uint8 = 2
+	ShopItemFireRate uint8 = 3
+	ShopItemDamage   uint8 = 4
+)
+
+// ShopCatalog is the fixed offer list. Tunable but not hot-reloaded —
+// server and client mirror it at startup.
+var ShopCatalog = []ShopOffer{
+	{ID: ShopItemAmmo, Name: "ammo", Cost: 5},
+	{ID: ShopItemSpeed, Name: "speed", Cost: 5},
+	{ID: ShopItemFireRate, Name: "fire_rate", Cost: 5},
+	{ID: ShopItemDamage, Name: "damage", Cost: 5},
+}
+
+// HandleShopPurchase is the C2S_SHOP_PURCHASE handler. Validates the item
+// ID, debits coins, and increments the matching trait stack. The `ammo`
+// case also refills every non-unlimited weapon to its post-stack cap.
+func HandleShopPurchase(p *PlayerState, itemID uint8) bool {
+	if itemID == 0 || int(itemID) > len(ShopCatalog) {
+		return false
+	}
+	offer := ShopCatalog[itemID-1]
+	if p.Coins < offer.Cost {
+		return false
+	}
+	p.Coins -= offer.Cost
+
+	switch offer.ID {
+	case ShopItemAmmo:
+		p.AmmoStacks++
+		for w, spec := range WeaponSpecs {
+			if spec.AmmoMax >= 9999 {
+				continue
+			}
+			p.WeaponAmmo[w] = EffectiveAmmoMax(spec, p)
+		}
+	case ShopItemSpeed:
+		p.SpeedStacks++
+	case ShopItemFireRate:
+		p.FireRateStacks++
+	case ShopItemDamage:
+		p.DamageStacks++
+	default:
+		// Unknown ID after bounds-check — refund.
+		p.Coins += offer.Cost
+		return false
+	}
+	return true
+}
