@@ -128,7 +128,11 @@ func main() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(web.SpectateHTML)
 	})
-	mux.HandleFunc("/api/live", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/api/live", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		// Verbatim cache — the game-server's spectator.Summary JSON shape
 		// is the contract here. If the cache hasn't populated yet (or the
 		// game server is down), this is the empty slice.
