@@ -4,7 +4,6 @@ import "net/http"
 
 // serveRegisterPage serves the minimal registration HTML per
 // docs/specs/foundations/03-identity-auth.md § Player-facing experience.
-// This lives on the game server until the separate lobby service exists.
 func serveRegisterPage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

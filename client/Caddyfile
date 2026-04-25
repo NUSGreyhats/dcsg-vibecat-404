@@ -11,15 +11,22 @@
         reverse_proxy game-server:8080
     }
 
-    @api path /api/*
-    handle @api {
-        reverse_proxy game-server:8080
+    # Identity endpoints live on the lobby (Phase 1 of the lobby split,
+    # see issue #21). The /register HTML page is served by the lobby too.
+    @lobby_identity path /api/register /api/login /api/verify /api/health
+    handle @lobby_identity {
+        reverse_proxy lobby:3001
     }
 
-    # Dev stand-in for the lobby registration page (see
-    # docs/specs/foundations/03-identity-auth.md § Implementation status).
     @register path /register
     handle @register {
+        reverse_proxy lobby:3001
+    }
+
+    # All other /api/* (notably /api/leaderboard until Phase 2 #22) still
+    # hits the game server.
+    @api path /api/*
+    handle @api {
         reverse_proxy game-server:8080
     }
 
