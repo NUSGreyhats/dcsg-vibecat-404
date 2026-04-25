@@ -78,9 +78,11 @@ func TopRuns(db *sql.DB, n int) ([]protocol.LeaderboardEntry, error) {
 		return nil, nil
 	}
 	rows, err := db.Query(
-		`SELECT replay_id, display_name, total_ms, seed, splits_json
-           FROM completed_runs
-          ORDER BY total_ms ASC
+		`SELECT cr.replay_id, cr.display_name, cr.total_ms, cr.seed, cr.splits_json
+           FROM completed_runs cr
+      LEFT JOIN flagged_runs fr ON fr.replay_id = cr.replay_id
+          WHERE fr.replay_id IS NULL
+          ORDER BY cr.total_ms ASC
           LIMIT ?`,
 		n,
 	)

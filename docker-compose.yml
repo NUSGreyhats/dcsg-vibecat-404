@@ -34,6 +34,11 @@ services:
       # (set in server/internal/leaderboard/db.go) lets both processes
       # share the file safely.
       GAME_DB: "/data/game.db"
+      # Admin panel credentials (Phase 4 #24). Empty values disable
+      # the panel — set both in the deployment's secret store. The
+      # hash is bcrypt; see scripts/genhash.go (or `htpasswd -bnBC 10`).
+      ADMIN_USER: "${ADMIN_USER:-}"
+      ADMIN_PASS_HASH: "${ADMIN_PASS_HASH:-}"
     volumes:
       - game-data:/data
     # Loopback only — public traffic enters via the Caddy client container.

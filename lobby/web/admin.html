@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VIBECAT 404 — Admin</title>
+<style>
+  :root {
+    --midnight: #0d1222;
+    --deep-navy: #1a2338;
+    --navy: #2b3d5c;
+    --mid-blue: #5c8fbf;
+    --bone: #f5f0e6;
+    --muted: #8a8679;
+    --accent: #ffdd33;
+    --danger: #ff5c5c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--midnight);
+    color: var(--bone);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 14px;
+    padding: 24px;
+  }
+  header {
+    max-width: 960px; margin: 0 auto 16px;
+    display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  }
+  h1 { margin: 0; font-size: 22px; letter-spacing: 1px; }
+  nav a { color: var(--mid-blue); text-decoration: none; font-size: 13px; }
+  nav a:hover { color: var(--accent); }
+  main { max-width: 960px; margin: 0 auto; }
+  section {
+    background: var(--deep-navy); border: 2px solid var(--mid-blue);
+    padding: 16px; margin-bottom: 16px;
+  }
+  section h2 { margin: 0 0 12px; font-size: 16px; color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--navy); }
+  th { color: var(--muted); font-weight: normal; font-size: 11px; text-transform: uppercase; }
+  td.flagged { color: var(--danger); }
+  td.actions button {
+    background: transparent; color: var(--mid-blue); border: 1px solid var(--mid-blue);
+    cursor: pointer; padding: 2px 8px; margin: 0 2px; font-family: inherit; font-size: 11px;
+  }
+  td.actions button:hover { color: var(--accent); border-color: var(--accent); }
+  td.actions button.del { color: var(--danger); border-color: var(--danger); }
+  td.actions button.del:hover { background: var(--danger); color: var(--midnight); }
+  .meta { margin-top: 12px; color: var(--muted); font-size: 12px; text-align: right; }
+  a.export {
+    display: inline-block; padding: 8px 16px; background: var(--navy); color: var(--bone);
+    text-decoration: none; border: 1px solid var(--mid-blue);
+  }
+  a.export:hover { color: var(--accent); border-color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Admin</h1>
+  <nav>
+    <a href="/leaderboard">→ Public leaderboard</a>
+    &nbsp;·&nbsp;
+    <a href="/source/">→ Source</a>
+  </nav>
+</header>
+<main>
+  <section>
+    <h2>Leaderboard moderation</h2>
+    <table id="board">
+      <thead>
+        <tr><th>Rank</th><th>Name</th><th>Time</th><th>Replay</th><th>Submitted</th><th></th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="meta" id="meta"></div>
+  </section>
+
+  <section>
+    <h2>Winner export</h2>
+    <p>CSV with replay_id, player_id, display_name, contact, total_ms, submitted_at. Flagged runs are excluded.</p>
+    <a class="export" href="/admin/winners.csv" download>Download winners.csv</a>
+  </section>
+</main>
+
+<script>
+  const rowsEl = document.getElementById('rows');
+  const metaEl = document.getElementById('meta');
+
+  function fmtMs(ms) {
+    const t = Math.max(0, ms | 0);
+    const m = Math.floor(t / 60000);
+    const s = Math.floor((t % 60000) / 1000);
+    const cs = Math.floor((t % 1000) / 10);
+    return m + ':' + String(s).padStart(2, '0') + '.' + String(cs).padStart(2, '0');
+  }
+  function escape(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[c]);
+  }
+  function shortId(id) { return String(id).slice(0, 8); }
+
+  async function load() {
+    try {
+      const res = await fetch('/admin/leaderboard.json');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const entries = await res.json();
+      rowsEl.innerHTML = '';
+      entries.forEach((e, i) => {
+        const tr = document.createElement('tr');
+        const nameCell = e.flagged
+          ? '<td class="flagged">' + escape(e.display_name) + ' (flagged)</td>'
+          : '<td>' + escape(e.display_name) + '</td>';
+        const flagBtn = e.flagged
+          ? '<button data-action="unflag" data-id="' + escape(e.replay_id) + '">unflag</button>'
+          : '<button data-action="flag" data-id="' + escape(e.replay_id) + '">flag</button>';
+        tr.innerHTML = (
+          '<td>' + (i + 1) + '</td>' +
+          nameCell +
+          '<td>' + fmtMs(e.total_ms) + '</td>' +
+          '<td><a href="/api/replay/' + encodeURIComponent(e.replay_id) +
+            '" download style="color:var(--mid-blue)">' + shortId(e.replay_id) + '</a></td>' +
+          '<td>' + escape(e.submitted_at) + '</td>' +
+          '<td class="actions">' + flagBtn +
+            '<button class="del" data-action="delete" data-id="' + escape(e.replay_id) + '">delete</button></td>'
+        );
+        rowsEl.appendChild(tr);
+      });
+      metaEl.textContent = entries.length + ' runs · refreshed ' + new Date().toLocaleTimeString();
+    } catch (err) {
+      metaEl.textContent = 'Error: ' + err.message;
+    }
+  }
+
+  rowsEl.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('button');
+    if (!btn) return;
+    const action = btn.dataset.action;
+    const id = btn.dataset.id;
+    if (action === 'delete' && !confirm('Hard-delete this run? Replay file will be gone.')) {
+      return;
+    }
+    btn.disabled = true;
+    try {
+      let res;
+      if (action === 'flag' || action === 'unflag') {
+        res = await fetch('/admin/leaderboard/' + action, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ replay_id: id }),
+        });
+      } else if (action === 'delete') {
+        res = await fetch('/admin/leaderboard/' + encodeURIComponent(id), { method: 'DELETE' });
+      }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      load();
+    } catch (err) {
+      alert('Action failed: ' + err.message);
+      btn.disabled = false;
+    }
+  });
+
+  load();
+</script>
+</body>
+</html>
