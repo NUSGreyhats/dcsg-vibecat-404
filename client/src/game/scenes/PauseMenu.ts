@@ -1,4 +1,6 @@
 import Phaser from "phaser";
+import { resetSync } from "../net/runContext";
+import { clearCachedPlayerId, isHudVisible, setHudVisible } from "../prefs";
 import {
   ACCENT_PRIMARY,
   DEPTH_HUD_BG,
@@ -19,10 +21,10 @@ import {
 
 type Page = "main" | "controls";
 
-const MAIN_ITEMS = [
-  { label: "Resume", key: "resume" },
-  { label: "Controls", key: "controls" },
-] as const;
+type MainItem = {
+  key: "resume" | "toggleHud" | "controls" | "restart" | "logout";
+  label(): string;
+};
 
 // Single source of truth for the controls page. Mirrors the bindings
 // in scenes/utils/Controls.ts — keep in sync if a key is added there.
@@ -37,12 +39,23 @@ const CONTROL_BINDINGS: ReadonlyArray<readonly [string, string]> = [
 ];
 
 const PANEL_WIDTH = 480;
-const PANEL_HEIGHT = 360;
+const PANEL_HEIGHT = 440;
+// Phaser camera post-FX blur tunings. quality=0 is low-pass (cheap and
+// the only one that visibly works on most platforms); the (x, y) values
+// are the blur radius in px.
+const BLUR_QUALITY = 0;
+const BLUR_X = 3;
+const BLUR_Y = 3;
+const BLUR_STRENGTH = 1;
+const BLUR_STEPS = 4;
+const BLURRED_SCENES = ["Game", "GameHUD"] as const;
 
 /**
  * Modal pause overlay. Pauses the Game scene while open; closes via Esc
  * (or the "Resume" entry) and resumes Game. Hosts a small page stack —
- * the "Controls" entry pushes a controls page that Esc pops.
+ * the "Controls" entry pushes a controls page that Esc pops. While open
+ * the Game + GameHUD cameras get a Phaser post-FX blur so the menu
+ * (drawn on a separate scene/camera) stays sharp on top.
  */
 export class PauseMenu extends Phaser.Scene {
   private page: Page = "main";
@@ -50,12 +63,17 @@ export class PauseMenu extends Phaser.Scene {
   private title?: Phaser.GameObjects.Text;
   private hint?: Phaser.GameObjects.Text;
   private body: Phaser.GameObjects.Text[] = [];
+  private items: MainItem[] = [];
   private keys?: {
     up: Phaser.Input.Keyboard.Key;
     down: Phaser.Input.Keyboard.Key;
     enter: Phaser.Input.Keyboard.Key;
     esc: Phaser.Input.Keyboard.Key;
   };
+  private appliedBlurs: {
+    cam: Phaser.Cameras.Scene2D.Camera;
+    fx: Phaser.FX.Blur;
+  }[] = [];
 
   constructor() {
     super({ key: "PauseMenu" });
@@ -64,6 +82,19 @@ export class PauseMenu extends Phaser.Scene {
   create(): void {
     const cx = this.scale.width / 2;
     const cy = this.scale.height / 2;
+
+    this.applyCanvasBlur();
+
+    this.items = [
+      { key: "resume", label: () => "Resume" },
+      {
+        key: "toggleHud",
+        label: () => (isHudVisible() ? "Hide HUD" : "Show HUD"),
+      },
+      { key: "controls", label: () => "Controls" },
+      { key: "restart", label: () => "Restart Run" },
+      { key: "logout", label: () => "Log Out" },
+    ];
 
     // Dim layer over the paused game.
     this.add
@@ -106,7 +137,7 @@ export class PauseMenu extends Phaser.Scene {
 
     if (this.page === "main") {
       this.title = this.add
-        .text(cx, cy - 150, "Paused", {
+        .text(cx, cy - 160, "Paused", {
           fontFamily: FONT_FAMILY,
           fontSize: FONT_SIZE_HEADING,
           color: hex(ACCENT_PRIMARY),
@@ -117,7 +148,7 @@ export class PauseMenu extends Phaser.Scene {
       this.hint = this.add
         .text(
           cx,
-          cy + 150,
+          cy + 160,
           "[Up/Down] select   [Enter] confirm   [Esc] resume",
           {
             fontFamily: FONT_FAMILY,
@@ -128,10 +159,10 @@ export class PauseMenu extends Phaser.Scene {
         .setOrigin(0.5)
         .setDepth(DEPTH_MODAL_TEXT);
 
-      const startY = cy - 50;
-      for (let i = 0; i < MAIN_ITEMS.length; i++) {
+      const startY = cy - 80;
+      for (let i = 0; i < this.items.length; i++) {
         const isSel = i === this.selected;
-        const label = `${isSel ? "> " : "  "}${MAIN_ITEMS[i].label}`;
+        const label = `${isSel ? "> " : "  "}${this.items[i].label()}`;
         const t = this.add
           .text(cx, startY + i * 36, label, {
             fontFamily: FONT_FAMILY,
@@ -144,7 +175,7 @@ export class PauseMenu extends Phaser.Scene {
       }
     } else {
       this.title = this.add
-        .text(cx, cy - 150, "Controls", {
+        .text(cx, cy - 160, "Controls", {
           fontFamily: FONT_FAMILY,
           fontSize: FONT_SIZE_HEADING,
           color: hex(ACCENT_PRIMARY),
@@ -153,7 +184,7 @@ export class PauseMenu extends Phaser.Scene {
         .setDepth(DEPTH_MODAL_TEXT);
 
       this.hint = this.add
-        .text(cx, cy + 150, "[Esc] back", {
+        .text(cx, cy + 160, "[Esc] back", {
           fontFamily: FONT_FAMILY,
           fontSize: FONT_SIZE_CAPTION,
           color: hex(TEXT_MUTED),
@@ -163,7 +194,7 @@ export class PauseMenu extends Phaser.Scene {
 
       const labelX = cx - 160;
       const valueX = cx + 160;
-      const startY = cy - 100;
+      const startY = cy - 110;
       const rowGap = 26;
       for (let i = 0; i < CONTROL_BINDINGS.length; i++) {
         const [name, key] = CONTROL_BINDINGS[i];
@@ -191,18 +222,36 @@ export class PauseMenu extends Phaser.Scene {
   private move(delta: number): void {
     if (this.page !== "main") return;
     this.selected =
-      (this.selected + delta + MAIN_ITEMS.length) % MAIN_ITEMS.length;
+      (this.selected + delta + this.items.length) % this.items.length;
     this.renderPage();
   }
 
   private activate(): void {
     if (this.page !== "main") return;
-    const item = MAIN_ITEMS[this.selected];
-    if (item.key === "resume") {
-      this.close();
-    } else if (item.key === "controls") {
-      this.page = "controls";
-      this.renderPage();
+    const item = this.items[this.selected];
+    switch (item.key) {
+      case "resume":
+        this.close();
+        return;
+      case "toggleHud": {
+        const next = !isHudVisible();
+        setHudVisible(next);
+        // Tell the HUD scene live — it listens on the global game events bus.
+        this.game.events.emit("hudVisibilityChanged", next);
+        // Re-render so the menu label flips immediately.
+        this.renderPage();
+        return;
+      }
+      case "controls":
+        this.page = "controls";
+        this.renderPage();
+        return;
+      case "restart":
+        this.restart();
+        return;
+      case "logout":
+        this.logout();
+        return;
     }
   }
 
@@ -216,8 +265,53 @@ export class PauseMenu extends Phaser.Scene {
   }
 
   private close(): void {
+    this.removeCanvasBlur();
     this.scene.resume("Game");
     this.scene.stop();
+  }
+
+  private restart(): void {
+    // Mirror the WinScreen "Play Again" path: tear down the WS so the
+    // server-side run state is dropped, then return to MainMenu where the
+    // user re-auths and starts a fresh run. The blur is removed so the
+    // login form behind isn't smeared.
+    this.removeCanvasBlur();
+    resetSync();
+    this.scene.stop("Game");
+    this.scene.stop("GameHUD");
+    this.scene.stop();
+    this.scene.start("MainMenu");
+  }
+
+  private logout(): void {
+    // Same as restart, but also wipes the cached player_id so MainMenu
+    // shows the login form instead of auto-resuming the previous account.
+    clearCachedPlayerId();
+    this.restart();
+  }
+
+  private applyCanvasBlur(): void {
+    for (const key of BLURRED_SCENES) {
+      const target = this.scene.get(key);
+      const cam = target?.cameras?.main;
+      if (!cam || !cam.postFX) continue;
+      const fx = cam.postFX.addBlur(
+        BLUR_QUALITY,
+        BLUR_X,
+        BLUR_Y,
+        BLUR_STRENGTH,
+        0xffffff,
+        BLUR_STEPS,
+      );
+      this.appliedBlurs.push({ cam, fx });
+    }
+  }
+
+  private removeCanvasBlur(): void {
+    for (const { cam, fx } of this.appliedBlurs) {
+      cam.postFX?.remove(fx);
+    }
+    this.appliedBlurs = [];
   }
 
   private cleanup(): void {
@@ -235,6 +329,9 @@ export class PauseMenu extends Phaser.Scene {
       this.keys.esc.removeAllListeners();
       this.keys = undefined;
     }
+    // Defensive: a forced shutdown (e.g. scene.stop from elsewhere) should
+    // never leave the canvas blurred behind the next scene.
+    this.removeCanvasBlur();
   }
 }
 
