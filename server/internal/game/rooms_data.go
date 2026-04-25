@@ -24,12 +24,23 @@ var RoomTemplates = [12]*RoomTemplate{
 	nil, // index 0 unused
 
 	// ---- Room 1 — tutorial grunts ----
+	//
+	// 3 initial mobs: WaveTriggers = [0.66, 0.33] → floor(3*0.66)=1 (wave 0
+	// kept), floor(3*0.33)=0 (wave 1 skipped). A single wave teaches the
+	// reinforcement mechanic.
 	{
 		TilemapID: "room-1",
 		Enemies: []EnemySpawnDef{
 			{EntityID: 101, Type: EnemyGrunt, X: 400, Y: 300},
 			{EntityID: 102, Type: EnemyGrunt, X: 800, Y: 300},
 			{EntityID: 103, Type: EnemyGrunt, X: 600, Y: 420},
+		},
+		Waves: []WaveDef{
+			// Arms at ≤1 living. Two grunts from the sides.
+			{Mobs: []WaveMobDef{
+				{Type: EnemyGrunt, X: 200, Y: 500},
+				{Type: EnemyGrunt, X: 1080, Y: 500},
+			}},
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 151, Type: PickupHealthPotion, X: 300, Y: 600},
@@ -41,6 +52,8 @@ var RoomTemplates = [12]*RoomTemplate{
 	},
 
 	// ---- Room 2 — introduce runners ----
+	//
+	// 4 initial mobs: triggers at ≤2 and ≤1 living.
 	{
 		TilemapID: "room-2",
 		Enemies: []EnemySpawnDef{
@@ -48,6 +61,16 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 202, Type: EnemyGrunt, X: 960, Y: 260},
 			{EntityID: 203, Type: EnemyRunner, X: 640, Y: 180},
 			{EntityID: 204, Type: EnemyRunner, X: 640, Y: 450},
+		},
+		Waves: []WaveDef{
+			{Mobs: []WaveMobDef{
+				{Type: EnemyRunner, X: 240, Y: 500},
+				{Type: EnemyRunner, X: 1040, Y: 500},
+			}},
+			{Mobs: []WaveMobDef{
+				{Type: EnemyGrunt, X: 640, Y: 560},
+				{Type: EnemyGrunt, X: 640, Y: 220},
+			}},
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 251, Type: PickupHealthPotion, X: 180, Y: 620},
@@ -59,6 +82,8 @@ var RoomTemplates = [12]*RoomTemplate{
 	},
 
 	// ---- Room 3 — first tank ----
+	//
+	// 4 initial mobs: triggers at ≤2 and ≤1.
 	{
 		TilemapID: "room-3",
 		Enemies: []EnemySpawnDef{
@@ -66,6 +91,15 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 302, Type: EnemyRunner, X: 900, Y: 240},
 			{EntityID: 303, Type: EnemyTank, X: 640, Y: 360},
 			{EntityID: 304, Type: EnemyGrunt, X: 480, Y: 460},
+		},
+		Waves: []WaveDef{
+			{Mobs: []WaveMobDef{
+				{Type: EnemyRunner, X: 260, Y: 440},
+				{Type: EnemyRunner, X: 1020, Y: 440},
+			}},
+			{Mobs: []WaveMobDef{
+				{Type: EnemyTank, X: 640, Y: 480},
+			}},
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 351, Type: PickupAmmoCrate, X: 200, Y: 640},
@@ -77,6 +111,8 @@ var RoomTemplates = [12]*RoomTemplate{
 	},
 
 	// ---- Room 4 — first kamikaze ----
+	//
+	// 5 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-4",
 		Enemies: []EnemySpawnDef{
@@ -85,6 +121,17 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 403, Type: EnemyRunner, X: 640, Y: 200},
 			{EntityID: 404, Type: EnemyKamikaze, X: 400, Y: 360},
 			{EntityID: 405, Type: EnemyKamikaze, X: 880, Y: 360},
+		},
+		Waves: []WaveDef{
+			{Mobs: []WaveMobDef{
+				{Type: EnemyKamikaze, X: 240, Y: 500},
+				{Type: EnemyKamikaze, X: 1040, Y: 500},
+			}},
+			{Mobs: []WaveMobDef{
+				{Type: EnemyGrunt, X: 320, Y: 180},
+				{Type: EnemyGrunt, X: 960, Y: 180},
+				{Type: EnemyRunner, X: 640, Y: 540},
+			}},
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 451, Type: PickupHealthPotion, X: 180, Y: 640},
@@ -96,6 +143,8 @@ var RoomTemplates = [12]*RoomTemplate{
 	},
 
 	// ---- Room 5 — mid-game pressure ----
+	//
+	// 5 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-5",
 		Enemies: []EnemySpawnDef{
@@ -104,6 +153,16 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 503, Type: EnemyTank, X: 640, Y: 320},
 			{EntityID: 504, Type: EnemyGrunt, X: 420, Y: 440},
 			{EntityID: 505, Type: EnemyGrunt, X: 860, Y: 440},
+		},
+		Waves: []WaveDef{
+			{Mobs: []WaveMobDef{
+				{Type: EnemyRunner, X: 200, Y: 500},
+				{Type: EnemyRunner, X: 1080, Y: 500},
+			}},
+			{Mobs: []WaveMobDef{
+				{Type: EnemyTank, X: 640, Y: 500},
+				{Type: EnemyGrunt, X: 640, Y: 200},
+			}},
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 551, Type: PickupAmmoCrate, X: 200, Y: 640},
@@ -115,6 +174,8 @@ var RoomTemplates = [12]*RoomTemplate{
 	},
 
 	// ---- Room 6 — tank pair ----
+	//
+	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-6",
 		Enemies: []EnemySpawnDef{
@@ -124,6 +185,17 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 604, Type: EnemyGrunt, X: 280, Y: 440},
 			{EntityID: 605, Type: EnemyGrunt, X: 1000, Y: 440},
 			{EntityID: 606, Type: EnemyKamikaze, X: 640, Y: 500},
+		},
+		Waves: []WaveDef{
+			{Mobs: []WaveMobDef{
+				{Type: EnemyKamikaze, X: 320, Y: 540},
+				{Type: EnemyKamikaze, X: 960, Y: 540},
+			}},
+			{Mobs: []WaveMobDef{
+				{Type: EnemyTank, X: 640, Y: 540},
+				{Type: EnemyRunner, X: 260, Y: 180},
+				{Type: EnemyRunner, X: 1020, Y: 180},
+			}},
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 651, Type: PickupHealthPotion, X: 220, Y: 640},
@@ -135,6 +207,8 @@ var RoomTemplates = [12]*RoomTemplate{
 	},
 
 	// ---- Room 7 — runner swarm ----
+	//
+	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-7",
 		Enemies: []EnemySpawnDef{
@@ -144,6 +218,17 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 704, Type: EnemyRunner, X: 1040, Y: 220},
 			{EntityID: 705, Type: EnemyGrunt, X: 640, Y: 360},
 			{EntityID: 706, Type: EnemyKamikaze, X: 640, Y: 480},
+		},
+		Waves: []WaveDef{
+			{Mobs: []WaveMobDef{
+				{Type: EnemyRunner, X: 320, Y: 540},
+				{Type: EnemyRunner, X: 960, Y: 540},
+			}},
+			{Mobs: []WaveMobDef{
+				{Type: EnemyTank, X: 640, Y: 540},
+				{Type: EnemyRunner, X: 240, Y: 400},
+				{Type: EnemyRunner, X: 1040, Y: 400},
+			}},
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 751, Type: PickupHealthPotion, X: 200, Y: 640},
@@ -155,6 +240,8 @@ var RoomTemplates = [12]*RoomTemplate{
 	},
 
 	// ---- Room 8 — mixed late game ----
+	//
+	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-8",
 		Enemies: []EnemySpawnDef{
@@ -164,6 +251,18 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 804, Type: EnemyRunner, X: 420, Y: 400},
 			{EntityID: 805, Type: EnemyRunner, X: 860, Y: 400},
 			{EntityID: 806, Type: EnemyKamikaze, X: 640, Y: 520},
+		},
+		Waves: []WaveDef{
+			{Mobs: []WaveMobDef{
+				{Type: EnemyRunner, X: 220, Y: 500},
+				{Type: EnemyRunner, X: 1060, Y: 500},
+				{Type: EnemyKamikaze, X: 640, Y: 540},
+			}},
+			{Mobs: []WaveMobDef{
+				{Type: EnemyTank, X: 640, Y: 180},
+				{Type: EnemyGrunt, X: 320, Y: 540},
+				{Type: EnemyGrunt, X: 960, Y: 540},
+			}},
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 851, Type: PickupAmmoCrate, X: 200, Y: 640},
@@ -175,6 +274,8 @@ var RoomTemplates = [12]*RoomTemplate{
 	},
 
 	// ---- Room 9 — kamikaze gauntlet ----
+	//
+	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-9",
 		Enemies: []EnemySpawnDef{
@@ -184,6 +285,18 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 904, Type: EnemyTank, X: 420, Y: 360},
 			{EntityID: 905, Type: EnemyTank, X: 860, Y: 360},
 			{EntityID: 906, Type: EnemyGrunt, X: 640, Y: 480},
+		},
+		Waves: []WaveDef{
+			{Mobs: []WaveMobDef{
+				{Type: EnemyKamikaze, X: 200, Y: 520},
+				{Type: EnemyKamikaze, X: 1080, Y: 520},
+				{Type: EnemyRunner, X: 640, Y: 540},
+			}},
+			{Mobs: []WaveMobDef{
+				{Type: EnemyTank, X: 640, Y: 540},
+				{Type: EnemyKamikaze, X: 240, Y: 180},
+				{Type: EnemyKamikaze, X: 1040, Y: 180},
+			}},
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 951, Type: PickupHealthPotion, X: 200, Y: 640},
@@ -195,6 +308,8 @@ var RoomTemplates = [12]*RoomTemplate{
 	},
 
 	// ---- Room 10 — pre-boss heavy ----
+	//
+	// 8 initial mobs: triggers at ≤5 and ≤2.
 	{
 		TilemapID: "room-10",
 		Enemies: []EnemySpawnDef{
@@ -207,6 +322,20 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 1007, Type: EnemyKamikaze, X: 420, Y: 500},
 			{EntityID: 1008, Type: EnemyKamikaze, X: 860, Y: 500},
 		},
+		Waves: []WaveDef{
+			{Mobs: []WaveMobDef{
+				{Type: EnemyTank, X: 640, Y: 560},
+				{Type: EnemyRunner, X: 240, Y: 540},
+				{Type: EnemyRunner, X: 1040, Y: 540},
+				{Type: EnemyKamikaze, X: 640, Y: 200},
+			}},
+			{Mobs: []WaveMobDef{
+				{Type: EnemyTank, X: 320, Y: 200},
+				{Type: EnemyTank, X: 960, Y: 200},
+				{Type: EnemyGrunt, X: 640, Y: 560},
+				{Type: EnemyGrunt, X: 640, Y: 180},
+			}},
+		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 1051, Type: PickupAmmoCrate, X: 200, Y: 640},
 			{EntityID: 1052, Type: PickupAmmoCrate, X: 1080, Y: 640},
@@ -218,15 +347,74 @@ var RoomTemplates = [12]*RoomTemplate{
 	},
 
 	// ---- Room 11 — boss room. No doors; run ends when boss dies. ----
+	//
+	// 7 initial mobs: boss at center + a 6-grunt ring at radius 140. Triggers
+	// at floor(7*0.66)=4 and floor(7*0.33)=2 living, so both waves keep:
+	//   Wave 1 (≤4 living): 10 runners at radius ~300 — mid-distance closers.
+	//   Wave 2 (≤2 living): 20 kamikazes hugging the perimeter — punishes
+	//                       wall-camping; forces the player back toward the
+	//                       boss for the kill.
+	// Tier-9+ scaling (×1.6 HP, ×1.2 speed) compounds with melee-damage
+	// archetype values — boss feels like a boss; a single bad dodge in
+	// wave 2 can chunk half the player's HP.
 	{
 		TilemapID: "room-11",
 		Enemies: []EnemySpawnDef{
-			{EntityID: 1101, Type: EnemyBoss, X: 640, Y: 280},
+			{EntityID: 1101, Type: EnemyBoss, X: 640, Y: 384},
+			// 6-grunt ring around the boss at radius 140.
+			{EntityID: 1102, Type: EnemyGrunt, X: 780, Y: 384},
+			{EntityID: 1103, Type: EnemyGrunt, X: 710, Y: 505},
+			{EntityID: 1104, Type: EnemyGrunt, X: 570, Y: 505},
+			{EntityID: 1105, Type: EnemyGrunt, X: 500, Y: 384},
+			{EntityID: 1106, Type: EnemyGrunt, X: 570, Y: 263},
+			{EntityID: 1107, Type: EnemyGrunt, X: 710, Y: 263},
+		},
+		Waves: []WaveDef{
+			// Wave 1 — 10 runners at radius ~300, 36° spacing offset 18°
+			// so they don't line up with the inner ring.
+			{Mobs: []WaveMobDef{
+				{Type: EnemyRunner, X: 925, Y: 477},
+				{Type: EnemyRunner, X: 816, Y: 627},
+				{Type: EnemyRunner, X: 640, Y: 684},
+				{Type: EnemyRunner, X: 464, Y: 627},
+				{Type: EnemyRunner, X: 355, Y: 477},
+				{Type: EnemyRunner, X: 355, Y: 291},
+				{Type: EnemyRunner, X: 464, Y: 141},
+				{Type: EnemyRunner, X: 640, Y: 84},
+				{Type: EnemyRunner, X: 816, Y: 141},
+				{Type: EnemyRunner, X: 925, Y: 291},
+			}},
+			// Wave 2 — 20 kamikazes along the perimeter (7 top, 7 bottom,
+			// 3 left, 3 right).
+			{Mobs: []WaveMobDef{
+				{Type: EnemyKamikaze, X: 120, Y: 80},
+				{Type: EnemyKamikaze, X: 320, Y: 80},
+				{Type: EnemyKamikaze, X: 520, Y: 80},
+				{Type: EnemyKamikaze, X: 640, Y: 80},
+				{Type: EnemyKamikaze, X: 760, Y: 80},
+				{Type: EnemyKamikaze, X: 960, Y: 80},
+				{Type: EnemyKamikaze, X: 1160, Y: 80},
+				{Type: EnemyKamikaze, X: 120, Y: 688},
+				{Type: EnemyKamikaze, X: 320, Y: 688},
+				{Type: EnemyKamikaze, X: 520, Y: 688},
+				{Type: EnemyKamikaze, X: 640, Y: 688},
+				{Type: EnemyKamikaze, X: 760, Y: 688},
+				{Type: EnemyKamikaze, X: 960, Y: 688},
+				{Type: EnemyKamikaze, X: 1160, Y: 688},
+				{Type: EnemyKamikaze, X: 80, Y: 200},
+				{Type: EnemyKamikaze, X: 80, Y: 384},
+				{Type: EnemyKamikaze, X: 80, Y: 568},
+				{Type: EnemyKamikaze, X: 1200, Y: 200},
+				{Type: EnemyKamikaze, X: 1200, Y: 384},
+				{Type: EnemyKamikaze, X: 1200, Y: 568},
+			}},
 		},
 		Pickups: []PickupSpawnDef{
-			{EntityID: 1151, Type: PickupHealthPotion, X: 640, Y: 600},
-			{EntityID: 1152, Type: PickupAmmoCrate, X: 200, Y: 600},
-			{EntityID: 1153, Type: PickupAmmoCrate, X: 1080, Y: 600},
+			{EntityID: 1151, Type: PickupHealthPotion, X: 200, Y: 600},
+			{EntityID: 1152, Type: PickupHealthPotion, X: 1080, Y: 600},
+			{EntityID: 1153, Type: PickupAmmoCrate, X: 320, Y: 384},
+			{EntityID: 1154, Type: PickupAmmoCrate, X: 960, Y: 384},
+			{EntityID: 1155, Type: PickupAmmoCrate, X: 640, Y: 600},
 		},
 		Doors: nil,
 	},

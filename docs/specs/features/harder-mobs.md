@@ -2,11 +2,12 @@
 
 ## Purpose
 
-Three interlocking systems that raise the difficulty ceiling of room combat without breaking determinism:
+Four interlocking systems that raise the difficulty ceiling of room combat without breaking determinism:
 
 1. **Reinforcement waves** — template-declared mob groups that arm on a kill-count threshold and fire after a jittered delay.
 2. **Pack aggro** — when any mob takes damage, nearby non-aggro mobs flip to Aggro. Kills the "pick off the straggler" and stealth-pull strategies.
 3. **Bumped room populations** — selective increases in base populations on under-threatening rooms.
+4. **Per-room HP/Speed scaling** — late-game rooms multiply mob HP and movement speed by a tier factor. Same archetypes, more dangerous.
 
 All three compose with existing [mob AI](./mob-ai.md) and preserve the `(seed, InputLog)` replay invariant in [../foundations/07-determinism-seeding.md](../foundations/07-determinism-seeding.md). Waves extend the [BUG-01](./mob-ai.md#bug-01-mob-seed-optimization) seed-search surface (now includes arm-delay windows) without changing its core shape.
 
@@ -158,6 +159,29 @@ for each declared wave i in 0..N:
 ```
 
 Skipped waves consume nothing. Declaration order within a wave is the mob author's ordering in `WaveDef.anchors`. Wave mobs are **not** entity-ID ordered at RNG time because they don't have entity IDs yet — IDs are assigned at fire time.
+
+## Per-room scaling
+
+Mob HP and movement speed are multiplied by a per-room tier factor at
+instantiation time (applies to both initial-pop enemies and wave mobs):
+
+| Rooms | HP × | Speed × |
+| ----- | ---- | ------- |
+| 1–5   | 1.0  | 1.0     |
+| 6–8   | 1.3  | 1.1     |
+| 9–11  | 1.6  | 1.2     |
+
+Scaling is applied inside `InstantiateEnemy` based on `RoomState.RoomIndex`
+plus archetype baseline. **No RNG is consumed**, so the BUG-01 seed invariant
+and replay byte-stability are preserved. Archetype `AggroRange`, `Armor`, and
+`AttackCooldownMs` are **not** scaled — only HP and Speed.
+
+Base archetype Speed values were also bumped globally in the same change
+(grunt 80→95, runner 140→165, tank 50→60, kamikaze 120→145, boss 60→70). The
+tier scaling stacks on top.
+
+Changing the tier table or the archetype base speeds is a balance change
+only — no determinism cost — so playtest tuning is cheap.
 
 ## Pack aggro
 

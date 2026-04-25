@@ -13,6 +13,7 @@ import (
 type RoomTemplate struct {
 	TilemapID string
 	Enemies   []EnemySpawnDef
+	Waves     []WaveDef
 	Pickups   []PickupSpawnDef
 	Doors     []DoorDef
 }
@@ -22,6 +23,20 @@ type EnemySpawnDef struct {
 	EntityID uint32
 	Type     uint8
 	X, Y     float32
+}
+
+// WaveDef is a reinforcement wave — declaration-order in RoomTemplate.Waves
+// corresponds to the trigger slot, with WaveTriggers[slot] as the threshold
+// as a fraction of initial room population. See docs/specs/features/harder-mobs.md.
+type WaveDef struct {
+	Mobs []WaveMobDef
+}
+
+// WaveMobDef is a single mob within a wave. Entity IDs are allocated at
+// fire time — unlike initial enemies, waves do not carry pre-assigned IDs.
+type WaveMobDef struct {
+	Type uint8
+	X, Y float32
 }
 
 // PickupSpawnDef is a static pickup placement.
@@ -73,8 +88,12 @@ func UnlockDoorsIfClear(r *RoomState) []uint32 {
 }
 
 // CheckAllEnemiesDead sets r.AllEnemiesDead when every enemy has HP<=0 or
-// AIState == AIDead. A room with zero enemies counts as cleared.
+// AIState == AIDead AND every reinforcement wave has fired. A room with
+// zero enemies and no unfired waves counts as cleared.
 func CheckAllEnemiesDead(r *RoomState) {
+	if !AllWavesFired(r) {
+		return
+	}
 	for _, e := range r.Enemies {
 		if e.HP > 0 && e.AIState != AIDead {
 			return
@@ -86,7 +105,8 @@ func CheckAllEnemiesDead(r *RoomState) {
 // LoadRoom populates r.Enemies / r.Pickups / r.Doors from the template.
 // Enemies go through SpawnEnemy so RNG consumption matches the order
 // mandated by docs/specs/foundations/07-determinism-seeding.md. Enemies
-// are spawned in ascending EntityID order.
+// are spawned in ascending EntityID order; waves are pre-seeded after all
+// initial enemies, in wave-slot order.
 //
 // Returns a protocol.RoomData suitable for S2C_RUN_STARTED or S2C_ROOM_LOAD.
 // Doors always ship as Locked: true — the unlock is a separate broadcast.
@@ -100,6 +120,8 @@ func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, now time.Time) p
 	r.Settled = false
 	r.TicksSinceLoad = 0
 	r.KillLog = r.KillLog[:0]
+	r.PendingWaves = r.PendingWaves[:0]
+	r.NextEnemyID = WaveEntityIDBase + uint32(r.RoomIndex)*WaveEntityIDStep
 
 	// Spawn enemies in ascending EntityID order to preserve the RNG
 	// consumption invariant.
@@ -119,6 +141,9 @@ func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, now time.Time) p
 			HP:       e.HP,
 		})
 	}
+
+	r.InitialPop = len(ordered)
+	seedWaves(r, rng, tmpl.Waves)
 
 	pickupOut := make([]protocol.PickupSpawn, 0, len(tmpl.Pickups))
 	for _, def := range tmpl.Pickups {

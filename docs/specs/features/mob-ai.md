@@ -25,13 +25,15 @@ EnemyState {
 
 Enemy archetypes (per `Type`):
 
-| Type | Name     | HP | Speed | Aggro range | Attack cooldown | Notes                                    |
-| ---- | -------- | -- | ----- | ----------- | --------------- | ---------------------------------------- |
-| 1    | Grunt    | 3  | 80    | 200         | 800 ms          | Baseline zombie; patrols then aggros.    |
-| 2    | Runner   | 2  | 140   | 260         | 600 ms          | Fast; short aggro window useful for planning. |
-| 3    | Tank     | 12 | 50    | 160         | 1200 ms         | Slow; high HP; armor enables BUG-08.     |
-| 4    | Kamikaze | 1  | 120   | 220         | N/A (explodes)  | One-shot kills self on contact; damages player. |
-| 5    | Boss     | 120 | 60   | 360         | 900 ms          | Room 11 only; armor + debuff ingress for BUG-08. |
+| Type | Name     | HP | Speed | Melee dmg | Aggro range | Attack cooldown | Notes                                    |
+| ---- | -------- | -- | ----- | --------- | ----------- | --------------- | ---------------------------------------- |
+| 1    | Grunt    | 3  | 95    | 5         | 200         | 800 ms          | Baseline zombie; patrols then aggros.    |
+| 2    | Runner   | 2  | 165   | 4         | 260         | 600 ms          | Fast; short aggro window useful for planning. |
+| 3    | Tank     | 12 | 60    | 8         | 160         | 1200 ms         | Slow; high HP; armor enables BUG-08.     |
+| 4    | Kamikaze | 1  | 145   | 15        | 220         | N/A (explodes)  | One-shot kills self on contact; damages player. |
+| 5    | Boss     | 120 | 70   | 20        | 360         | 900 ms          | Room 11 only; armor + debuff ingress for BUG-08. |
+
+HP and Speed are multiplied by a per-room tier factor at `InstantiateEnemy` time — see [harder-mobs.md § Per-room scaling](./harder-mobs.md#per-room-scaling). The numbers above are the **room 1–5 baseline**. Melee damage, AggroRange, Armor, and attack cooldown are **not** scaled. The active shield powerup halves incoming melee damage (integer divide, floor 1).
 
 Exact numbers TBD — see open questions in [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md). The table is the shape, not the final balance.
 

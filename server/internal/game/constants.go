@@ -34,4 +34,34 @@ const (
 
 	InChBuf  = 64
 	OutChBuf = 64
+
+	// --- Harder-mobs tuning. See docs/specs/features/harder-mobs.md. ---
+
+	// WaveArmDelayMs is the base delay from wave arm → fire.
+	WaveArmDelayMs = 3000
+
+	// WaveArmJitterMs is the ± jitter applied to each wave's arm→fire delay.
+	// Consumes one MobRNG.Intn(2 * WaveArmJitterMs) per declared wave at
+	// room load. Changing this value is a determinism change — old seeds
+	// invalidated.
+	WaveArmJitterMs = 3000
+
+	// WaveEntityIDBase is the starting EntityID for mobs spawned by
+	// waves (template mob IDs stay well below this). Per-room offset keeps
+	// wave IDs unique across rooms for cleaner logs.
+	WaveEntityIDBase uint32 = 100000
+	WaveEntityIDStep uint32 = 1000
+
+	// PackAggroRadius is the pixel radius for on-damage aggro broadcast.
+	// No LOS check. See docs/specs/features/harder-mobs.md.
+	PackAggroRadius float32 = 250.0
 )
+
+// WaveTriggers is the ordered set of relative thresholds (fraction of initial
+// room population) at which each wave arms. WaveTriggers[i] corresponds to
+// wave slot i in a room's template. A room may declare 0..len(WaveTriggers)
+// waves.
+//
+// Changing this array is both a balance change and a determinism change —
+// old seeds invalidated (skip rule may gate different waves).
+var WaveTriggers = []float32{0.66, 0.33}
