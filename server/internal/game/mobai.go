@@ -106,9 +106,14 @@ func UpdateEnemy(e *EnemyState, p *PlayerState, roomIndex uint8, dt float32, now
 	case AIAggro:
 		aimX := p.X + (e.JitterX-0.5)*20
 		aimY := p.Y + (e.JitterY-0.5)*20
-		moveTowardWithWalls(e, aimX, aimY, dt, roomIndex)
+		// Stop short of the player so melee enemies don't pile on top of
+		// the sprite — the player needs visual + shooting space. Kamikaze
+		// is exempt because it self-destructs on contact.
+		if e.Type == EnemyKamikaze || dist > meleeStandoff {
+			moveTowardWithWalls(e, aimX, aimY, dt, roomIndex)
+		}
 
-		if dist < 34 && now.After(e.AttackCooldown) {
+		if dist < meleeAttackRange && now.After(e.AttackCooldown) {
 			didAttack = true
 			cd := Archetypes[e.Type].AttackCooldownMs
 			e.AttackCooldown = now.Add(time.Duration(cd) * time.Millisecond)
@@ -116,6 +121,15 @@ func UpdateEnemy(e *EnemyState, p *PlayerState, roomIndex uint8, dt float32, now
 	}
 	return didAttack
 }
+
+// Melee tunings — must satisfy meleeStandoff < meleeAttackRange so an
+// enemy parked at standoff still triggers attacks. Standoff is wide
+// enough to keep the enemy sprite visually separated from the player so
+// the player can aim and shoot.
+const (
+	meleeStandoff    float32 = 38
+	meleeAttackRange float32 = 48
+)
 
 func moveToward(e *EnemyState, tx, ty, dt float32) {
 	dx := tx - e.X
