@@ -439,9 +439,16 @@ func (e *Engine) advancePlayer(dt float32) {
 }
 
 func (e *Engine) advanceEnemies(dt float32, now time.Time) []uint32 {
+	// Build the per-tick flow-field cache. The cache is rooted at the
+	// player's tile; per-mob jitter biases the source by ±1 tile, so the
+	// cache holds at most 9 fields per tick. Fields are computed lazily
+	// on first request and discarded when this function returns. See
+	// docs/specs/features/mob-ai.md § Aggro chase: flow field.
+	fields := NewFlowFieldCache(e.run.CurrentRoom)
+
 	var deaths []uint32
 	for id, en := range e.room.Enemies {
-		if UpdateEnemy(en, e.player, e.run.CurrentRoom, dt, now) {
+		if UpdateEnemy(en, e.player, e.run.CurrentRoom, dt, now, fields) {
 			// Per-archetype melee damage. Shield halves it (integer divide,
 			// floor 1) so boss/tank hits scale proportionally.
 			dmg := Archetypes[en.Type].MeleeDamage
