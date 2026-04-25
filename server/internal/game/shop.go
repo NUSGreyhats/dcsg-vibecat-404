@@ -28,8 +28,8 @@ var ShopCatalog = []ShopOffer{
 }
 
 // HandleShopPurchase is the C2S_SHOP_PURCHASE handler. Validates the item
-// ID, debits coins, and increments the matching trait stack. The `ammo`
-// case also refills every non-unlimited weapon to its post-stack cap.
+// ID, debits coins, and applies the matching effect. The `ammo` case
+// refills every non-unlimited weapon to its static ammo cap.
 func HandleShopPurchase(p *PlayerState, itemID uint8) bool {
 	if itemID == 0 || int(itemID) > len(ShopCatalog) {
 		return false
