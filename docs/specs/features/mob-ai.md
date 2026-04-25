@@ -85,7 +85,7 @@ Aggro chase uses a tile-grid breadth-first search rooted at the player's current
 ### Per-tick computation
 
 ```
-flowField := BFSFromPlayer(roomIndex, playerTile)
+flowField := BFSFromTile(roomIndex, playerTileRow, playerTileCol)
     // 40×24 grid, 8-neighbourhood with unit-cost diagonals (Chebyshev metric),
     // walls (cellSolid + cellWater) impassable. Diagonal steps are forbidden
     // when either axis-aligned tile bracketing the corner is a wall, so mobs
