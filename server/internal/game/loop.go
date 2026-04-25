@@ -581,6 +581,7 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 		if err := json.Unmarshal(env.Data, &pkt); err != nil {
 			return
 		}
+		e.player.LastAimAngle = pkt.AimAngle
 		HandleShoot(e.player, e.room, pkt.AimAngle, now)
 	case protocol.C2SSwitchWeapon:
 		var pkt protocol.SwitchWeaponPacket
@@ -847,6 +848,7 @@ func (e *Engine) sendState(now time.Time) {
 			SpeedStacks:    e.player.SpeedStacks,
 			FireRateStacks: e.player.FireRateStacks,
 			DamageStacks:   e.player.DamageStacks,
+			AimAngle:       e.player.LastAimAngle,
 		},
 		Entities:    entities,
 		Projectiles: projs,

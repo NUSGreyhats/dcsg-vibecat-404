@@ -100,6 +100,12 @@ type PlayerState struct {
 	SpeedStacks    uint8
 	FireRateStacks uint8
 	DamageStacks   uint8
+
+	// LastAimAngle is the angle of the player's most recent C2S_SHOOT,
+	// in radians. Surfaced on PlayerSnapshot so spectators (who don't
+	// have a local cursor) can render the gun pointing where the player
+	// is aiming. Stays at 0 until the first shot.
+	LastAimAngle float32
 }
 
 func NewPlayerState() *PlayerState {

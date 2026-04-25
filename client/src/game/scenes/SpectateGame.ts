@@ -80,7 +80,8 @@ export class SpectateGame extends Phaser.Scene {
 
     const px = state.player?.x ?? ROOM_WIDTH / 2;
     const py = state.player?.y ?? ROOM_HEIGHT - 100;
-    this.player = new Player(this, px, py);
+    // useSnapshotAim — server-authoritative aim instead of local cursor.
+    this.player = new Player(this, px, py, { useSnapshotAim: true });
     this.add.existing(this.player);
 
     // Spectator badge — top-center, semi-muted so it doesn't fight the HUD.
@@ -150,8 +151,10 @@ export class SpectateGame extends Phaser.Scene {
     }
 
     const state = getActiveState();
+    const seenPickupIds = new Set<number>();
     if (payload.pickups) {
       for (const snap of payload.pickups) {
+        seenPickupIds.add(snap.entity_id);
         if (state.deadEntities.has(snap.entity_id)) continue;
         if (this.pickups.has(snap.entity_id)) continue;
         const pickup = new Pickup(this, snap);
@@ -168,6 +171,27 @@ export class SpectateGame extends Phaser.Scene {
       const pk = this.pickups.get(id);
       if (pk) {
         pk.setConsumed();
+        this.pickups.delete(id);
+      }
+    }
+
+    // Catchup reconcile: spectators who attach mid-room never received
+    // the S2C_ENTITY_DIED events for kills that happened before they
+    // joined, so deadEntities is empty for those. The server filters
+    // dead enemies and consumed pickups out of S2C_STATE, so absence
+    // from the seen sets is an authoritative "this entity is gone now."
+    // Run the prune unconditionally — it's O(n) and the player code
+    // doesn't hit it because the player's deadEntities path already
+    // tore each one down on the same tick the server filtered it out.
+    for (const [id, enemy] of this.enemies) {
+      if (!seenEntityIds.has(id)) {
+        enemy.destroy();
+        this.enemies.delete(id);
+      }
+    }
+    for (const [id, pickup] of this.pickups) {
+      if (!seenPickupIds.has(id)) {
+        pickup.destroy();
         this.pickups.delete(id);
       }
     }
