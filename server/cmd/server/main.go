@@ -14,9 +14,9 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/greyhats/defcon-game/pkg/identity"
 	"github.com/greyhats/defcon-game/server/internal/auth"
 	"github.com/greyhats/defcon-game/server/internal/game"
-	"github.com/greyhats/defcon-game/server/internal/identity"
 	"github.com/greyhats/defcon-game/server/internal/leaderboard"
 	"github.com/greyhats/defcon-game/server/internal/protocol"
 )
@@ -40,8 +40,6 @@ func main() {
 		log.Fatalf("open identity db: %v", err)
 	}
 	defer identityDB.Close()
-
-	identitySvc := identity.NewService(identityDB)
 
 	mode := auth.ModeFromEnv()
 	switch mode {
@@ -95,14 +93,14 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
-	// Identity endpoints. Per docs/specs/foundations/03-identity-auth.md the
-	// lobby service is spec'd to host these — until that lands, the game
-	// server hosts them directly.
-	identitySvc.Register(mux)
-	mux.HandleFunc("/register", serveRegisterPage)
+	// Identity HTTP endpoints (/api/register, /api/login, /api/verify) and the
+	// /register page now live on the lobby service. The game server still
+	// imports pkg/identity for WS-time Lookup in authCheck above.
+	//
 	// Dev-only: the lobby service is spec'd to host /api/leaderboard, but
-	// it doesn't exist yet. Expose a read-through here so local testers
-	// can view results without finishing a run.
+	// the lobby read-through hasn't shipped yet (Phase 2 of the lobby split,
+	// see issue #22). Expose a read-through here so local testers can view
+	// results without finishing a run.
 	mux.HandleFunc("/api/leaderboard", func(w http.ResponseWriter, r *http.Request) {
 		limit := 10
 		if v := r.URL.Query().Get("limit"); v != "" {

@@ -1,6 +1,8 @@
 services:
   game-server:
-    build: ./server
+    build:
+      context: .
+      dockerfile: server/Dockerfile
     environment:
       LISTEN_ADDR: ":8080"
       # identity mode: WS C2S_AUTH requires the player_id to exist in
@@ -15,10 +17,24 @@ services:
       - game-data:/data
     # Bind to loopback only: all browser traffic goes through the Caddy
     # client container on :3000, which reverse-proxies /ws, /api/*, and
-    # /register here. Binding to 127.0.0.1 keeps the dev-only leaderboard
-    # JSON endpoint off the public internet on the DO droplet.
+    # /register to the appropriate service. Binding to 127.0.0.1 keeps the
+    # dev-only leaderboard JSON endpoint off the public internet.
     ports:
       - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+  lobby:
+    build:
+      context: .
+      dockerfile: lobby/Dockerfile
+    environment:
+      LISTEN_ADDR: ":3001"
+      IDENTITY_DB: "/data/identity.db"
+    volumes:
+      - game-data:/data
+    # Loopback only — public traffic enters via the Caddy client container.
+    ports:
+      - "127.0.0.1:3001:3001"
     restart: unless-stopped
 
   client:
@@ -27,6 +43,7 @@ services:
       - "80:3000"
     depends_on:
       - game-server
+      - lobby
     restart: unless-stopped
 
 volumes:
