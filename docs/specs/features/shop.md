@@ -17,11 +17,10 @@ PlayerState {
     SpeedStacks     uint8   // owned by features/shop.md
     FireRateStacks  uint8   // owned by features/shop.md
     DamageStacks    uint8   // owned by features/shop.md
-    AmmoStacks      uint8   // owned by features/shop.md
 }
 ```
 
-`Coins` is `int32`; integer-overflow on coins is **not** an intended bug class. Stack counters are `uint8` (coin cost rate-limits stack growth far below 255).
+`Coins` is `int32`; integer-overflow on coins is **not** an intended bug class. Stack counters are `uint8` (coin cost rate-limits stack growth far below 255). The `ammo` shop item is a **one-shot consumable refill** — it does not increment a stack counter and has no `AmmoStacks` field.
 
 The existing `SpeedMult` / `SpeedMultUntil` / `DamageMult` / `DamageMultUntil` timed-buff fields (used by the inventory `speed_boost` consumable) are unchanged. Shop traits and temp buffs compose **multiplicatively** at read time — see the derivation table below. Shop traits add no new timer fields.
 
@@ -32,7 +31,7 @@ Effective multipliers and caps are **derived**, not stored:
 | Speed      | `(1.0 + 0.1 × SpeedStacks) × tempSpeedMult(p, now)` — composes with temp buff           |
 | Fire rate  | cooldown divided by `(1.0 + 0.1 × FireRateStacks)`                                      |
 | Damage     | `(1.0 + 0.1 × DamageStacks) × tempDamageMult(p, now)` — composes with temp buff         |
-| Max ammo   | `WeaponSpec.AmmoMax + 5 × AmmoStacks` per non-unlimited weapon (pistol unaffected)      |
+| Ammo       | `ammo` purchase refills every non-unlimited weapon to `WeaponSpec.AmmoMax` (static cap) |
 
 Stacks are reset to zero at run start (on death / new run). They persist across rooms within a run. There is no per-stack diminishing return in the initial design — keep the math linear and tune the per-stack delta if a single trait dominates.
 
@@ -56,10 +55,10 @@ type ShopOffer struct {
 }
 
 var ShopCatalog = []ShopOffer{
-    {1, "ammo",      5, /* AmmoStacks++ ; refill all non-unlimited weapons to new cap */},
-    {2, "speed",     5, /* SpeedStacks++ */},
-    {3, "fire_rate", 5, /* FireRateStacks++ */},
-    {4, "damage",    5, /* DamageStacks++ */},
+    {1, "ammo",      5,  /* one-shot refill to WeaponSpec.AmmoMax for every non-unlimited weapon */},
+    {2, "speed",     10, /* SpeedStacks++ */},
+    {3, "fire_rate", 15, /* FireRateStacks++ */},
+    {4, "damage",    20, /* DamageStacks++ */},
 }
 ```
 
@@ -114,15 +113,15 @@ handleShopPurchase:
 S2C_STATE broadcasts updated PlayerSnapshot
 ```
 
-`applyShopEffect` is a small `switch offer.ID` — integer dispatch, no string-name lookup, no fallback table. The body is one line per case: `p.SpeedStacks++`, `p.DamageStacks++`, etc. The `ammo` case also iterates `WeaponSpecs` and refills `WeaponAmmo[w]` to the post-stack cap.
+`applyShopEffect` is a small `switch offer.ID` — integer dispatch, no string-name lookup, no fallback table. The body is one line per case: `p.SpeedStacks++`, `p.DamageStacks++`, etc. The `ammo` case iterates `WeaponSpecs` and refills `WeaponAmmo[w]` to the static `spec.AmmoMax` cap — it does **not** increment any stack counter.
 
 ### Stack semantics
 
-Each purchase increments the corresponding `*Stacks` counter on `PlayerState`. Stacks persist for the rest of the run and zero on death / new run. There is no expiry, no decay, no overwrite, no purchase cooldown.
+Each `speed`, `fire_rate`, and `damage` purchase increments the corresponding `*Stacks` counter on `PlayerState`. Stacks persist for the rest of the run and zero on death / new run. There is no expiry, no decay, no overwrite, no purchase cooldown.
 
-`ammo` is the only case that mutates anything besides a stack counter: in addition to `p.AmmoStacks++`, the handler writes `p.WeaponAmmo[w] = spec.AmmoMax + 5*int(p.AmmoStacks)` for every non-unlimited weapon — raising the cap and refilling current ammo to the new cap in one step.
+`ammo` is a **one-shot consumable refill** — it does not increment any stack counter. The handler writes `p.WeaponAmmo[w] = spec.AmmoMax` for every non-unlimited weapon, resetting current ammo to the static cap. Max ammo capacity is unchanged.
 
-Stack growth is gated by coin supply, not by a cooldown. At 5 coins per purchase and ~1 coin per enemy kill, an honest run yields ~4–6 stacks total; BUG-12 lifts that ceiling toward "every pickup converts to a stack".
+Stack growth is gated by coin supply, not by a cooldown. With costs of 10/15/20 for speed/fire_rate/damage and ~1 coin per enemy kill, an honest run yields ~2–3 stacks total; BUG-12 lifts that ceiling toward "every pickup converts to coins".
 
 ## Client interactions
 
@@ -138,14 +137,14 @@ Stack growth is gated by coin supply, not by a cooldown. At 5 coins per purchase
 
 ### Server
 
-- **`internal/game/state.go`** — append `Coins int32` and `SpeedStacks / FireRateStacks / DamageStacks / AmmoStacks uint8` to `PlayerState`. Zero all five in the per-run reset path (death / new run).
+- **`internal/game/state.go`** — append `Coins int32` and `SpeedStacks / FireRateStacks / DamageStacks uint8` to `PlayerState`. Zero all four in the per-run reset path (death / new run).
 - **`internal/game/pickups.go`** — add the constant `PickupCoin = 3` (recycled from the removed Speed boost type). Add `ExpiresAt time.Time` to `PickupState`. Change `applyPickup`'s signature to `applyPickup(p *PlayerState, pk *PickupState, claimedType uint8, now time.Time)` and switch on `claimedType` (see [BUG-12](#bug-12-pickup-type-confusion)). Add a `case PickupCoin: p.Coins++` arm.
 - **`internal/game/combat.go`** — at the point where an enemy's HP reaches zero in the damage path, register a new `PickupState{Type: PickupCoin, X, Y, EntityID: r.NextEntityID(), ExpiresAt: now.Add(30*time.Second)}` in `r.Pickups`.
-- **`internal/game/shop.go`** (new) — define `ShopOffer`, `ShopCatalog` (the slice from the data-model section), and `HandleShopPurchase(p *PlayerState, itemID uint8) (applied bool)`. Body: bounds-check `itemID` against `len(ShopCatalog)`, debit `p.Coins`, switch on `offer.ID` to increment the matching `*Stacks` counter. The `ammo` case also walks `WeaponSpecs` and writes `p.WeaponAmmo[w] = spec.AmmoMax + 5*int(p.AmmoStacks)` for every non-unlimited weapon. Do **not** route shop purchases through `AllowedItems` — that would put the shop on the same string-keyed dispatch path that historically hosted BUG-09 / BUG-10.
+- **`internal/game/shop.go`** (new) — define `ShopOffer`, `ShopCatalog` (the slice from the data-model section), and `HandleShopPurchase(p *PlayerState, itemID uint8) (applied bool)`. Body: bounds-check `itemID` against `len(ShopCatalog)`, debit `p.Coins`, switch on `offer.ID` to increment the matching `*Stacks` counter. The `ammo` case walks `WeaponSpecs` and writes `p.WeaponAmmo[w] = spec.AmmoMax` for every non-unlimited weapon — a one-shot refill to the static cap. Do **not** route shop purchases through `AllowedItems` — that would put the shop on the same string-keyed dispatch path that historically hosted BUG-09 / BUG-10.
 - **`internal/protocol/packets.go`** — extend `InteractPacket` with `ClaimedType uint8` (json tag `claimed_type`); add `ShopPurchasePacket` with one field `ItemID uint8` (json tag `item_id`); register `C2S_SHOP_PURCHASE` at type code `0x09`.
 - **C2S dispatcher** — register `C2S_SHOP_PURCHASE` → `HandleShopPurchase` next to the existing `C2S_INTERACT` registration.
 - **Tick loop** (in the same place the existing pickup pass runs) — for each `pk` in `r.Pickups`, if `!pk.Consumed && !pk.ExpiresAt.IsZero() && now.After(pk.ExpiresAt)`, set `pk.Consumed = true`. The existing snapshot diff drops consumed pickups.
-- **`PlayerSnapshot`** — append `coins`, `speed_stacks`, `fire_rate_stacks`, `damage_stacks`, `ammo_stacks` so the client can render the HUD coin counter and (optionally) per-trait stack counts in the shop UI.
+- **`PlayerSnapshot`** — append `coins`, `speed_stacks`, `fire_rate_stacks`, `damage_stacks` so the client can render the HUD coin counter and per-trait stack counts in the shop UI.
 
 ### Trait reads (find every call site)
 
@@ -156,7 +155,6 @@ Effective values are derived at the point of use — **don't cache on `PlayerSta
 | Movement integration (wherever `SpeedMult` is read today)   | `(1 + 0.1*float32(p.SpeedStacks)) * nonZeroSpeedMult(p, now)`        |
 | `HandleShoot` damage (`combat.go:44–80`)                    | `(1 + 0.1*float32(p.DamageStacks)) * nonZeroDamageMult(p, now)`      |
 | `HandleShoot` cooldown                                      | `cooldown / (1 + 0.1*float32(p.FireRateStacks))` (Duration math)     |
-| `WeaponSpec.AmmoMax` clamp sites (ammo pickup, ammo buy, decrement) | `spec.AmmoMax + 5*int(p.AmmoStacks)`                         |
 
 `nonZero*Mult(p, now)` (the existing helper that returns `1.0` when the temp buff has expired) stays in place for the temp-buff side of the formula. The shop trait reads don't need expiry-checking.
 
@@ -237,7 +235,7 @@ A weaker reverse exploit also exists — claim a coin as `PickupHealthPotion` to
 
 - `C2S_INTERACT` — payload extended with `ClaimedType uint8`. **This breaks the existing payload shape**; coordinate with [foundations/02-protocol.md](../foundations/02-protocol.md) and the client's `packet.ts`.
 - `C2S_SHOP_PURCHASE` (new, suggested type code `0x09`) — `{ item_id: uint8 }`.
-- `S2C_STATE` — already broadcasts `PlayerSnapshot`; the snapshot is extended with `Coins`, `SpeedStacks`, `FireRateStacks`, `DamageStacks`, `AmmoStacks`.
+- `S2C_STATE` — already broadcasts `PlayerSnapshot`; the snapshot is extended with `Coins`, `SpeedStacks`, `FireRateStacks`, `DamageStacks`.
 
 A `C2S_SHOP_OPEN` / `S2C_SHOP_STATE` pair is **not** introduced — the shop UI is fully client-side until purchase. The README's "How to add a feature" worked example shows a heavier shape (with open packet and between-rooms gating); this spec deviates intentionally because the shop opens via global keybind anywhere and the catalog is static.
 
