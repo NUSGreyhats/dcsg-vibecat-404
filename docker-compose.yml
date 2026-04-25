@@ -39,6 +39,11 @@ services:
       # hash is bcrypt; see scripts/genhash.go (or `htpasswd -bnBC 10`).
       ADMIN_USER: "${ADMIN_USER:-}"
       ADMIN_PASS_HASH: "${ADMIN_PASS_HASH:-}"
+      # Stripped source served at /source/*. Baked into the lobby image
+      # at build time by the strip stage in lobby/Dockerfile, so the
+      # default points at the in-image path. Override at deploy time to
+      # serve from a host mount or a different volume path.
+      SOURCE_DIR: "/app/stripped-source"
     volumes:
       - game-data:/data
     # Loopback only — public traffic enters via the Caddy client container.

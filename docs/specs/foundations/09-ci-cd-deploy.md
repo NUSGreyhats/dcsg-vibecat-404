@@ -95,10 +95,10 @@ The published tree contains exactly the code a player would need to study to fin
 
 ### Pipeline
 
-1. CI runs a `go/ast`-based stripping tool → `gofmt` → emits `stripped-source.tar.gz` as a workflow artifact.
-2. On deploy, the tarball is extracted into the shared Docker volume at `/data/stripped-source/`.
-3. The lobby service mounts that path and serves it read-only at `http://:3000/source/` alongside the leaderboard webapp.
-4. Air-gapped prod: the tarball travels inside the `.tar.gz` GitHub Release bundle alongside the service images and is unpacked into `/data/stripped-source/` during on-LAN deploy.
+1. The strip tool (`tools/strip`) runs as a multi-stage build inside `lobby/Dockerfile` — a dedicated `strip` stage walks the allowlist, transforms each file, and writes the result into `/stripped`. The runtime stage `COPY --from=strip /stripped /app/stripped-source`. A broken strip fails the image build, so deploys can't silently ship an empty source tree.
+2. On deploy, `docker compose up -d --build` rebuilds the lobby image and the freshly stripped source ships with it. No volume passing, no separate artifact.
+3. Lobby serves `/app/stripped-source/` at `http://:3000/source/` via `http.FileServer`. `SOURCE_DIR` defaults to `/app/stripped-source` and can be overridden to point at a host mount for ad-hoc testing.
+4. Air-gapped prod: the lobby image goes inside the `.tar.gz` Release bundle alongside the rest of the stack — stripped source is part of the image, no extra step.
 
 ### Why lobby, not GitHub Pages
 

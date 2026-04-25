@@ -11,9 +11,26 @@ COPY lobby ./lobby
 
 RUN cd lobby && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/lobby ./cmd/lobby
 
+# --- strip stage: produce the published source tree ---------------------
+# Runs the tools/strip allowlist against server/, pkg/, client/ and emits
+# the comment-free result into /stripped. The output is copied into the
+# runtime stage and served by lobby at /source/*. Doing this at image
+# build time ties the published source to the deployed binary version,
+# and a broken strip tool fails the image build instead of silently
+# leaving the volume empty at deploy time.
+FROM golang:1.25-alpine AS strip
+WORKDIR /repo
+ENV GOWORK=off
+COPY pkg ./pkg
+COPY server ./server
+COPY client ./client
+COPY tools ./tools
+RUN cd tools/strip && go run . -in /repo -out /stripped
+
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates && mkdir -p /data
 WORKDIR /app
 COPY --from=build /out/lobby /app/lobby
+COPY --from=strip /stripped /app/stripped-source
 EXPOSE 3001
 ENTRYPOINT ["/app/lobby"]
