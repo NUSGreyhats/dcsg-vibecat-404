@@ -4,4 +4,5 @@ use (
 	./pkg
 	./server
 	./lobby
+	./tools/strip
 )

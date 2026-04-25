@@ -27,6 +27,12 @@
         reverse_proxy lobby:3001
     }
 
+    # Stripped source tree served by lobby (Phase 4 #24). Read-only.
+    @source path /source /source/*
+    handle @source {
+        reverse_proxy lobby:3001
+    }
+
     # Remaining /api/* still hits the game server (no public endpoints
     # today; /ws/spectate routes alongside /ws once Phase 3 server-side
     # spectator fan-out lands).

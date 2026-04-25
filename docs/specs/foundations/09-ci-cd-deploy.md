@@ -66,16 +66,31 @@ This ensures:
 
 ## Source code publishing (served by lobby)
 
-**Only the game server code is published.** Lobby source is **never** published.
+The published tree contains exactly the code a player would need to study to find intentional bugs — game-server runtime + the player-facing client. Everything else (lobby, infra, docs, CI configs) is hidden, both because it's not part of the game and because it would leak the bug-hiding strategy.
+
+### What is published
+
+- `server/` — the game-server Go module. The whole runtime, including the file that intentionally races on `KillLog`.
+- `pkg/` — shared Go modules that `server/` imports (`pkg/identity` today). Required for the published source to compile on its own.
+- `client/src/`, `client/index.html`, `client/spectate.html`, `client/package.json`, `client/style.css`, `client/public/` — the Phaser app source players already see in their browser.
+
+### What is NOT published
+
+- `lobby/` — would expose admin endpoints, queue logic, and the `/source/*` handler itself.
+- `tools/` — including `tools/strip/`; the stripper's logic is the bug-hiding strategy.
+- `docs/` — every spec file is a hint sheet; explicitly excluded.
+- `.github/` — workflows reveal the `-tags=norace` build choice.
+- Top-level / build files: `docker-compose.yml`, `*.Dockerfile`, `go.work`, `README.md`, `client/Caddyfile`, `client/vite/*`. Infra, never code.
+
+### Per-file transforms
 
 | Stripped ❌                          | Kept ✅                               |
 | ----------------------------------- | ------------------------------------ |
-| All comments (`//`, `/* */`)        | Raw `.go` files                      |
+| All comments (`//`, `/* */`)        | Raw `.go` / `.ts` / `.tsx` files     |
 | Doc strings                         | Package structure                    |
-| README, docs/, markdown             | Function signatures + implementation |
-| `// BUG:` / `// HACK:` annotations  | `go.mod` / `go.sum`                  |
-| `*_test.go`                         | —                                    |
-| `.github/`, Dockerfile, CI configs  | —                                    |
+| `// BUG:` / `// HACK:` annotations  | Function signatures + implementation |
+| `*_test.go`, `*.test.ts`            | `go.mod` / `go.sum`                  |
+| Markdown files                      | `package.json`, `style.css`, HTML    |
 | Build tags / race exclusion pragmas | —                                    |
 
 ### Pipeline
@@ -91,8 +106,9 @@ One public webapp for players (queue, leaderboard, source browser) — no separa
 
 ### Do-not-leak rules
 
-- Only `stripped-source.tar.gz` enters `/data/stripped-source/`. Never mount the raw `game-server/` repo into the volume.
-- Lobby's source handler is static file serving only — no directory traversal outside `/data/stripped-source/`.
+- Only `stripped-source.tar.gz` enters `/data/stripped-source/`. Never mount the raw repo into the volume.
+- The strip tool's allowlist (the "What is published" section above) is the canonical source of truth — paths outside it never enter the tarball, even if they happen to land in `/data/stripped-source/` by mistake.
+- Lobby's source handler is static file serving only — no directory traversal outside `/data/stripped-source/` (relies on `http.Dir`).
 - Lobby must not serve its **own** source or any file from outside the stripped tree.
 
 **Note on build tag stripping:** the stripping tool also removes the `//go:build !norace` line from the published source — otherwise it would be a direct hint about the kill-log file. Stripped source must compile on its own but with the race intact.

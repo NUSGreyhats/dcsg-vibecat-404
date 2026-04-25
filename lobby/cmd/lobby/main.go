@@ -34,6 +34,7 @@ func main() {
 	identityDBPath := envDefault("IDENTITY_DB", "/data/identity.db")
 	gameDBPath := envDefault("GAME_DB", "/data/game.db")
 	gameServerURL := envDefault("GAME_SERVER_URL", "http://game-server:8080")
+	sourceDir := envDefault("SOURCE_DIR", "/data/stripped-source")
 
 	identityDB, err := identity.OpenDB(identityDBPath)
 	if err != nil {
@@ -143,6 +144,15 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(entries)
 	})
+	// /source/* — read-only static serving of the stripped source tree.
+	// http.Dir prevents directory traversal outside sourceDir; the
+	// stripped tree itself is the canonical allowlist (lobby/, tools/,
+	// docs/ etc. are never copied in by tools/strip — see
+	// docs/specs/foundations/09-ci-cd-deploy.md). If sourceDir doesn't
+	// exist yet (fresh deploy, CI hasn't populated the tarball), the
+	// handler 404s — that's the expected state pre-Phase-4c.
+	sourceFS := http.FileServer(http.Dir(sourceDir))
+	mux.Handle("/source/", http.StripPrefix("/source/", sourceFS))
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -154,7 +164,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("lobby: listening on %s (identity_db=%s game_db=%s game_server=%s)", addr, identityDBPath, gameDBPath, gameServerURL)
+		log.Printf("lobby: listening on %s (identity_db=%s game_db=%s game_server=%s source_dir=%s)", addr, identityDBPath, gameDBPath, gameServerURL, sourceDir)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen: %v", err)
 		}
