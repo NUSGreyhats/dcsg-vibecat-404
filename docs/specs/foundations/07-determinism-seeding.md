@@ -67,7 +67,7 @@ Important: per-tick mob behavior (current aim, movement decisions) must be deriv
 
 Some per-tick computations are deterministic functions of pre-existing state and preserve the replay invariant even though they are not constants. They must be implemented as pure functions with stable iteration order over their inputs:
 
-- **Aggro flow field** (see [mob-ai § Aggro chase: flow field](../features/mob-ai.md#aggro-chase-flow-field)): one BFS per room per tick over the static wall grid, rooted at the player's tile. Neighbour enumeration order in the BFS queue and in the per-mob gradient pick is fixed at **N, E, S, W**. Distances are integer tile counts. The field is a pure function of `(roomIndex, playerTile)`; the wall grid is static per room. Each mob reads the field independently — mob-to-mob iteration order does not affect any mob's read.
+- **Aggro flow field** (see [mob-ai § Aggro chase: flow field](../features/mob-ai.md#aggro-chase-flow-field)): one BFS per room per tick over the static wall grid, rooted at the player's tile. Neighbour enumeration order in the BFS queue and in the per-mob gradient pick is fixed clockwise from N: **N, NE, E, SE, S, SW, W, NW**. Diagonal steps are unit-cost (Chebyshev metric) and gated on corner-cut prevention — both axis-aligned tiles bracketing the corner must be non-wall. Distances are integer tile counts. The field is a pure function of `(roomIndex, playerTile)`; the wall grid is static per room. Each mob reads the field independently — mob-to-mob iteration order does not affect any mob's read.
 
 Adding a new per-tick deterministic computation requires the same scrutiny as adding RNG: document the invariant here, fix iteration order over its inputs, and add a regression test.
 

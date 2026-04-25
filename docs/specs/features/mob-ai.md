@@ -86,7 +86,10 @@ Aggro chase uses a tile-grid breadth-first search rooted at the player's current
 
 ```
 flowField := BFSFromPlayer(roomIndex, playerTile)
-    // 40×24 grid, 4-neighbourhood, walls (cellSolid + cellWater) impassable.
+    // 40×24 grid, 8-neighbourhood with unit-cost diagonals (Chebyshev metric),
+    // walls (cellSolid + cellWater) impassable. Diagonal steps are forbidden
+    // when either axis-aligned tile bracketing the corner is a wall, so mobs
+    // never visually clip through a wall corner.
     // Distance in tile steps. Unreachable tiles = sentinel (uint16 max).
     // ~960 cell ops per tick — trivial cost.
 ```
@@ -99,11 +102,11 @@ A mob in Aggro state computes its next aim point by:
 
 1. Take its own tile `(r, c)`.
 2. Optionally bias the *source* of the BFS by the mob's pre-computed jitter — see [Jitter handling](#jitter-handling) below.
-3. Among the 4 neighbours `(r±1, c)` and `(r, c±1)`, pick the one with the **lowest** `distance` value. Ties broken by a fixed neighbour enumeration order: **N, E, S, W**.
+3. Among the 8 neighbours (cardinal `(r±1, c)`, `(r, c±1)` and diagonal `(r±1, c±1)`), pick the one with the **lowest** `distance` value. Ties broken by a fixed clockwise enumeration order from N: **N, NE, E, SE, S, SW, W, NW**. Diagonal candidates are skipped when either axis-aligned tile bracketing the corner is a wall — same corner-cut rule the BFS applies.
 4. Aim point = pixel-space center of the chosen neighbour tile.
 5. Movement uses the existing pixel-precision `moveTowardWithWalls` with that aim — the axis-separated wall slide is retained for sub-tile motion smoothness, but it is no longer the primary obstacle-avoidance mechanism.
 
-If all 4 neighbours have distance ≥ the mob's own (mob is at a local minimum, e.g. on the player's tile or in an unreachable pocket), the mob holds position.
+If all 8 neighbours have distance ≥ the mob's own (mob is at a local minimum, e.g. on the player's tile or in an unreachable pocket), the mob holds position.
 
 ### Jitter handling
 
@@ -126,7 +129,7 @@ Mobs whose jitter falls in `[0.25, 0.75]` on both axes use the unbiased flow fie
 
 ### Determinism invariants
 
-- Neighbour enumeration order in the BFS queue and in the per-mob gradient pick is fixed: **N, E, S, W**.
+- Neighbour enumeration order in the BFS queue and in the per-mob gradient pick is fixed (clockwise from N): **N, NE, E, SE, S, SW, W, NW**. Diagonal steps are gated on corner-cut prevention — both axis-aligned tiles bracketing the corner must be non-wall.
 - The BFS is a pure function of `(roomIndex, playerTile)` — wall grid is static per room, so the field for a given `(room, tile)` is byte-identical across runs.
 - The per-mob jitter bias is pre-computed at spawn time from `MobRNG`; the tick handler never touches `MobRNG`.
 - The BFS must run before mob updates *and* before any code that depends on mob position (death pass, projectile resolution) within the same tick.

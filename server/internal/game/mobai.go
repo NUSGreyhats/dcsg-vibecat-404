@@ -170,7 +170,7 @@ func UpdateEnemy(e *EnemyState, p *PlayerState, roomIndex uint8, dt float32, now
 		pr, pc := TileOf(p.X, p.Y)
 		fr, fc := BiasedPlayerTile(pr, pc, e.JitterX, e.JitterY, roomIndex)
 		field := fields.Get(fr, fc)
-		nr, nc := NextStepTile(field, mr, mc)
+		nr, nc := NextStepTile(field, roomIndex, mr, mc)
 		aimX, aimY := TileCenter(nr, nc)
 		moveTowardWithWalls(e, aimX, aimY, dt, roomIndex)
 
