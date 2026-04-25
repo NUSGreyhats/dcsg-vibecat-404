@@ -38,13 +38,13 @@ const (
 	// --- Harder-mobs tuning. See docs/specs/features/harder-mobs.md. ---
 
 	// WaveArmDelayMs is the base delay from wave arm → fire.
-	WaveArmDelayMs = 3000
+	WaveArmDelayMs = 1500
 
 	// WaveArmJitterMs is the ± jitter applied to each wave's arm→fire delay.
 	// Consumes one MobRNG.Intn(2 * WaveArmJitterMs) per declared wave at
 	// room load. Changing this value is a determinism change — old seeds
 	// invalidated.
-	WaveArmJitterMs = 3000
+	WaveArmJitterMs = 1500
 
 	// WaveEntityIDBase is the starting EntityID for mobs spawned by
 	// waves (template mob IDs stay well below this). Per-room offset keeps

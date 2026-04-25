@@ -25,22 +25,14 @@ var RoomTemplates = [12]*RoomTemplate{
 
 	// ---- Room 1 — tutorial grunts ----
 	//
-	// 3 initial mobs: WaveTriggers = [0.66, 0.33] → floor(3*0.66)=1 (wave 0
-	// kept), floor(3*0.33)=0 (wave 1 skipped). A single wave teaches the
-	// reinforcement mechanic.
+	// 3 initial mobs, no waves. Tutorial pacing — players learn movement
+	// and basic combat without reinforcement pressure.
 	{
 		TilemapID: "room-1",
 		Enemies: []EnemySpawnDef{
 			{EntityID: 101, Type: EnemyGrunt, X: 400, Y: 300},
 			{EntityID: 102, Type: EnemyGrunt, X: 800, Y: 300},
 			{EntityID: 103, Type: EnemyGrunt, X: 600, Y: 420},
-		},
-		Waves: []WaveDef{
-			// Arms at ≤1 living. Two grunts from the sides.
-			{Mobs: []WaveMobDef{
-				{Type: EnemyGrunt, X: 200, Y: 500},
-				{Type: EnemyGrunt, X: 1080, Y: 500},
-			}},
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 151, Type: PickupHealthPotion, X: 300, Y: 600},
@@ -53,7 +45,8 @@ var RoomTemplates = [12]*RoomTemplate{
 
 	// ---- Room 2 — introduce runners ----
 	//
-	// 4 initial mobs: triggers at ≤2 and ≤1 living.
+	// 4 initial mobs, no waves. Players learn the runner archetype on a
+	// clean fight before waves enter the picture in room 4+.
 	{
 		TilemapID: "room-2",
 		Enemies: []EnemySpawnDef{
@@ -61,16 +54,6 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 202, Type: EnemyGrunt, X: 960, Y: 260},
 			{EntityID: 203, Type: EnemyRunner, X: 640, Y: 180},
 			{EntityID: 204, Type: EnemyRunner, X: 640, Y: 450},
-		},
-		Waves: []WaveDef{
-			{Mobs: []WaveMobDef{
-				{Type: EnemyRunner, X: 240, Y: 500},
-				{Type: EnemyRunner, X: 1040, Y: 500},
-			}},
-			{Mobs: []WaveMobDef{
-				{Type: EnemyGrunt, X: 640, Y: 560},
-				{Type: EnemyGrunt, X: 640, Y: 220},
-			}},
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 251, Type: PickupHealthPotion, X: 180, Y: 620},
@@ -83,7 +66,8 @@ var RoomTemplates = [12]*RoomTemplate{
 
 	// ---- Room 3 — first tank ----
 	//
-	// 4 initial mobs: triggers at ≤2 and ≤1.
+	// 4 initial mobs, no waves. Introduces the tank archetype; pacing
+	// still in tutorial mode.
 	{
 		TilemapID: "room-3",
 		Enemies: []EnemySpawnDef{
@@ -91,15 +75,6 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 302, Type: EnemyRunner, X: 900, Y: 240},
 			{EntityID: 303, Type: EnemyTank, X: 640, Y: 360},
 			{EntityID: 304, Type: EnemyGrunt, X: 480, Y: 460},
-		},
-		Waves: []WaveDef{
-			{Mobs: []WaveMobDef{
-				{Type: EnemyRunner, X: 260, Y: 440},
-				{Type: EnemyRunner, X: 1020, Y: 440},
-			}},
-			{Mobs: []WaveMobDef{
-				{Type: EnemyTank, X: 640, Y: 480},
-			}},
 		},
 		Pickups: []PickupSpawnDef{
 			{EntityID: 351, Type: PickupAmmoCrate, X: 200, Y: 640},

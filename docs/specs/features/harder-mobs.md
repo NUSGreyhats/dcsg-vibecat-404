@@ -23,11 +23,11 @@ Lives in the mob-AI package. Named constants — never inlined.
 WaveTriggers = []float32{0.66, 0.33}  // wave 1 at ≤66% living, wave 2 at ≤33%
 
 // WaveArmDelayMs: base delay from arm → fire.
-WaveArmDelayMs = 3000
+WaveArmDelayMs = 1500
 
 // WaveArmJitterMs: ± jitter applied to the arm→fire delay.
 // Consumes 1 MobRNG.Intn(2*WaveArmJitterMs) per declared wave at room load.
-WaveArmJitterMs = 3000
+WaveArmJitterMs = 1500
 
 // PackAggroRadius: pixel radius for on-damage aggro broadcast.
 // No LOS check — "they heard you."
