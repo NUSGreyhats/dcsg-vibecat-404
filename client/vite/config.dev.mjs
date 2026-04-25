@@ -9,6 +9,10 @@ export default defineConfig({
     base: './',
     build: {
         rollupOptions: {
+            input: {
+                index: 'index.html',
+                spectate: 'spectate.html',
+            },
             output: {
                 manualChunks: {
                     phaser: ['phaser']

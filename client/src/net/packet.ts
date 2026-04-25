@@ -131,6 +131,7 @@ export type PlayerSnapshot = {
   speed_stacks: number; // uint8, +10% move speed each
   fire_rate_stacks: number; // uint8, cooldown / (1 + 0.1 * stacks)
   damage_stacks: number; // uint8, +10% damage each
+  aim_angle?: number; // radians; the player's most recent C2S_SHOOT angle.
 };
 
 export type EntitySnapshot = {

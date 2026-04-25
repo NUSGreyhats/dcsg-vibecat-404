@@ -70,7 +70,7 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 | `EnemySpawn`       | `{ entity_id, type, x, y, hp }`                                                               |
 | `PickupSpawn`      | `{ entity_id, type, x, y }`                                                                   |
 | `DoorDef`          | `{ door_id, x, y, target_room, locked }`                                                      |
-| `PlayerSnapshot`   | `{ x, y, hp, weapon_id, ammo, inventory: []string, coins: int32, speed_stacks: uint8, fire_rate_stacks: uint8, damage_stacks: uint8 }` |
+| `PlayerSnapshot`   | `{ x, y, hp, weapon_id, ammo, inventory: []string, coins: int32, speed_stacks: uint8, fire_rate_stacks: uint8, damage_stacks: uint8, aim_angle: float32 }`. `aim_angle` is the radians angle of the player's most recent `C2S_SHOOT` (zero until the first shot). The player client ignores it (their local cursor read is more responsive); spectators (no local cursor) render the gun rotation from this field. See [04-lobby.md#live-spectating](./04-lobby.md#live-spectating). |
 | `EntitySnapshot`   | `{ entity_id, type, x, y, hp, state }`                                                        |
 | `ProjSnapshot`     | `{ proj_id, x, y, angle, owner }`                                                             |
 | `SplitData`        | `{ room_index, time_ms, kills }`                                                              |
@@ -173,8 +173,9 @@ This gives the viewer everything it needs to render from the first frame without
 
 ## Implementation status
 
-- **Client:** typed envelope + discriminated unions fully defined in `client/src/net/packet.ts`.
-- **Server:** current server (`server/main.go`) does NOT yet use this envelope — it accepts a single monolithic `gameState` JSON every ~1.5 s with server-side validation. Migration to the typed envelope is later work.
+- **Client:** typed envelope + discriminated unions in `client/src/net/packet.ts`.
+- **Server:** typed envelope live across `server/internal/protocol/` (decode) and `server/internal/game/loop.go` (dispatch). Single `gameLoop` goroutine drains `inCh`, runs the 20 Hz tick, and emits `S2C_*` envelopes via `outCh`.
+- **Spectator protocol:** server-side fan-out (per-spectator outCh + catchup) shipped in #23. Client-side bundle (`client/src/spectate-main.ts` + `SpectatorSync` + `SpectateGame`) shipped in the same PR.
 
 ## Intentional bugs in this area
 

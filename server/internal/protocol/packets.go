@@ -83,6 +83,10 @@ type PlayerSnapshot struct {
 	SpeedStacks    uint8    `json:"speed_stacks"`
 	FireRateStacks uint8    `json:"fire_rate_stacks"`
 	DamageStacks   uint8    `json:"damage_stacks"`
+	// AimAngle is the radians angle of the player's most recent
+	// C2S_SHOOT. Spectators render the gun rotation from this; the
+	// player ignores it (their local cursor is more responsive).
+	AimAngle float32 `json:"aim_angle"`
 }
 
 type EntitySnapshot struct {

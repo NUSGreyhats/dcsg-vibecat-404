@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <!-- Caddy serves this HTML for any /spectate/<player_id> URL (single
+         path segment), so relative `./assets/...` script paths emitted by
+         Vite would resolve against /spectate/<id>/ and 404. <base> pins
+         resolution to the document root so every asset URL becomes
+         /assets/... regardless of viewer URL. -->
+    <base href="/">
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/style.css">
+    <title>VIBECAT 404 — Spectator</title>
+</head>
+
+<body>
+    <div id="app">
+        <div id="game-container"></div>
+    </div>
+    <script type="module" src="/src/spectate-main.ts"></script>
+</body>
+</html>

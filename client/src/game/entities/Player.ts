@@ -45,9 +45,20 @@ export class Player extends Phaser.GameObjects.Container {
   private moving = false;
   private aimAngle = 0;
   private weaponId: WeaponId = "pistol";
+  // When true, aimAngle is updated from the server's PlayerSnapshot.aim_angle
+  // instead of from the local cursor. Spectator mode sets this — they have
+  // no shooter cursor to read from. Default false preserves the player's
+  // original behaviour exactly.
+  private useSnapshotAim = false;
 
-  constructor(scene: Phaser.Scene, x: number, y: number) {
+  constructor(
+    scene: Phaser.Scene,
+    x: number,
+    y: number,
+    opts: { useSnapshotAim?: boolean } = {},
+  ) {
     super(scene, x, y);
+    this.useSnapshotAim = opts.useSnapshotAim ?? false;
     this.targetX = x;
     this.targetY = y;
 
@@ -102,6 +113,7 @@ export class Player extends Phaser.GameObjects.Container {
     y: number;
     hp: number;
     weapon_id?: number;
+    aim_angle?: number;
   }): void {
     this.targetX = snap.x;
     this.targetY = snap.y;
@@ -119,6 +131,9 @@ export class Player extends Phaser.GameObjects.Container {
         }
         this.playWeaponAnim("idle");
       }
+    }
+    if (this.useSnapshotAim && typeof snap.aim_angle === "number") {
+      this.aimAngle = snap.aim_angle;
     }
   }
 
@@ -149,15 +164,19 @@ export class Player extends Phaser.GameObjects.Container {
    * walk reflects actual motion.
    */
   tick(_dt: number): void {
-    // Aim toward the pointer in world-space coords. Re-projecting per
-    // frame guards against camera scroll changing the relationship
-    // between screen pixels and world coords.
-    const pointer = this.scene.input.activePointer;
-    const cam = this.scene.cameras.main;
-    if (cam) pointer.updateWorldPoint(cam);
-    const worldX = Number.isFinite(pointer.worldX) ? pointer.worldX : pointer.x;
-    const worldY = Number.isFinite(pointer.worldY) ? pointer.worldY : pointer.y;
-    this.aimAngle = Math.atan2(worldY - this.y, worldX - this.x);
+    if (!this.useSnapshotAim) {
+      // Aim toward the pointer in world-space coords. Re-projecting per
+      // frame guards against camera scroll changing the relationship
+      // between screen pixels and world coords. Spectators skip this
+      // entirely — their aimAngle is set in applySnapshot from the
+      // server's authoritative aim_angle field.
+      const pointer = this.scene.input.activePointer;
+      const cam = this.scene.cameras.main;
+      if (cam) pointer.updateWorldPoint(cam);
+      const worldX = Number.isFinite(pointer.worldX) ? pointer.worldX : pointer.x;
+      const worldY = Number.isFinite(pointer.worldY) ? pointer.worldY : pointer.y;
+      this.aimAngle = Math.atan2(worldY - this.y, worldX - this.x);
+    }
 
     // Smooth toward the server-authoritative target position.
     const dx = this.targetX - this.x;

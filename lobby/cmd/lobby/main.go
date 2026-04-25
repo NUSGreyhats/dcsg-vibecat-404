@@ -1,8 +1,9 @@
 // Package main is the lobby service entry point.
 //
 // Phase 1 (#21) hosts identity HTTP serving. Phase 2 (#22) adds the public
-// leaderboard webapp + replay download. Later phases add spectator
-// selector, source serving, admin panel, and the FIFO queue.
+// leaderboard webapp + replay download. Phase 3 (#23) adds the spectator
+// selector and (later) the spectator viewer page. Later phases add source
+// serving, admin panel, and the FIFO queue.
 //
 // Spec: docs/specs/foundations/04-lobby.md.
 package main
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/greyhats/defcon-game/lobby/internal/leaderboard"
+	"github.com/greyhats/defcon-game/lobby/internal/livegames"
 	"github.com/greyhats/defcon-game/lobby/web"
 	"github.com/greyhats/defcon-game/pkg/identity"
 )
@@ -31,6 +33,7 @@ func main() {
 	addr := envDefault("LISTEN_ADDR", ":3001")
 	identityDBPath := envDefault("IDENTITY_DB", "/data/identity.db")
 	gameDBPath := envDefault("GAME_DB", "/data/game.db")
+	gameServerURL := envDefault("GAME_SERVER_URL", "http://game-server:8080")
 
 	identityDB, err := identity.OpenDB(identityDBPath)
 	if err != nil {
@@ -45,6 +48,15 @@ func main() {
 	defer gameDB.Close()
 
 	identitySvc := identity.NewService(identityDB)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	// Live-games poller — pulls /internal/live-games from the game server
+	// every 2 s and caches the response. Backs /api/live and the
+	// /spectate selector page.
+	livePoller := livegames.New(gameServerURL)
+	livePoller.Start(ctx)
 
 	mux := http.NewServeMux()
 	identitySvc.Register(mux)
@@ -108,6 +120,29 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(replay)
 	})
+	mux.HandleFunc("/spectate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(web.SpectateHTML)
+	})
+	mux.HandleFunc("/api/live", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Verbatim cache — the game-server's spectator.Summary JSON shape
+		// is the contract here. If the cache hasn't populated yet (or the
+		// game server is down), this is the empty slice.
+		entries := livePoller.Snapshot()
+		if entries == nil {
+			entries = []livegames.Entry{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(entries)
+	})
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -118,11 +153,8 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
 	go func() {
-		log.Printf("lobby: listening on %s (identity_db=%s game_db=%s)", addr, identityDBPath, gameDBPath)
+		log.Printf("lobby: listening on %s (identity_db=%s game_db=%s game_server=%s)", addr, identityDBPath, gameDBPath, gameServerURL)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen: %v", err)
 		}
