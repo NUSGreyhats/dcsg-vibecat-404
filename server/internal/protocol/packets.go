@@ -83,7 +83,6 @@ type PlayerSnapshot struct {
 	SpeedStacks    uint8    `json:"speed_stacks"`
 	FireRateStacks uint8    `json:"fire_rate_stacks"`
 	DamageStacks   uint8    `json:"damage_stacks"`
-	AmmoStacks     uint8    `json:"ammo_stacks"`
 }
 
 type EntitySnapshot struct {

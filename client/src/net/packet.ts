@@ -131,7 +131,6 @@ export type PlayerSnapshot = {
   speed_stacks: number; // uint8, +10% move speed each
   fire_rate_stacks: number; // uint8, cooldown / (1 + 0.1 * stacks)
   damage_stacks: number; // uint8, +10% damage each
-  ammo_stacks: number; // uint8, +5 max ammo per non-pistol weapon each
 };
 
 export type EntitySnapshot = {

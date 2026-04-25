@@ -42,12 +42,14 @@ func HandleShopPurchase(p *PlayerState, itemID uint8) bool {
 
 	switch offer.ID {
 	case ShopItemAmmo:
-		p.AmmoStacks++
+		// Refill: top up every non-pistol weapon to its static cap. The
+		// purchase is a consumable-style refill, NOT a permanent stack —
+		// max capacity is unchanged.
 		for w, spec := range WeaponSpecs {
 			if spec.AmmoMax >= 9999 {
 				continue
 			}
-			p.WeaponAmmo[w] = EffectiveAmmoMax(spec, p)
+			p.WeaponAmmo[w] = spec.AmmoMax
 		}
 	case ShopItemSpeed:
 		p.SpeedStacks++

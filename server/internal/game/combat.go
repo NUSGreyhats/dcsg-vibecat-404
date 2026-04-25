@@ -132,14 +132,6 @@ func EffectiveSpeedMult(p *PlayerState, now time.Time) float32 {
 	return (1 + 0.1*float32(p.SpeedStacks)) * temp
 }
 
-// EffectiveAmmoMax derives a weapon's max-ammo cap including AmmoStacks.
-// Pistol-tier "unlimited" weapons (AmmoMax >= 9999) ignore stacks.
-func EffectiveAmmoMax(spec WeaponSpec, p *PlayerState) int {
-	if spec.AmmoMax >= 9999 {
-		return spec.AmmoMax
-	}
-	return spec.AmmoMax + 5*int(p.AmmoStacks)
-}
 
 // AdvanceProjectiles steps every projectile, culls expired, and returns
 // the list of (projectile, enemy) collisions for the collision pass to

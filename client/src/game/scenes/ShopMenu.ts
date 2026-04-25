@@ -29,7 +29,7 @@ type ShopOffer = {
 // Mirrors server/internal/game/shop.go:ShopCatalog. IDs and costs must
 // match the server. Display names/blurbs are client-only flavor.
 const SHOP_CATALOG: ShopOffer[] = [
-  { id: 1, name: "Ammo",     cost: 5,  blurb: "+5 max ammo (per weapon)" },
+  { id: 1, name: "Ammo",     cost: 5,  blurb: "Refill all weapons" },
   { id: 2, name: "Speed",    cost: 10, blurb: "+10% move speed" },
   { id: 3, name: "Fire Rate", cost: 15, blurb: "+10% fire rate" },
   { id: 4, name: "Damage",   cost: 20, blurb: "+10% damage" },
@@ -147,7 +147,9 @@ export class ShopMenu extends Phaser.Scene {
       const offer = SHOP_CATALOG[i];
       const stacks = stacksFor(offer.id, player);
       const prefix = i === this.selected ? "> " : "  ";
-      const label = `${prefix}${offer.name.padEnd(10)} $${offer.cost}   ${offer.blurb}  (x${stacks})`;
+      // Ammo (id=1) is a one-shot refill — no stack count to display.
+      const tail = offer.id === 1 ? "" : `  (x${stacks})`;
+      const label = `${prefix}${offer.name.padEnd(10)} $${offer.cost}   ${offer.blurb}${tail}`;
       const txt = this.add
         .text(cx - 220, startY + i * 32, label, {
           fontFamily: FONT_FAMILY,
@@ -218,7 +220,6 @@ function stacksFor(
   itemId: number,
   player:
     | {
-        ammo_stacks?: number;
         speed_stacks?: number;
         fire_rate_stacks?: number;
         damage_stacks?: number;
@@ -227,8 +228,6 @@ function stacksFor(
 ): number {
   if (!player) return 0;
   switch (itemId) {
-    case 1:
-      return player.ammo_stacks ?? 0;
     case 2:
       return player.speed_stacks ?? 0;
     case 3:

@@ -93,13 +93,13 @@ type PlayerState struct {
 	ShieldUntil     time.Time
 
 	// Shop traits — permanent stackable buffs purchased from features/shop.md.
-	// Reset on death / new run. Effective multipliers and caps are derived at
-	// read time, never cached on this struct.
+	// Reset on death / new run. Effective multipliers are derived at read
+	// time, never cached on this struct. The shop's `ammo` purchase is a
+	// one-shot refill (not stackable) so there is no AmmoStacks counter.
 	Coins          int32
 	SpeedStacks    uint8
 	FireRateStacks uint8
 	DamageStacks   uint8
-	AmmoStacks     uint8
 }
 
 func NewPlayerState() *PlayerState {

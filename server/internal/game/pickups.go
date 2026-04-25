@@ -55,9 +55,8 @@ func applyPickup(p *PlayerState, pk *PickupState, claimedType uint8, _ time.Time
 		if ok {
 			cur := p.WeaponAmmo[p.CurrentWeapon]
 			cur += 20
-			cap := EffectiveAmmoMax(spec, p)
-			if cur > cap {
-				cur = cap
+			if cur > spec.AmmoMax {
+				cur = spec.AmmoMax
 			}
 			p.WeaponAmmo[p.CurrentWeapon] = cur
 		}

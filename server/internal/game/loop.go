@@ -586,7 +586,6 @@ func (e *Engine) sendState(now time.Time) {
 			SpeedStacks:    e.player.SpeedStacks,
 			FireRateStacks: e.player.FireRateStacks,
 			DamageStacks:   e.player.DamageStacks,
-			AmmoStacks:     e.player.AmmoStacks,
 		},
 		Entities:    entities,
 		Projectiles: projs,
