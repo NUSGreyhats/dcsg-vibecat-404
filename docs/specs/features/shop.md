@@ -2,7 +2,7 @@
 
 ## Purpose
 
-In-run shop where the player spends Coins on **permanent stackable traits**: ammo capacity, speed, fire rate, damage. Each purchase increments a stack counter; effects compound for the rest of the run (zeroed on death). Coins drop from defeated enemies as world pickups. The shop is opened via a global keybind ("B") at any time during a run — there is no shop room or shop NPC. Hosts [BUG-12 — Pickup Type Confusion](#bug-12-pickup-type-confusion), a Protocol-tier client-trusted-discriminator bug that lets the player declare what type a pickup is at collection time (e.g. claim an ammo crate as a coin).
+In-run shop where the player spends Coins on **permanent stackable traits**: ammo capacity, speed, fire rate, damage. Each purchase increments a stack counter on `PlayerState`; effects compound for the rest of the run (zeroed on death). Coins drop from defeated enemies as world pickups. The shop is opened via a global keybind ("B") at any time during a run — there is no shop room or shop NPC. Hosts [BUG-12 — Pickup Type Confusion](#bug-12-pickup-type-confusion), a Protocol-tier bug where the server uses a client-supplied `claimed_type` field on `C2S_INTERACT` to dispatch the pickup effect, instead of looking up the type stored on the pickup. A modified client can claim an ammo crate as a coin and mint currency.
 
 ## Data model
 
@@ -21,11 +21,9 @@ PlayerState {
 }
 ```
 
-`int32` is wide enough on `Coins` to absorb BUG-12 abuse without wrapping. Integer-overflow on coins is **not** an intended bug class for this feature.
+`Coins` is `int32`; integer-overflow on coins is **not** an intended bug class. Stack counters are `uint8` (coin cost rate-limits stack growth far below 255).
 
-`uint8` is plenty for the stack counters — coin cost is the natural rate-limit; nobody is stacking 256 traits in a 2-minute run.
-
-The existing `SpeedMult` / `SpeedMultUntil` / `DamageMult` / `DamageMultUntil` timed-buff fields (used by the inventory `speed_boost` consumable) are **unchanged** and orthogonal to shop traits — temporary buffs from inventory items and permanent traits from the shop compose multiplicatively, and shop traits do not introduce new timer machinery.
+The existing `SpeedMult` / `SpeedMultUntil` / `DamageMult` / `DamageMultUntil` timed-buff fields (used by the inventory `speed_boost` consumable) are unchanged. Shop traits and temp buffs compose **multiplicatively** at read time — see the derivation table below. Shop traits add no new timer fields.
 
 Effective multipliers and caps are **derived**, not stored:
 
@@ -69,11 +67,11 @@ Catalog is fixed at server startup; client mirrors the same IDs and costs. Dispa
 
 ### Coin drop policy
 
-When an enemy dies (in `internal/game/combat.go`'s enemy-death branch), spawn a `PickupCoin` at the enemy's `(x, y)` with a fresh `entity_id`, registered in the room's `RoomState.Pickups` map identically to any other pickup.
+When an enemy's HP reaches zero in `combat.go`'s damage-application path, register a new `PickupState` in `r.Pickups` with `Type=PickupCoin`, the enemy's last `(X, Y)`, a fresh `EntityID`, and `ExpiresAt = now.Add(30 * time.Second)`. `ExpiresAt` is a new field on `PickupState` (see [pickups.md](pickups.md) — `RespawnAt` is the existing time field; `ExpiresAt` is added for the despawn-on-timeout behavior coins need).
 
-- Drop chance: 100%, 1 coin per enemy. Tune from there.
-- Despawn after 30 s of being unclaimed (a new time-bounded cleanup pass on `RoomState.Pickups`; or reuse generalized `RespawnAt` logic if [pickups.md — implementation notes](pickups.md#implementation-notes) factors it out).
-- Because coins live in the same `Pickups` registry and use the same `C2S_INTERACT` path as ammo / health, they are subject to BUG-05 *and* BUG-12.
+- Drop chance: 100%, 1 coin per enemy. Tunable.
+- Despawn at `ExpiresAt`: in the per-tick pickup pass, set `pk.Consumed = true` for any `pk` where `!pk.Consumed && !pk.ExpiresAt.IsZero() && now.After(pk.ExpiresAt)`. The existing pickup-broadcast logic drops consumed pickups from the next snapshot.
+- Because coins live in the same `Pickups` registry and use the same `C2S_INTERACT` path as ammo / health, they are subject to [BUG-05](pickups.md#bug-05-interact-range-bug) *and* [BUG-12](#bug-12-pickup-type-confusion).
 
 ## Data flow
 
@@ -94,7 +92,7 @@ handleInteract:
 applyPickup switches on CLAIMED_TYPE — see BUG-12
     │
     ▼
-S2C_STATE broadcasts updated PlayerSnapshot (Coins, ammo, buff fields, etc.)
+S2C_STATE broadcasts updated PlayerSnapshot (Coins, *Stacks, WeaponAmmo, ...)
 ```
 
 The pickup is consumed regardless of which switch case ran — claiming an ammo crate as a coin still consumes the ammo crate. This is intentional ([BUG-12](#bug-12-pickup-type-confusion)).
@@ -120,11 +118,11 @@ S2C_STATE broadcasts updated PlayerSnapshot
 
 ### Stack semantics
 
-All four shop items are **permanent for the duration of the run** and **stack additively**. Each purchase increments the corresponding `*Stacks` counter; the effective multiplier or cap is derived per the table in the data-model section. There is no expiry, no decay, no overwrite — purchases compound until the run ends (death / new run zeroes them).
+Each purchase increments the corresponding `*Stacks` counter on `PlayerState`. Stacks persist for the rest of the run and zero on death / new run. There is no expiry, no decay, no overwrite, no purchase cooldown.
 
-`ammo` is special-cased: in addition to incrementing `AmmoStacks`, the purchase **refills** every non-unlimited weapon's ammo to its new cap. Without the refill, "I bought ammo and got nothing visible" would be a footgun.
+`ammo` is the only case that mutates anything besides a stack counter: in addition to `p.AmmoStacks++`, the handler writes `p.WeaponAmmo[w] = spec.AmmoMax + 5*int(p.AmmoStacks)` for every non-unlimited weapon — raising the cap and refilling current ammo to the new cap in one step.
 
-There is no purchase cooldown. Stack growth is gated by coin supply — at 5 coins per purchase and ~1 coin per enemy kill, a run yields ~4–6 stacks total honestly. BUG-12 lifts that ceiling toward "every pickup converts to a stack", which is intentional.
+Stack growth is gated by coin supply, not by a cooldown. At 5 coins per purchase and ~1 coin per enemy kill, an honest run yields ~4–6 stacks total; BUG-12 lifts that ceiling toward "every pickup converts to a stack".
 
 ## Client interactions
 
@@ -138,15 +136,42 @@ There is no purchase cooldown. Stack growth is gated by coin supply — at 5 coi
 
 ## Implementation notes
 
-- Package: `internal/game/shop` (new).
-- Do **not** route shop purchases through `AllowedItems` (the string-keyed map in `items.go`). Shop dispatch is integer-keyed by design — adding it to the string map would re-expose BUG-09 / BUG-10 surfaces (currently disabled) on the shop path.
-- Effective multipliers/caps are **derived per read**, not cached on `PlayerState`. The combat / movement / ammo paths each compute `1.0 + 0.1 × *Stacks` (or the ammo equivalent) at the point of use. Don't memoize — the stack counter is the source of truth and the arithmetic is trivial.
-- Stack counters are zeroed at run start (alongside the existing run-state reset). They do **not** persist across deaths.
-- The temporary `SpeedMult` / `DamageMult` fields used by inventory `speed_boost` are unrelated to shop stacks. Effective speed at a tick is `(1 + 0.1 × p.SpeedStacks) × nonZeroSpeedMult(p, now)` — **keep** the `nonZero*Mult(p, now)` helper pattern for the temp-buff side; the shop trait reads do not need expiry-checking.
-- `ammo` purchase iterates `WeaponSpecs` once and writes `WeaponAmmo[w] = newCap` for every non-unlimited weapon (skip pistol). This is the only shop case that mutates anything besides a stack counter.
-- Coin drops use the existing `RoomState.Pickups` registry. A despawn-by-time pass needs to be added (or generalized from any future `RespawnAt` logic in pickups.md).
-- The `Coins` int32 field is **not** narrowed for "fun" — see Data model note.
-- Replay engine must persist `claimed_type` alongside `target_id` in the per-tick input log; otherwise BUG-12-stacked runs won't reproduce. See [foundations/08-leaderboard-replay.md](../foundations/08-leaderboard-replay.md).
+### Server
+
+- **`internal/game/state.go`** — append `Coins int32` and `SpeedStacks / FireRateStacks / DamageStacks / AmmoStacks uint8` to `PlayerState`. Zero all five in the per-run reset path (death / new run).
+- **`internal/game/pickups.go`** — add the constant `PickupCoin = 3` (recycled from the removed Speed boost type). Add `ExpiresAt time.Time` to `PickupState`. Change `applyPickup`'s signature to `applyPickup(p *PlayerState, pk *PickupState, claimedType uint8, now time.Time)` and switch on `claimedType` (see [BUG-12](#bug-12-pickup-type-confusion)). Add a `case PickupCoin: p.Coins++` arm.
+- **`internal/game/combat.go`** — at the point where an enemy's HP reaches zero in the damage path, register a new `PickupState{Type: PickupCoin, X, Y, EntityID: r.NextEntityID(), ExpiresAt: now.Add(30*time.Second)}` in `r.Pickups`.
+- **`internal/game/shop.go`** (new) — define `ShopOffer`, `ShopCatalog` (the slice from the data-model section), and `HandleShopPurchase(p *PlayerState, itemID uint8) (applied bool)`. Body: bounds-check `itemID` against `len(ShopCatalog)`, debit `p.Coins`, switch on `offer.ID` to increment the matching `*Stacks` counter. The `ammo` case also walks `WeaponSpecs` and writes `p.WeaponAmmo[w] = spec.AmmoMax + 5*int(p.AmmoStacks)` for every non-unlimited weapon. Do **not** route shop purchases through `AllowedItems` — that would put the shop on the same string-keyed dispatch path that historically hosted BUG-09 / BUG-10.
+- **`internal/protocol/packets.go`** — extend `InteractPacket` with `ClaimedType uint8` (json tag `claimed_type`); add `ShopPurchasePacket` with one field `ItemID uint8` (json tag `item_id`); register `C2S_SHOP_PURCHASE` at type code `0x09`.
+- **C2S dispatcher** — register `C2S_SHOP_PURCHASE` → `HandleShopPurchase` next to the existing `C2S_INTERACT` registration.
+- **Tick loop** (in the same place the existing pickup pass runs) — for each `pk` in `r.Pickups`, if `!pk.Consumed && !pk.ExpiresAt.IsZero() && now.After(pk.ExpiresAt)`, set `pk.Consumed = true`. The existing snapshot diff drops consumed pickups.
+- **`PlayerSnapshot`** — append `coins`, `speed_stacks`, `fire_rate_stacks`, `damage_stacks`, `ammo_stacks` so the client can render the HUD coin counter and (optionally) per-trait stack counts in the shop UI.
+
+### Trait reads (find every call site)
+
+Effective values are derived at the point of use — **don't cache on `PlayerState`**. Replace the existing single-multiplier reads at these call sites:
+
+| Read point                                                  | Replacement                                                          |
+| ----------------------------------------------------------- | -------------------------------------------------------------------- |
+| Movement integration (wherever `SpeedMult` is read today)   | `(1 + 0.1*float32(p.SpeedStacks)) * nonZeroSpeedMult(p, now)`        |
+| `HandleShoot` damage (`combat.go:44–80`)                    | `(1 + 0.1*float32(p.DamageStacks)) * nonZeroDamageMult(p, now)`      |
+| `HandleShoot` cooldown                                      | `cooldown / (1 + 0.1*float32(p.FireRateStacks))` (Duration math)     |
+| `WeaponSpec.AmmoMax` clamp sites (ammo pickup, ammo buy, decrement) | `spec.AmmoMax + 5*int(p.AmmoStacks)`                         |
+
+`nonZero*Mult(p, now)` (the existing helper that returns `1.0` when the temp buff has expired) stays in place for the temp-buff side of the formula. The shop trait reads don't need expiry-checking.
+
+### Client
+
+- **`client/src/game/net/packet.ts`** — extend the `C2S_INTERACT` payload type with `claimed_type: number`. Add `C2S_SHOP_PURCHASE` to the `C2SType` union and a `sendShopPurchase(itemId: number)` helper. Update the `sendInteract` call to set `claimed_type` to the rendered pickup's type (the type stored client-side from the room load).
+- **`client/src/game/scenes/ShopMenu.ts`** (new) — clone `InventoryMenu.ts`. `create()` builds a 4-row list from a hardcoded catalog mirror, panel styling from [client/10-ui-components.md](../client/10-ui-components.md). `update()` reads `getSync().state.player.coins`; render rows where `cost > coins` greyed out. Input: ↑/↓ navigate, Enter → `sendShopPurchase(catalog[selected].id)`, Esc → close. Launch with `this.scene.launch('ShopMenu'); this.scene.pause('Game')`.
+- **`client/src/game/scenes/GameHUD.ts`** — add a coin-counter `Text` (top-right, gold). Bind "B" to launch `ShopMenu` and pause the `Game` scene.
+- **`client/src/game/scenes/Preloader.ts`** — register a `coin` sprite asset.
+- **`client/src/game/main.ts`** — register the new `ShopMenu` scene.
+- **Coin pickup rendering** — coins are pickups, so they go through the existing pickup render path in [client/05-entities-rendering.md](../client/05-entities-rendering.md). Add a `coin` case wherever the renderer switches on pickup type.
+
+### Replay
+
+`InputLog` entries for `C2S_INTERACT` must include `claimed_type` alongside `target_id`. Old logs without the field decode `claimed_type = 0`, which falls through `applyPickup`'s switch with no effect — those logs still verify but don't reproduce BUG-12-exploited runs. See [foundations/08-leaderboard-replay.md](../foundations/08-leaderboard-replay.md).
 
 ## Implementation status
 
@@ -165,9 +190,7 @@ When implementing, the following appends are also required:
 
 ### BUG-12 Pickup Type Confusion
 
-**Source:** OWASP A04:2021 — Insecure Design (client-trusted discriminator). Same anti-pattern family as Mass Assignment / Parameter Tampering: the server accepts a client-supplied tag and uses it to dispatch into authoritative state, even though the server already has the canonical tag.
-
-**Design choice enabling the bug:** `C2S_INTERACT` carries a `claimed_type uint8` field, and `applyPickup` switches on `claimed_type` rather than on the server-stored `pk.Type`.
+**Design choice enabling the bug:** `C2S_INTERACT` carries a `claimed_type uint8` field. The server validates that the pickup exists and is in range, then passes the client-declared type into `applyPickup`'s switch — the server-stored `pk.Type` is never read for dispatch.
 
 **Root cause sketch:**
 
@@ -200,15 +223,15 @@ The server validates that the pickup *exists*, that it's in range (subject to BU
 
 A weaker reverse exploit also exists — claim a coin as `PickupHealthPotion` to gain `+20 HP`. Less interesting because health potions are plentiful and HP is rarely the binding constraint.
 
-**Bound:** Limited per pickup — each pickup is consumed once via the `pk.Consumed` flag. The exploit's economic ceiling is `(number of pickups in the run) × 1 coin`. Pickup count is room-bounded; the player cannot mint coins from thin air. Combined with shop costs (5–20 coins per item), the practical upside is roughly one extra shop purchase per run-without-grinding-enemies.
+**Bound:** Each pickup is consumed once via `pk.Consumed`. Economic ceiling: `(number of pickups in the run) × 1 coin`. Pickup count is room-bounded — the player cannot mint coins from thin air. At 5 coins per shop item, the practical upside is ~2–3 extra trait stacks per run beyond honest play.
 
 **Detection:** Replay reproduces identically — `(seed, InputLog)` must include the recorded `claimed_type` per interact. Do **not** "fix" `applyPickup` to switch on `pk.Type`, and do **not** drop the `claimed_type` field from the packet.
 
 **Synergies:**
-- Strong synergy with [BUG-05](pickups.md#bug-05-interact-range-bug): grab pickups across the room *and* choose what they decode as → multiplies the type-confusion abuse rate.
-- Indirect synergy with [BUG-04](combat-weapons.md#bug-04-swap-cancel) and [BUG-07](combat-weapons.md#bug-07-damage-batch-overflow) via the shop's `damage_boost` and `fire_rate` items — converting incidental ammo crates into shop currency funds the buffs that turbo-charge those DPS bugs.
+- [BUG-05](pickups.md#bug-05-interact-range-bug) lets the player interact with pickups from across the room. Combined with BUG-12, every visible pickup becomes a coin without needing to walk to it.
+- The `damage` and `fire_rate` traits compound with [BUG-04](combat-weapons.md#bug-04-swap-cancel) and [BUG-07](combat-weapons.md#bug-07-damage-batch-overflow). BUG-12 funds those traits without enemy-grinding.
 
-**Savings:** ~10–20 s per run. Larger than for a timed-buff economy because shop traits are **permanent and stack additively** — every minted coin converts to a stack that compounds for the whole run, not just a 10s window. The most exploitative target is `damage` (each stack permanently boosts DPS through every subsequent fight, including the boss). Concrete back-of-envelope: ~10-15 pickups per run, BUG-12 converts each into a coin, ~2-3 extra trait stacks beyond honest play, ~20-30% effective DPS / mobility uplift for the run's tail.
+**Savings:** ~10–20 s per run. With ~10–15 pickups in a typical run, an exploiter mints ~10–15 extra coins beyond the ~1-per-kill honest rate, buying ~2–3 extra permanent stacks. Each `damage` stack adds 10% damage for the rest of the run (including the boss).
 
 ## Packets used
 
@@ -225,7 +248,7 @@ A `C2S_SHOP_OPEN` / `S2C_SHOP_STATE` pair is **not** introduced — the shop UI 
 - [features/combat-weapons.md](combat-weapons.md) — damage and fire-rate buff multipliers consumed by the shoot pipeline; `nonZero*Mult` helper pattern.
 - [features/mob-ai.md](mob-ai.md) — enemy death is the coin drop trigger.
 - [foundations/02-protocol.md](../foundations/02-protocol.md) — `InteractPacket.ClaimedType` field and `C2S_SHOP_PURCHASE` row.
-- [foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md) — `Coins`, `FireRateMult`, `FireRateMultUntil` on `PlayerState`.
+- [foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md) — `Coins` and the four `*Stacks` fields on `PlayerState`.
 - [foundations/08-leaderboard-replay.md](../foundations/08-leaderboard-replay.md) — replay must record `claimed_type`.
 - [client/04-scenes.md](../client/04-scenes.md) — `ShopMenu` scene.
 - [client/07-input-controls.md](../client/07-input-controls.md) — "B" → open ShopMenu binding.
