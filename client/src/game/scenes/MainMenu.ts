@@ -617,6 +617,13 @@ export class MainMenu extends Phaser.Scene {
 
     for (const el of this.sponsorLogoEls) el.remove();
     this.sponsorLogoEls = [];
+
+    // Phaser reuses the same scene instance across stop/start, so any
+    // field set during a previous login (submitting/connected) would
+    // otherwise carry over to the next mount and silently swallow the
+    // first onStart click. Reset to the fresh-instance defaults.
+    this.submitting = false;
+    this.connected = false;
   }
 }
 
