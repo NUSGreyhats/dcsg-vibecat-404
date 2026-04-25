@@ -75,6 +75,7 @@ Per-tick collision scan also exists for pickups that auto-trigger on touch (e.g.
 - `client/src/game/entities/Coin.ts` renders coin-style pickups.
 - Pickup UI: sprite + interact prompt when the player is nearby.
 - Input: press "E" (or configured key) → `C2S_INTERACT { target_id: <nearest> }`.
+- On `S2C_ENTITY_DIED` for a pickup the local client requested via `C2S_INTERACT`, a floating toast rises from the pickup's last position (`client/src/game/ui/PickupToast.ts`): `+20 Health` / `+20 {Weapon} ammo` / `+1 Coin`. Ammo toasts read the **post-pickup** `weapon_id` from `PlayerSnapshot` to name the weapon (Pistol / Rifle / Shotgun); the pickup itself never changes weapon, so the equipped slot is the one that received the ammo. Toasts are gated on `Game.requestedPickupIds`, so pickups that despawn for other reasons (e.g., coin-drop `ExpiresAt` expiry) do not produce a toast. The `+20` ammo text is the nominal server-side increment (`server/internal/game/pickups.go`); when the player is at `AmmoMax` the toast may overstate the actual gain — accepted as a minor cost since the HUD ammo counter remains authoritative.
 
 ## Implementation notes
 

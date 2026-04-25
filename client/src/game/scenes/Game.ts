@@ -25,7 +25,9 @@ import {
   WEAPON_FX,
 } from "../fx";
 import { maybeRecordPB } from "../prefs";
-import { WEAPON_STATS } from "../weapons";
+import { spawnPickupToast } from "../ui/PickupToast";
+import { BONE_WHITE, COIN_GOLD, HP_GREEN } from "../ui/tokens";
+import { WEAPON_STATS, weaponFromServerId } from "../weapons";
 import { RunOutcome as RunOutcomeValue } from "../../net/packet";
 import { createControls, type Controls } from "./utils/Controls";
 import type {
@@ -322,7 +324,41 @@ export class Game extends Phaser.Scene {
       });
       enemy.markDead();
     }
-    this.pickups.get(entityId)?.setConsumed();
+    const pk = this.pickups.get(entityId);
+    if (pk && this.requestedPickupIds.has(entityId)) {
+      this.spawnPickupToastFor(pk);
+    }
+    this.requestedPickupIds.delete(entityId);
+    pk?.setConsumed();
+  }
+
+  private spawnPickupToastFor(pk: Pickup): void {
+    const HEALTH = 1;
+    const AMMO = 2;
+    const COIN = 3;
+
+    let text: string;
+    let color: number;
+    switch (pk.pickupType) {
+      case HEALTH:
+        text = "+20 Health";
+        color = HP_GREEN;
+        break;
+      case AMMO: {
+        const weaponId = getSync().state.player?.weapon_id ?? 0;
+        const weapon = WEAPON_STATS[weaponFromServerId(weaponId)];
+        text = `+20 ${weapon.displayName} ammo`;
+        color = BONE_WHITE;
+        break;
+      }
+      case COIN:
+        text = "+1 Coin";
+        color = COIN_GOLD;
+        break;
+      default:
+        return;
+    }
+    spawnPickupToast(this, pk.x, pk.y, text, color);
   }
 
   private onEnemyHit(x: number, y: number, _entityId: number): void {

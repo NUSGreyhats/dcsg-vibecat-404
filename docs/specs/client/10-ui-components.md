@@ -149,6 +149,7 @@ See [05-entities-rendering.md#depth-layering](./05-entities-rendering.md#depth-l
 | -30     | Tilemap                                                         |
 | 0–5     | Entities, projectiles, pickups, doors                           |
 | 10      | Player                                                          |
+| 20      | World-space FX (e.g., pickup toasts)                            |
 | 1000    | HUD text + bar backgrounds                                      |
 | 1001    | HUD bar fills, modal panels                                     |
 | 1002    | Modal text, selected item                                       |
@@ -440,7 +441,7 @@ Players read entity state visually before they read text. These visual states ar
 | Player   | fedora cat, 8 dirs    | HP bar color shift                 | n/a (run over)                                                | muzzle-flash frame |
 | Enemy    | white masked cat      | HP bar appears below full          | 180 ms scale 1×→1.4× + alpha fade, flash white              | aim-assist glow    |
 | Bullet   | `#ffdd33` rect/sprite | —                                  | despawn                                                      | per-weapon sprite  |
-| Pickup   | 900 ms bob yoyo       | —                                  | 220 ms alpha fade + 12 px rise                               | interact prompt ring |
+| Pickup   | 900 ms bob yoyo       | —                                  | 220 ms alpha fade + 12 px rise; spawns a 900 ms `+N Label` toast that rises 28 px and fades (`PickupToast.ts`) when consumed by the local player | interact prompt ring |
 | Door     | red/green tint + icon | —                                  | n/a (state change only)                                      | "Press E" prompt   |
 
 Full detail in [05-entities-rendering.md](./05-entities-rendering.md).
