@@ -10,6 +10,8 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"log"
@@ -21,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/greyhats/defcon-game/lobby/internal/admin"
 	"github.com/greyhats/defcon-game/lobby/internal/leaderboard"
 	"github.com/greyhats/defcon-game/lobby/internal/livegames"
 	"github.com/greyhats/defcon-game/lobby/web"
@@ -34,6 +37,9 @@ func main() {
 	identityDBPath := envDefault("IDENTITY_DB", "/data/identity.db")
 	gameDBPath := envDefault("GAME_DB", "/data/game.db")
 	gameServerURL := envDefault("GAME_SERVER_URL", "http://game-server:8080")
+	sourceTarball := envDefault("SOURCE_TARBALL", "/app/source.tar.gz")
+	adminUser := os.Getenv("ADMIN_USER")
+	adminPassHash := []byte(os.Getenv("ADMIN_PASS_HASH"))
 
 	identityDB, err := identity.OpenDB(identityDBPath)
 	if err != nil {
@@ -46,6 +52,13 @@ func main() {
 		log.Fatalf("open game db: %v", err)
 	}
 	defer gameDB.Close()
+
+	// Ensure admin-owned schema exists (flagged_runs). Idempotent.
+	if err := admin.EnsureSchema(gameDB); err != nil {
+		log.Fatalf("admin schema: %v", err)
+	}
+
+	auth := &admin.Auth{User: adminUser, PassHash: adminPassHash}
 
 	identitySvc := identity.NewService(identityDB)
 
@@ -143,6 +156,63 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(entries)
 	})
+	// /admin/* — Basic-auth-gated moderation panel. Auth.Wrap returns
+	// 503 "admin disabled" if ADMIN_USER is empty, so a deployment that
+	// hasn't configured creds can't accidentally serve flag/delete.
+	mux.Handle("/admin/", auth.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && (r.URL.Path == "/admin/" || r.URL.Path == "/admin"):
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write(web.AdminHTML)
+		case r.Method == http.MethodGet && r.URL.Path == "/admin/leaderboard.json":
+			entries, err := admin.AllRuns(gameDB, 200)
+			if err != nil {
+				log.Printf("admin: list runs: %v", err)
+				http.Error(w, "list failed", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(entries)
+		case r.Method == http.MethodPost && r.URL.Path == "/admin/leaderboard/flag":
+			adminFlagHandler(w, r, gameDB, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/admin/leaderboard/unflag":
+			adminFlagHandler(w, r, gameDB, false)
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/admin/leaderboard/"):
+			id := strings.TrimPrefix(r.URL.Path, "/admin/leaderboard/")
+			if id == "" || strings.Contains(id, "/") {
+				http.Error(w, "invalid replay id", http.StatusBadRequest)
+				return
+			}
+			if err := admin.HardDelete(gameDB, id); err != nil {
+				log.Printf("admin: delete %s: %v", id, err)
+				http.Error(w, "delete failed", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/admin/winners.csv":
+			adminWinnersCSV(w, gameDB, identityDB)
+		default:
+			http.NotFound(w, r)
+		}
+	})))
+
+	// /source.tar.gz streams the stripped tarball baked into the image
+	// at build time by the strip stage in lobby/Dockerfile (linked from
+	// the nav bar of /register, /leaderboard, /spectate, /admin/, so no
+	// dedicated landing page). Players download once and browse the
+	// tree locally; no per-file HTTP traversal, no index.html
+	// collisions with the stripped client/index.html, no surprise SPA
+	// rendering. SOURCE_TARBALL only needs to be set for ad-hoc
+	// testing — the default points at the baked path.
+	mux.HandleFunc("/source.tar.gz", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", `attachment; filename="source.tar.gz"`)
+		http.ServeFile(w, r, sourceTarball)
+	})
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -154,7 +224,11 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("lobby: listening on %s (identity_db=%s game_db=%s game_server=%s)", addr, identityDBPath, gameDBPath, gameServerURL)
+		adminEnabled := "off"
+		if adminUser != "" && len(adminPassHash) > 0 {
+			adminEnabled = "on (user=" + adminUser + ")"
+		}
+		log.Printf("lobby: listening on %s (identity_db=%s game_db=%s game_server=%s source_tarball=%s admin=%s)", addr, identityDBPath, gameDBPath, gameServerURL, sourceTarball, adminEnabled)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen: %v", err)
 		}
@@ -172,4 +246,60 @@ func envDefault(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// adminFlagHandler is the shared body for POST /admin/leaderboard/{flag,unflag}.
+// Body is JSON `{"replay_id": "...", "reason": "..."}`. Reason is ignored
+// for unflag.
+func adminFlagHandler(w http.ResponseWriter, r *http.Request, db *sql.DB, flag bool) {
+	var body struct {
+		ReplayID string `json:"replay_id"`
+		Reason   string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if body.ReplayID == "" {
+		http.Error(w, "replay_id required", http.StatusBadRequest)
+		return
+	}
+	var err error
+	if flag {
+		err = admin.Flag(db, body.ReplayID, body.Reason)
+	} else {
+		err = admin.Unflag(db, body.ReplayID)
+	}
+	if err != nil {
+		log.Printf("admin: flag %s: %v", body.ReplayID, err)
+		http.Error(w, "flag op failed", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// adminWinnersCSV streams the non-flagged top runs joined with player
+// contact info as a CSV download.
+func adminWinnersCSV(w http.ResponseWriter, gameDB, identityDB *sql.DB) {
+	winners, err := admin.TopWinners(gameDB, identityDB, 100)
+	if err != nil {
+		log.Printf("admin: winners: %v", err)
+		http.Error(w, "export failed", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="winners.csv"`)
+	cw := csv.NewWriter(w)
+	_ = cw.Write([]string{"replay_id", "player_id", "display_name", "contact", "total_ms", "submitted_at"})
+	for _, win := range winners {
+		_ = cw.Write([]string{
+			win.ReplayID,
+			win.PlayerID,
+			win.DisplayName,
+			win.Contact,
+			strconv.FormatInt(win.TotalMs, 10),
+			win.SubmittedAt,
+		})
+	}
+	cw.Flush()
 }

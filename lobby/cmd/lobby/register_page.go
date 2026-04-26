@@ -118,7 +118,15 @@ const registerHTML = `<!doctype html>
 <body>
 <main>
   <h1>Register</h1>
-  <p class="lead">Create an account. After registering, return to the game and log in with your username and password.</p>
+  <p class="lead">
+    Create an account. After registering, return to the game and log in with your username and password.
+    <br><br>
+    <a href="/">→ Play</a>
+    &nbsp;·&nbsp;
+    <a href="/leaderboard">→ Leaderboard</a>
+    &nbsp;·&nbsp;
+    <a href="/source.tar.gz" download>→ Source</a>
+  </p>
 
   <form id="f" autocomplete="off" novalidate>
     <label for="display_name">Username</label>

@@ -8,3 +8,6 @@ var LeaderboardHTML []byte
 
 //go:embed spectate.html
 var SpectateHTML []byte
+
+//go:embed admin.html
+var AdminHTML []byte
