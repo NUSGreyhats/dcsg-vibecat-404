@@ -314,9 +314,17 @@ func (s *Service) sendTelegram(ctx context.Context, text string) error {
 		return ErrDisabled
 	}
 	endpoint := "https://api.telegram.org/bot" + url.PathEscape(s.cfg.BotToken) + "/sendMessage"
+	// parse_mode=Markdown so backtick-wrapped substrings render as
+	// inline code — Telegram's mobile clients then expose tap-to-copy
+	// on those spans, which is the whole point for an OTP. Callers
+	// are responsible for escaping any user-controlled text; today the
+	// only message is the OTP delivery string composed below from a
+	// hard-coded template + 6 random digits, so there's nothing to
+	// escape.
 	body, err := json.Marshal(map[string]string{
-		"chat_id": s.cfg.ChatID,
-		"text":    text,
+		"chat_id":    s.cfg.ChatID,
+		"text":       text,
+		"parse_mode": "Markdown",
 	})
 	if err != nil {
 		return err
@@ -408,7 +416,9 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "issue failed", http.StatusInternalServerError)
 		return
 	}
-	msg := fmt.Sprintf("VIBECAT 404 admin login code: %s\n(valid 5 min)", otp)
+	// Wrapping the OTP in backticks renders it as inline code in
+	// Telegram, which gives the recipient tap-to-copy on mobile.
+	msg := fmt.Sprintf("VIBECAT 404 admin login code: `%s`\n(valid 5 min)", otp)
 	if err := s.send(r.Context(), msg); err != nil {
 		log.Printf("adminauth: telegram: %v", err)
 		// Best-effort cleanup of the issued row so the operator can

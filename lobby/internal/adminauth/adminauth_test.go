@@ -58,8 +58,10 @@ func newServiceTest(t *testing.T) (*Service, *tgFake, func() time.Time) {
 
 func extractOTP(t *testing.T, msg string) string {
 	t.Helper()
-	// Message format: "VIBECAT 404 admin login code: 123456\n..."
-	const marker = "code: "
+	// Message format: "VIBECAT 404 admin login code: `123456`\n..."
+	// The OTP is wrapped in Markdown backticks so Telegram exposes
+	// tap-to-copy on mobile.
+	const marker = "code: `"
 	i := strings.Index(msg, marker)
 	if i < 0 {
 		t.Fatalf("no code marker in: %q", msg)
