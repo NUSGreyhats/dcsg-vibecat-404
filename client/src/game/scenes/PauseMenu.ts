@@ -30,56 +30,20 @@ type MainItem = {
   label(): string;
 };
 
-type ControlSection = {
-  title: string;
-  bindings: ReadonlyArray<readonly [string, string]>;
-};
-
-// Mirrors gameplay controls plus scene-local menu bindings from
-// Controls.ts, InventoryMenu.ts, ShopMenu.ts, and this scene.
-const CONTROL_SECTIONS: ReadonlyArray<ControlSection> = [
-  {
-    title: "Gameplay",
-    bindings: [
-      ["Move", "W A S D / Arrows"],
-      ["Aim", "Mouse"],
-      ["Shoot", "Left mouse"],
-      ["Switch weapon", "1 / 2 / 3"],
-      ["Pick up item", "Walk near pickup"],
-      ["Enter door", "Walk near unlocked door"],
-      ["Open inventory", "I"],
-      ["Open shop", "B"],
-      ["Open menu", "Esc"],
-    ],
-  },
-  {
-    title: "Inventory",
-    bindings: [
-      ["Select item", "Up / Down"],
-      ["Use item", "Enter"],
-      ["Close", "Esc / I"],
-    ],
-  },
-  {
-    title: "Shop",
-    bindings: [
-      ["Select offer", "Up / Down"],
-      ["Buy offer", "Enter"],
-      ["Close", "Esc / B"],
-    ],
-  },
-  {
-    title: "Pause menu",
-    bindings: [
-      ["Select item", "Up / Down"],
-      ["Confirm", "Enter"],
-      ["Back / close", "Esc"],
-    ],
-  },
+// Single source of truth for the controls page. Mirrors the bindings
+// in scenes/utils/Controls.ts — keep in sync if a key is added there.
+const CONTROL_BINDINGS: ReadonlyArray<readonly [string, string]> = [
+  ["Move", "W A S D / Arrows"],
+  ["Aim", "Mouse"],
+  ["Shoot", "Left mouse button"],
+  ["Switch weapon", "1 / 2 / 3"],
+  ["Interact / enter door", "E"],
+  ["Inventory", "I"],
+  ["Menu", "Esc"],
 ];
 
-const PANEL_WIDTH = 720;
-const PANEL_HEIGHT = 560;
+const PANEL_WIDTH = 480;
+const PANEL_HEIGHT = 440;
 // Phaser camera post-FX blur tunings. quality=0 is low-pass (cheap and
 // the only one that visibly works on most platforms); the (x, y) values
 // are the blur radius in px.
@@ -179,7 +143,7 @@ export class PauseMenu extends Phaser.Scene {
 
     if (this.page === "main") {
       this.title = this.add
-        .text(cx, cy - 220, "Menu", {
+        .text(cx, cy - 160, "Menu", {
           fontFamily: FONT_FAMILY,
           fontSize: FONT_SIZE_HEADING,
           color: hex(ACCENT_PRIMARY),
@@ -190,7 +154,7 @@ export class PauseMenu extends Phaser.Scene {
       this.hint = this.add
         .text(
           cx,
-          cy + 220,
+          cy + 160,
           "[Up/Down] select   [Enter] confirm   [Esc] close",
           {
             fontFamily: FONT_FAMILY,
@@ -201,12 +165,12 @@ export class PauseMenu extends Phaser.Scene {
         .setOrigin(0.5)
         .setDepth(DEPTH_MODAL_TEXT);
 
-      const startY = cy - 110;
+      const startY = cy - 80;
       for (let i = 0; i < this.items.length; i++) {
         const isSel = i === this.selected;
         const label = `${isSel ? "> " : "  "}${this.items[i].label()}`;
         const t = this.add
-          .text(cx, startY + i * 44, label, {
+          .text(cx, startY + i * 36, label, {
             fontFamily: FONT_FAMILY,
             fontSize: FONT_SIZE_BODY_EM,
             color: hex(isSel ? ACCENT_PRIMARY : TEXT_PRIMARY),
@@ -228,7 +192,7 @@ export class PauseMenu extends Phaser.Scene {
       }
     } else {
       this.title = this.add
-        .text(cx, cy - 230, "Controls", {
+        .text(cx, cy - 160, "Controls", {
           fontFamily: FONT_FAMILY,
           fontSize: FONT_SIZE_HEADING,
           color: hex(ACCENT_PRIMARY),
@@ -237,7 +201,7 @@ export class PauseMenu extends Phaser.Scene {
         .setDepth(DEPTH_MODAL_TEXT);
 
       this.hint = this.add
-        .text(cx, cy + 230, "[Esc] back", {
+        .text(cx, cy + 160, "[Esc] back", {
           fontFamily: FONT_FAMILY,
           fontSize: FONT_SIZE_CAPTION,
           color: hex(TEXT_MUTED),
@@ -247,53 +211,30 @@ export class PauseMenu extends Phaser.Scene {
         .setInteractive({ useHandCursor: true });
       this.hint.on("pointerdown", () => this.back());
 
-      this.renderControlSection(CONTROL_SECTIONS[0], cx - 320, cy - 175, 300);
-      this.renderControlSection(CONTROL_SECTIONS[1], cx + 20, cy - 175, 300);
-      this.renderControlSection(CONTROL_SECTIONS[2], cx + 20, cy - 40, 300);
-      this.renderControlSection(CONTROL_SECTIONS[3], cx + 20, cy + 95, 300);
-    }
-  }
-
-  private renderControlSection(
-    section: ControlSection,
-    x: number,
-    y: number,
-    width: number,
-  ): void {
-    const heading = this.add
-      .text(x, y, section.title, {
-        fontFamily: FONT_FAMILY,
-        fontSize: FONT_SIZE_CAPTION,
-        color: hex(TEXT_MUTED),
-      })
-      .setOrigin(0, 0)
-      .setDepth(DEPTH_MODAL_TEXT);
-    this.body.push(heading);
-
-    const labelX = x;
-    const valueX = x + width;
-    const startY = y + 26;
-    const rowGap = 24;
-    for (let i = 0; i < section.bindings.length; i++) {
-      const [name, key] = section.bindings[i];
-      const rowY = startY + i * rowGap;
-      const label = this.add
-        .text(labelX, rowY, name, {
-          fontFamily: FONT_FAMILY,
-          fontSize: FONT_SIZE_BODY,
-          color: hex(TEXT_PRIMARY),
-        })
-        .setOrigin(0, 0)
-        .setDepth(DEPTH_MODAL_TEXT);
-      const value = this.add
-        .text(valueX, rowY, key, {
-          fontFamily: FONT_FAMILY,
-          fontSize: FONT_SIZE_BODY,
-          color: hex(ACCENT_PRIMARY),
-        })
-        .setOrigin(1, 0)
-        .setDepth(DEPTH_MODAL_TEXT);
-      this.body.push(label, value);
+      const labelX = cx - 160;
+      const valueX = cx + 160;
+      const startY = cy - 110;
+      const rowGap = 26;
+      for (let i = 0; i < CONTROL_BINDINGS.length; i++) {
+        const [name, key] = CONTROL_BINDINGS[i];
+        const t1 = this.add
+          .text(labelX, startY + i * rowGap, name, {
+            fontFamily: FONT_FAMILY,
+            fontSize: FONT_SIZE_BODY,
+            color: hex(TEXT_PRIMARY),
+          })
+          .setOrigin(0, 0)
+          .setDepth(DEPTH_MODAL_TEXT);
+        const t2 = this.add
+          .text(valueX, startY + i * rowGap, key, {
+            fontFamily: FONT_FAMILY,
+            fontSize: FONT_SIZE_BODY,
+            color: hex(ACCENT_PRIMARY),
+          })
+          .setOrigin(1, 0)
+          .setDepth(DEPTH_MODAL_TEXT);
+        this.body.push(t1, t2);
+      }
     }
   }
 
