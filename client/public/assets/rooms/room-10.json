@@ -2389,6 +2389,54 @@
      "width": 0,
      "x": 860,
      "y": 500
+    },
+    {
+     "height": 0,
+     "id": 39,
+     "name": "Boss",
+     "point": true,
+     "rotation": 0,
+     "type": "Boss",
+     "visible": true,
+     "width": 0,
+     "x": 640,
+     "y": 384
+    },
+    {
+     "height": 0,
+     "id": 40,
+     "name": "Grunt",
+     "point": true,
+     "rotation": 0,
+     "type": "Grunt",
+     "visible": true,
+     "width": 0,
+     "x": 780,
+     "y": 384
+    },
+    {
+     "height": 0,
+     "id": 41,
+     "name": "Grunt",
+     "point": true,
+     "rotation": 0,
+     "type": "Grunt",
+     "visible": true,
+     "width": 0,
+     "x": 570,
+     "y": 505
+    },
+    {
+     "height": 0,
+     "id": 42,
+     "name": "Grunt",
+     "point": true,
+     "rotation": 0,
+     "type": "Grunt",
+     "visible": true,
+     "width": 0,
+     "x": 570,
+     "y": 263
     }
    ],
    "opacity": 1,
@@ -2399,7 +2447,7 @@
   }
  ],
  "nextlayerid": 4,
- "nextobjectid": 39,
+ "nextobjectid": 43,
  "orientation": "orthogonal",
  "renderorder": "right-down",
  "tiledversion": "1.11.2",

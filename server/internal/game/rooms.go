@@ -110,9 +110,12 @@ func CheckAllEnemiesDead(r *RoomState) {
 // are spawned in ascending EntityID order; waves are pre-seeded after all
 // initial enemies, in wave-slot order.
 //
+// `enemies` is the room's initial enemy spawn list (production callers
+// pass TilemapEnemies(r.RoomIndex); tests can pass a hand-built slice).
+//
 // Returns a protocol.RoomData suitable for S2C_RUN_STARTED or S2C_ROOM_LOAD.
 // Doors always ship as Locked: true — the unlock is a separate broadcast.
-func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, now time.Time) protocol.RoomData {
+func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, enemies []EnemySpawnDef, now time.Time) protocol.RoomData {
 	// Reset collections for the new room.
 	r.Enemies = map[uint32]*EnemyState{}
 	r.Pickups = map[uint32]*PickupState{}
@@ -125,13 +128,10 @@ func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, now time.Time) p
 	r.PendingWaves = r.PendingWaves[:0]
 	r.NextEnemyID = WaveEntityIDBase + uint32(r.RoomIndex)*WaveEntityIDStep
 
-	// Initial enemies come from the tilemap's object layer (Grunt /
-	// Runner / Tank / Kamikaze / Boss point objects). Sort ascending by
-	// EntityID before SpawnEnemy so RNG consumption stays deterministic
-	// across replays.
-	src := TilemapEnemies(r.RoomIndex)
-	ordered := make([]EnemySpawnDef, len(src))
-	copy(ordered, src)
+	// Sort ascending by EntityID before SpawnEnemy so RNG consumption
+	// stays deterministic across replays.
+	ordered := make([]EnemySpawnDef, len(enemies))
+	copy(ordered, enemies)
 	sortEnemySpawnsByID(ordered)
 
 	enemyOut := make([]protocol.EnemySpawn, 0, len(ordered))

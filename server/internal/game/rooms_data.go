@@ -9,18 +9,19 @@ const (
 	EnemyBoss     uint8 = 5
 )
 
-// RoomTemplates is indexed 1..11. Index 0 is unused; callers that look up
+// RoomTemplates is indexed 1..10. Index 0 is unused; callers that look up
 // a room by RunState.CurrentRoom index directly into this array.
 //
 // Progression:
 //
 //	Rooms 1–3  — introductory, 2–3 enemies, mostly grunts with occasional runners.
 //	Rooms 4–7  — mid-game, 4–6 enemies, add tanks and kamikazes.
-//	Rooms 8–10 — late game, dense mixes, Room 10 is the heaviest pre-boss.
-//	Room 11    — boss only, no doors; run ends on boss kill.
+//	Rooms 8–9  — late game, dense mixes.
+//	Room 10    — boss room (boss + ring + thematic waves), no doors;
+//	             run ends on boss kill.
 //
 // Doors always target roomIndex+1.
-var RoomTemplates = [12]*RoomTemplate{
+var RoomTemplates = [11]*RoomTemplate{
 	nil, // index 0 unused
 
 	// ---- Room 1 — tutorial grunts ----
@@ -29,11 +30,6 @@ var RoomTemplates = [12]*RoomTemplate{
 	// and basic combat without reinforcement pressure.
 	{
 		TilemapID: "room-1",
-		Enemies: []EnemySpawnDef{
-			{EntityID: 101, Type: EnemyGrunt, X: 400, Y: 300},
-			{EntityID: 102, Type: EnemyGrunt, X: 800, Y: 300},
-			{EntityID: 103, Type: EnemyGrunt, X: 600, Y: 420},
-		},
 		Doors: []DoorDef{
 			{DoorID: 191, X: 1220, Y: 384, TargetRoom: 2},
 		},
@@ -45,12 +41,6 @@ var RoomTemplates = [12]*RoomTemplate{
 	// clean fight before waves enter the picture in room 4+.
 	{
 		TilemapID: "room-2",
-		Enemies: []EnemySpawnDef{
-			{EntityID: 201, Type: EnemyGrunt, X: 320, Y: 260},
-			{EntityID: 202, Type: EnemyGrunt, X: 960, Y: 260},
-			{EntityID: 203, Type: EnemyRunner, X: 640, Y: 180},
-			{EntityID: 204, Type: EnemyRunner, X: 640, Y: 450},
-		},
 		Doors: []DoorDef{
 			{DoorID: 291, X: 1220, Y: 384, TargetRoom: 3},
 		},
@@ -62,12 +52,6 @@ var RoomTemplates = [12]*RoomTemplate{
 	// still in tutorial mode.
 	{
 		TilemapID: "room-3",
-		Enemies: []EnemySpawnDef{
-			{EntityID: 301, Type: EnemyGrunt, X: 300, Y: 240},
-			{EntityID: 302, Type: EnemyRunner, X: 900, Y: 240},
-			{EntityID: 303, Type: EnemyTank, X: 640, Y: 360},
-			{EntityID: 304, Type: EnemyGrunt, X: 480, Y: 460},
-		},
 		Doors: []DoorDef{
 			{DoorID: 391, X: 640, Y: 40, TargetRoom: 4},
 		},
@@ -78,13 +62,6 @@ var RoomTemplates = [12]*RoomTemplate{
 	// 5 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-4",
-		Enemies: []EnemySpawnDef{
-			{EntityID: 401, Type: EnemyGrunt, X: 280, Y: 220},
-			{EntityID: 402, Type: EnemyGrunt, X: 1000, Y: 220},
-			{EntityID: 403, Type: EnemyRunner, X: 640, Y: 200},
-			{EntityID: 404, Type: EnemyKamikaze, X: 400, Y: 360},
-			{EntityID: 405, Type: EnemyKamikaze, X: 880, Y: 360},
-		},
 		Waves: []WaveDef{
 			{Mobs: []WaveMobDef{
 				{Type: EnemyKamikaze, X: 240, Y: 500},
@@ -106,13 +83,6 @@ var RoomTemplates = [12]*RoomTemplate{
 	// 5 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-5",
-		Enemies: []EnemySpawnDef{
-			{EntityID: 501, Type: EnemyRunner, X: 260, Y: 200},
-			{EntityID: 502, Type: EnemyRunner, X: 1020, Y: 200},
-			{EntityID: 503, Type: EnemyTank, X: 640, Y: 320},
-			{EntityID: 504, Type: EnemyGrunt, X: 420, Y: 440},
-			{EntityID: 505, Type: EnemyGrunt, X: 860, Y: 440},
-		},
 		Waves: []WaveDef{
 			{Mobs: []WaveMobDef{
 				{Type: EnemyRunner, X: 200, Y: 500},
@@ -133,14 +103,6 @@ var RoomTemplates = [12]*RoomTemplate{
 	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-6",
-		Enemies: []EnemySpawnDef{
-			{EntityID: 601, Type: EnemyTank, X: 420, Y: 260},
-			{EntityID: 602, Type: EnemyTank, X: 860, Y: 260},
-			{EntityID: 603, Type: EnemyRunner, X: 640, Y: 200},
-			{EntityID: 604, Type: EnemyGrunt, X: 280, Y: 440},
-			{EntityID: 605, Type: EnemyGrunt, X: 1000, Y: 440},
-			{EntityID: 606, Type: EnemyKamikaze, X: 640, Y: 500},
-		},
 		Waves: []WaveDef{
 			{Mobs: []WaveMobDef{
 				{Type: EnemyKamikaze, X: 320, Y: 540},
@@ -162,14 +124,6 @@ var RoomTemplates = [12]*RoomTemplate{
 	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-7",
-		Enemies: []EnemySpawnDef{
-			{EntityID: 701, Type: EnemyRunner, X: 240, Y: 220},
-			{EntityID: 702, Type: EnemyRunner, X: 440, Y: 220},
-			{EntityID: 703, Type: EnemyRunner, X: 840, Y: 220},
-			{EntityID: 704, Type: EnemyRunner, X: 1040, Y: 220},
-			{EntityID: 705, Type: EnemyGrunt, X: 640, Y: 360},
-			{EntityID: 706, Type: EnemyKamikaze, X: 640, Y: 480},
-		},
 		Waves: []WaveDef{
 			{Mobs: []WaveMobDef{
 				{Type: EnemyRunner, X: 320, Y: 540},
@@ -191,14 +145,6 @@ var RoomTemplates = [12]*RoomTemplate{
 	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-8",
-		Enemies: []EnemySpawnDef{
-			{EntityID: 801, Type: EnemyGrunt, X: 260, Y: 200},
-			{EntityID: 802, Type: EnemyGrunt, X: 1020, Y: 200},
-			{EntityID: 803, Type: EnemyTank, X: 640, Y: 280},
-			{EntityID: 804, Type: EnemyRunner, X: 420, Y: 400},
-			{EntityID: 805, Type: EnemyRunner, X: 860, Y: 400},
-			{EntityID: 806, Type: EnemyKamikaze, X: 640, Y: 520},
-		},
 		Waves: []WaveDef{
 			{Mobs: []WaveMobDef{
 				{Type: EnemyRunner, X: 220, Y: 500},
@@ -221,14 +167,6 @@ var RoomTemplates = [12]*RoomTemplate{
 	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-9",
-		Enemies: []EnemySpawnDef{
-			{EntityID: 901, Type: EnemyKamikaze, X: 320, Y: 220},
-			{EntityID: 902, Type: EnemyKamikaze, X: 960, Y: 220},
-			{EntityID: 903, Type: EnemyRunner, X: 640, Y: 200},
-			{EntityID: 904, Type: EnemyTank, X: 420, Y: 360},
-			{EntityID: 905, Type: EnemyTank, X: 860, Y: 360},
-			{EntityID: 906, Type: EnemyGrunt, X: 640, Y: 480},
-		},
 		Waves: []WaveDef{
 			{Mobs: []WaveMobDef{
 				{Type: EnemyKamikaze, X: 200, Y: 520},
@@ -246,60 +184,22 @@ var RoomTemplates = [12]*RoomTemplate{
 		},
 	},
 
-	// ---- Room 10 — pre-boss heavy ----
+	// ---- Room 10 — boss room. No doors; run ends when boss dies. ----
 	//
-	// 8 initial mobs: triggers at ≤5 and ≤2.
-	{
-		TilemapID: "room-10",
-		Enemies: []EnemySpawnDef{
-			{EntityID: 1001, Type: EnemyTank, X: 320, Y: 220},
-			{EntityID: 1002, Type: EnemyTank, X: 960, Y: 220},
-			{EntityID: 1003, Type: EnemyRunner, X: 260, Y: 360},
-			{EntityID: 1004, Type: EnemyRunner, X: 1020, Y: 360},
-			{EntityID: 1005, Type: EnemyGrunt, X: 480, Y: 320},
-			{EntityID: 1006, Type: EnemyGrunt, X: 800, Y: 320},
-			{EntityID: 1007, Type: EnemyKamikaze, X: 420, Y: 500},
-			{EntityID: 1008, Type: EnemyKamikaze, X: 860, Y: 500},
-		},
-		Waves: []WaveDef{
-			{Mobs: []WaveMobDef{
-				{Type: EnemyTank, X: 640, Y: 560},
-				{Type: EnemyRunner, X: 240, Y: 540},
-				{Type: EnemyRunner, X: 1040, Y: 540},
-				{Type: EnemyKamikaze, X: 640, Y: 200},
-			}},
-			{Mobs: []WaveMobDef{
-				{Type: EnemyTank, X: 320, Y: 200},
-				{Type: EnemyTank, X: 960, Y: 200},
-				{Type: EnemyGrunt, X: 640, Y: 560},
-				{Type: EnemyGrunt, X: 640, Y: 180},
-			}},
-		},
-		Doors: []DoorDef{
-			{DoorID: 1091, X: 1220, Y: 384, TargetRoom: 11},
-		},
-	},
-
-	// ---- Room 11 — boss room. No doors; run ends when boss dies. ----
-	//
-	// 7 initial mobs: boss at center + a 6-grunt ring at radius 140. Triggers
-	// at floor(7*0.66)=4 and floor(7*0.33)=2 living, so both waves keep:
-	//   Wave 1 (≤4 living): 10 runners at radius ~300 — mid-distance closers.
-	//   Wave 2 (≤2 living): 20 kamikazes hugging the perimeter — punishes
-	//                       wall-camping; forces the player back toward the
-	//                       boss for the kill.
+	// 12 initial mobs: pre-boss heavy (8 tanks/runners/grunts/kamikazes)
+	// plus boss + 3-grunt ring (radius 140, 120° spacing). Initial
+	// positions live in the tilemap. Triggers at floor(12*0.66)=7 and
+	// floor(12*0.33)=3 living:
+	//   Wave 1 (≤7 living): 5 runners at radius ~300, 72° spacing —
+	//                       mid-distance closers.
+	//   Wave 2 (≤3 living): 10 kamikazes hugging the perimeter — punishes
+	//                       wall-camping; forces the player back toward
+	//                       the boss for the kill.
 	// Tier-9+ scaling (×1.6 HP, ×1.2 speed) compounds with melee-damage
 	// archetype values — boss feels like a boss; a single bad dodge in
 	// wave 2 can chunk half the player's HP.
 	{
-		TilemapID: "room-11",
-		Enemies: []EnemySpawnDef{
-			{EntityID: 1101, Type: EnemyBoss, X: 640, Y: 384},
-			// 3-grunt ring around the boss at radius 140 (120° spacing).
-			{EntityID: 1102, Type: EnemyGrunt, X: 780, Y: 384},
-			{EntityID: 1104, Type: EnemyGrunt, X: 570, Y: 505},
-			{EntityID: 1106, Type: EnemyGrunt, X: 570, Y: 263},
-		},
+		TilemapID: "room-10",
 		Waves: []WaveDef{
 			// Wave 1 — 5 runners at radius ~300, 72° spacing.
 			{Mobs: []WaveMobDef{

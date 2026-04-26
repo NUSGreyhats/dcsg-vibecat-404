@@ -34,24 +34,24 @@ func TestLoadRoomRNGConsumptionInvariant(t *testing.T) {
 
 	tmpl := &RoomTemplate{
 		TilemapID: "test",
-		Enemies: []EnemySpawnDef{
-			// Deliberately out-of-order — LoadRoom must sort ascending
-			// by EntityID before seeding.
-			{EntityID: 2, Type: EnemyGrunt, X: 400, Y: 300},
-			{EntityID: 1, Type: EnemyGrunt, X: 500, Y: 300},
-		},
 		Waves: []WaveDef{
 			{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 600, Y: 300}}},
 			{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 700, Y: 300}}},
 			{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 800, Y: 300}}},
 		},
 	}
+	// Deliberately out-of-order — LoadRoom must sort ascending by
+	// EntityID before seeding.
+	enemies := []EnemySpawnDef{
+		{EntityID: 2, Type: EnemyGrunt, X: 400, Y: 300},
+		{EntityID: 1, Type: EnemyGrunt, X: 500, Y: 300},
+	}
 
 	const seed = int64(42)
 	rng := rand.New(rand.NewSource(seed))
 	r := NewRoomState(0) // room 0 = no wall grid; positions pass through clean
 	now := time.Unix(1_700_000_000, 0)
-	_ = LoadRoom(r, rng, tmpl, now)
+	_ = LoadRoom(r, rng, tmpl, enemies, now)
 
 	// Post-condition: skip rule honored.
 	if len(r.PendingWaves) != 1 {

@@ -1,7 +1,7 @@
 export const ROOM_WIDTH = 1280;
 export const ROOM_HEIGHT = 768;
-export const ROOM_COUNT = 11;
-export const WIN_ROOM = 11;
+export const ROOM_COUNT = 10;
+export const WIN_ROOM = 10;
 
 export const PLAYER_MAX_HEALTH = 100;
 
