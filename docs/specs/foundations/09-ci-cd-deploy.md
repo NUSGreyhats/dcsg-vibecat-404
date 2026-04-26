@@ -71,11 +71,13 @@ The published tree contains exactly the code a player would need to study to fin
 ### What is published
 
 - `server/` — the game-server Go module. The whole runtime, including the file that intentionally races on `KillLog`.
-- `pkg/` — shared Go modules that `server/` imports (`pkg/identity` today). Required for the published source to compile on its own.
 - `client/src/`, `client/index.html`, `client/spectate.html`, `client/package.json`, `client/style.css`, `client/public/` — the Phaser app source players already see in their browser.
+- `pkg/identity/` (stub) and `pkg/go.mod` — a no-auth stub baked into the strip binary at `tools/strip/stubs/`, copied verbatim into the tarball so `cd server && go build ./...` succeeds. The stub treats every `player_id` as registered, prints a `STUB IDENTITY` warning at startup, and is the only thing players see of the identity package.
+- `README.md` (top-level) — quickstart for running the server locally and the explicit list of what is stubbed/omitted. Also lives at `tools/strip/stubs/README.md`.
 
 ### What is NOT published
 
+- The real `pkg/identity` — replaced by the stub above. Identity is shared infrastructure, not part of the puzzle: an exploit there (account hijack, leaderboard spoof, rate-limit bypass derived from reading the exact bcrypt-cost / dummy-hash / rate-limit logic) breaks the game **for every other player**. The HTTP API surface (`/api/register`, `/api/login`, `/api/verify`) is enough for any player who needs to script auth. New `pkg/*` subpackages default to private — add them to the strip allowlist (or to the stubs tree) explicitly if a future package becomes gameplay-relevant.
 - `lobby/` — would expose admin endpoints, queue logic, and the `/source/*` handler itself.
 - `tools/` — including `tools/strip/`; the stripper's logic is the bug-hiding strategy.
 - `docs/` — every spec file is a hint sheet; explicitly excluded.

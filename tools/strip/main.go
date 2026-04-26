@@ -25,6 +25,7 @@ package main
 
 import (
 	"bufio"
+	"embed"
 	"flag"
 	"fmt"
 	"go/ast"
@@ -39,6 +40,15 @@ import (
 	"path/filepath"
 	"strings"
 )
+
+// stubsFS holds files that are written verbatim into the published tree
+// after the allowlist walk. Today this is `pkg/identity` — the real
+// package is private (see docs/specs/foundations/09-ci-cd-deploy.md), so
+// the published tarball ships a no-auth stub that lets `server/`
+// compile and run locally for puzzle research.
+//
+//go:embed all:stubs
+var stubsFS embed.FS
 
 func main() {
 	in := flag.String("in", ".", "input source root (the repo root)")
@@ -60,7 +70,6 @@ func main() {
 func roots() []string {
 	return []string{
 		"server",
-		"pkg",
 		"client/src",
 		"client/public",
 		"client/index.html",
@@ -111,7 +120,37 @@ func run(in, out string) error {
 			return fmt.Errorf("%s: %w", root, err)
 		}
 	}
-	return nil
+	return copyStubs(out)
+}
+
+// copyStubs writes the embedded stubs/ tree into out verbatim. Stubs
+// must NOT pass through processFile — the explanatory header on the
+// stub identity package is the whole point of shipping it, and the Go
+// stripper would erase it.
+//
+// `.tmpl` suffixes in the embedded tree are stripped on copy: the
+// stub `pkg/go.mod` is stored as `go.mod.tmpl` in source so Go's
+// build doesn't treat the stub dir as a nested module (which would
+// make the embed itself fail).
+func copyStubs(out string) error {
+	return fs.WalkDir(stubsFS, "stubs", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel := strings.TrimSuffix(strings.TrimPrefix(p, "stubs/"), ".tmpl")
+		dst := filepath.Join(out, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		data, err := stubsFS.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dst, data, 0o644)
+	})
 }
 
 func processFile(srcPath, dstPath string) error {
