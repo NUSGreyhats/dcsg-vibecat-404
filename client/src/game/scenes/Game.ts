@@ -335,6 +335,7 @@ export class Game extends Phaser.Scene {
 
   private onDoorUnlocked(doorId: number): void {
     this.doors.get(doorId)?.setUnlocked(true);
+    this.game.events.emit("doorUnlockedToast", doorId);
   }
 
   private onEntityDied(entityId: number): void {

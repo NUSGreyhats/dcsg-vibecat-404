@@ -13,6 +13,7 @@ import {
   DEPTH_HUD_FILL,
   ERROR,
   FONT_FAMILY,
+  FONT_SIZE_BODY_EM,
   FONT_SIZE_CAPTION,
   FONT_SIZE_MICRO,
   FONT_SIZE_SMALL,
@@ -22,7 +23,9 @@ import {
   HP_RED,
   HUD_TEXT_STYLE,
   MIDNIGHT,
+  STROKE_THICKNESS_HUD,
   SUCCESS,
+  TEXT_SECONDARY,
   TEXT_MUTED,
   TEXT_PRIMARY,
   TEXT_STROKE,
@@ -54,6 +57,7 @@ const WEAPON_ICON_FRAME = "0";
 const PANEL_PAD_X = 8;
 const PANEL_PAD_Y = 4;
 const PANEL_ALPHA = 0.45;
+const TOAST_Y = 74;
 
 /**
  * Heads-up display overlay. Launched alongside the Game scene. Reads state
@@ -74,6 +78,8 @@ export class GameHUD extends Phaser.Scene {
   private splitsRows: Phaser.GameObjects.Text[] = [];
   private splitsDeltas: Phaser.GameObjects.Text[] = [];
   private currentWeaponKey?: string;
+  private toastBg?: Phaser.GameObjects.Rectangle;
+  private toastText?: Phaser.GameObjects.Text;
   // Once the run finishes the timer latches at the server's authoritative
   // total so it doesn't keep ticking past the final split.
   private latchedTotalMs?: number;
@@ -172,6 +178,7 @@ export class GameHUD extends Phaser.Scene {
       this.onTimingsVisibilityChanged,
       this,
     );
+    this.game.events.on("doorUnlockedToast", this.onDoorUnlockedToast, this);
 
     this.applyTimingsVisibility();
   }
@@ -427,6 +434,62 @@ export class GameHUD extends Phaser.Scene {
     this.latchedTotalMs = totalMs;
   }
 
+  private onDoorUnlockedToast(): void {
+    this.showToast("LEVEL CLEAR - DOOR UNLOCKED");
+  }
+
+  private showToast(message: string): void {
+    const cx = this.scale.width / 2;
+    if (this.toastText) this.tweens.killTweensOf(this.toastText);
+    if (this.toastBg) this.tweens.killTweensOf(this.toastBg);
+    this.toastText?.destroy();
+    this.toastBg?.destroy();
+
+    this.toastText = this.add
+      .text(cx, TOAST_Y, message, {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_BODY_EM,
+        color: hex(BONE_WHITE),
+        stroke: hex(TEXT_STROKE),
+        strokeThickness: STROKE_THICKNESS_HUD,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_FILL);
+
+    this.toastBg = this.add
+      .rectangle(
+        cx,
+        TOAST_Y,
+        this.toastText.displayWidth + PANEL_PAD_X * 4,
+        this.toastText.displayHeight + PANEL_PAD_Y * 4,
+        MIDNIGHT,
+        0.74,
+      )
+      .setOrigin(0.5)
+      .setStrokeStyle(1, TEXT_SECONDARY, 0.95)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_BG);
+
+    this.toastText.setAlpha(0);
+    this.toastBg.setAlpha(0);
+    this.tweens.add({
+      targets: [this.toastText, this.toastBg],
+      alpha: 1,
+      y: TOAST_Y - 8,
+      duration: 160,
+      ease: "Cubic.easeOut",
+      hold: 1500,
+      yoyo: true,
+      onComplete: () => {
+        this.toastText?.destroy();
+        this.toastBg?.destroy();
+        this.toastText = undefined;
+        this.toastBg = undefined;
+      },
+    });
+  }
+
   private cleanup(): void {
     const state = getActiveState();
     state.off("runComplete", this.onRunComplete, this);
@@ -435,6 +498,7 @@ export class GameHUD extends Phaser.Scene {
       this.onTimingsVisibilityChanged,
       this,
     );
+    this.game.events.off("doorUnlockedToast", this.onDoorUnlockedToast, this);
 
     this.timeText?.destroy();
     this.timePanel?.destroy();
@@ -445,6 +509,10 @@ export class GameHUD extends Phaser.Scene {
     this.weaponText?.destroy();
     this.weaponIcon?.destroy();
     this.weaponPanel?.destroy();
+    if (this.toastText) this.tweens.killTweensOf(this.toastText);
+    if (this.toastBg) this.tweens.killTweensOf(this.toastBg);
+    this.toastText?.destroy();
+    this.toastBg?.destroy();
     this.splitsHeader?.destroy();
     this.splitsPanel?.destroy();
     for (const r of this.splitsRows) r.destroy();
@@ -464,6 +532,8 @@ export class GameHUD extends Phaser.Scene {
     this.splitsPanel = undefined;
     this.currentWeaponKey = undefined;
     this.latchedTotalMs = undefined;
+    this.toastText = undefined;
+    this.toastBg = undefined;
   }
 }
 
