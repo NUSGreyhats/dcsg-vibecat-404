@@ -25,6 +25,19 @@ jobs:
           script_stop: true
           # Give docker builds room on slow droplets.
           command_timeout: 15m
+          # Forward repo Actions config into the remote shell so the
+          # docker compose run picks them up via process env. Avoids
+          # writing a .env file to disk on the droplet. Operational
+          # toggles come from repo Variables (visible in CI logs);
+          # credentials come from repo Secrets (masked).
+          envs: AUTH_MODE,QUEUE_ENABLED,MAX_CONCURRENT,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,ADMIN_SESSION_SECRET
+          env:
+            AUTH_MODE: ${{ vars.AUTH_MODE }}
+            QUEUE_ENABLED: ${{ vars.QUEUE_ENABLED }}
+            MAX_CONCURRENT: ${{ vars.MAX_CONCURRENT }}
+            TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+            TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+            ADMIN_SESSION_SECRET: ${{ secrets.ADMIN_SESSION_SECRET }}
           script: |
             set -euo pipefail
 
@@ -35,6 +48,9 @@ jobs:
             echo "==> Target: $REPO_SLUG @ $REF"
             echo "==> Host:   $(hostname)  user: $(whoami)"
             echo "==> Path:   $DIR"
+            # Surface which prod-cutover toggles are active, without
+            # leaking the actual secrets to the log.
+            echo "==> Env:    AUTH_MODE=${AUTH_MODE:-<unset>} QUEUE_ENABLED=${QUEUE_ENABLED:-<unset>} MAX_CONCURRENT=${MAX_CONCURRENT:-<unset>} admin_telegram=$([ -n "${TELEGRAM_BOT_TOKEN:-}" ] && echo set || echo unset) admin_session=$([ -n "${ADMIN_SESSION_SECRET:-}" ] && echo set || echo unset)"
 
             # Preflight — make sure docker is usable without sudo.
             docker version >/dev/null 2>&1 || {
