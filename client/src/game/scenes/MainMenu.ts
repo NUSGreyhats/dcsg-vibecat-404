@@ -74,8 +74,15 @@ export class MainMenu extends Phaser.Scene {
   private startButton?: HTMLButtonElement;
   private connected = false;
   private submitting = false;
+  // Authentication completed; player is in the "queued" state and a Space
+  // or Enter press should fire START_RUN. Also true after Restart Run /
+  // Play Again so the player still has to confirm before another run
+  // begins (no more auto-launch on cached id).
+  private queued = false;
   private resizeHandlers: Array<() => void> = [];
   private sponsorLogoEls: HTMLImageElement[] = [];
+  private spaceKey?: Phaser.Input.Keyboard.Key;
+  private enterKey?: Phaser.Input.Keyboard.Key;
 
   private static readonly PANEL_WIDTH = 460;
   private static readonly PANEL_HEIGHT = 200;
@@ -209,9 +216,58 @@ export class MainMenu extends Phaser.Scene {
     sync.state.on("runStarted", this.onRunStarted, this);
     sync.state.on("error", this.onError, this);
 
+    const kb = this.input.keyboard;
+    if (kb) {
+      this.spaceKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+      this.enterKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+      this.spaceKey.on("down", this.onQueueKey, this);
+      this.enterKey.on("down", this.onQueueKey, this);
+    }
+
     this.events.on("shutdown", this.cleanup, this);
 
     setTimeout(() => this.usernameInput?.focus(), 50);
+  }
+
+  /**
+   * Space/Enter while in the queued state confirms the start. Fires
+   * START_RUN and waits for S2C_RUN_STARTED. Press while not queued is
+   * a no-op so the keys don't interfere with the login form.
+   */
+  private onQueueKey(): void {
+    if (!this.queued || this.submitting) return;
+    if (!this.connected) return;
+    // If the user has the username/password input focused (e.g. they just
+    // logged in and the browser keeps focus on the form), the keypress
+    // already produced a character there — don't double-fire START_RUN.
+    const ae = document.activeElement;
+    if (ae && (ae === this.usernameInput || ae === this.passwordInput)) return;
+    this.startQueuedRun();
+  }
+
+  private startQueuedRun(): void {
+    this.submitting = true;
+    this.queued = false;
+    this.statusText?.setText("Starting run...");
+    this.statusText?.setColor(hex(TEXT_MUTED));
+    getSync().sendStartRun();
+  }
+
+  /**
+   * Auth has succeeded but no run is running yet — the player has a
+   * confirmed slot and just needs to press Space / Enter to launch the
+   * run. Reached after both fresh login (onAuthOk → here) and cached-id
+   * resume (connect → sendAuth → onAuthOk → here). Replaces the previous
+   * "auto-launch a run as soon as you log in" path so a player who came
+   * back from the WinScreen / Pause-menu Restart / page reload doesn't
+   * get dropped straight into a fresh run with no warning.
+   */
+  private enterQueuedState(): void {
+    this.submitting = false;
+    this.queued = true;
+    this.hideLoginForm();
+    this.statusText?.setText("Press [ Space ] or [ Enter ] to play.");
+    this.statusText?.setColor(hex(SUCCESS));
   }
 
   /**
@@ -354,10 +410,11 @@ export class MainMenu extends Phaser.Scene {
         this.connected = true;
         const cachedId = getCachedPlayerId();
         if (cachedId) {
-          // Skip the form — re-auth with the cached id and let onAuthOk
-          // kick off START_RUN. If the server rejects (account gone /
-          // server restarted), onError will clear the cache and re-show
-          // the form so the user can re-enter credentials.
+          // Skip the form — re-auth with the cached id, then sit in the
+          // queued state until the player presses Space/Enter. If the
+          // server rejects (account gone / server restarted), onError will
+          // clear the cache and re-show the form so the user can re-enter
+          // credentials.
           this.hideLoginForm();
           this.statusText?.setText("Resuming session...");
           this.statusText?.setColor(hex(TEXT_MUTED));
@@ -381,6 +438,16 @@ export class MainMenu extends Phaser.Scene {
     if (this.usernameInput) this.usernameInput.style.display = "none";
     if (this.passwordInput) this.passwordInput.style.display = "none";
     if (this.startButton) this.startButton.style.display = "none";
+    // Drop focus off the now-hidden form controls so a subsequent Space
+    // press goes to the queue handler instead of re-firing the Login
+    // button's click handler or scrolling the page.
+    if (
+      document.activeElement === this.usernameInput ||
+      document.activeElement === this.passwordInput ||
+      document.activeElement === this.startButton
+    ) {
+      (document.activeElement as HTMLElement).blur();
+    }
   }
 
   private showLoginForm(): void {
@@ -573,8 +640,11 @@ export class MainMenu extends Phaser.Scene {
   }
 
   private onAuthOk(_displayName: string): void {
-    this.statusText?.setText("Starting run...");
-    getSync().sendStartRun();
+    // Enter the queued state instead of auto-firing START_RUN. The player
+    // confirms with Space / Enter so a fresh page-load, Restart Run, or
+    // Play Again all give the player a moment to settle before the run
+    // begins.
+    this.enterQueuedState();
   }
 
   private onRunStarted(): void {
@@ -593,6 +663,7 @@ export class MainMenu extends Phaser.Scene {
     this.statusText?.setText(`Error: ${err.message}`);
     this.statusText?.setColor(hex(ERROR));
     this.submitting = false;
+    this.queued = false;
   }
 
   private cleanup(): void {
@@ -600,6 +671,15 @@ export class MainMenu extends Phaser.Scene {
     sync.state.off("authOk", this.onAuthOk, this);
     sync.state.off("runStarted", this.onRunStarted, this);
     sync.state.off("error", this.onError, this);
+
+    if (this.spaceKey) {
+      this.spaceKey.off("down", this.onQueueKey, this);
+      this.spaceKey = undefined;
+    }
+    if (this.enterKey) {
+      this.enterKey.off("down", this.onQueueKey, this);
+      this.enterKey = undefined;
+    }
 
     for (const fn of this.resizeHandlers) {
       window.removeEventListener("resize", fn);
@@ -618,11 +698,12 @@ export class MainMenu extends Phaser.Scene {
     this.sponsorLogoEls = [];
 
     // Phaser reuses the same scene instance across stop/start, so any
-    // field set during a previous login (submitting/connected) would
-    // otherwise carry over to the next mount and silently swallow the
-    // first onStart click. Reset to the fresh-instance defaults.
+    // field set during a previous login (submitting/connected/queued)
+    // would otherwise carry over to the next mount and silently swallow
+    // the first onStart click. Reset to the fresh-instance defaults.
     this.submitting = false;
     this.connected = false;
+    this.queued = false;
   }
 }
 

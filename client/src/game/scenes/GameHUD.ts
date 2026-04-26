@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { getActiveState } from "../net/runContext";
+import { getActiveState, resetSync } from "../net/runContext";
 import { PLAYER_MAX_HEALTH, ROOM_COUNT } from "../constants";
 import { getStoredPB, isTimingsVisible } from "../prefs";
 import type { SplitData } from "../../net/packet";
@@ -59,6 +59,15 @@ const PANEL_PAD_Y = 4;
 const PANEL_ALPHA = 0.45;
 const TOAST_Y = 74;
 
+// Hold-Space-to-restart hotkey. Player holds the space bar continuously
+// for HOLD_RESTART_MS to abandon the current run and bounce back to the
+// MainMenu queue. The progress widget appears after a short grace so a
+// stray tap doesn't flash anything on screen.
+const HOLD_RESTART_MS = 3000;
+const HOLD_FEEDBACK_GRACE_MS = 250;
+const HOLD_BAR_WIDTH = 240;
+const HOLD_BAR_HEIGHT = 8;
+
 /**
  * Heads-up display overlay. Launched alongside the Game scene. Reads state
  * directly from the sync on every tick — no input handling here.
@@ -90,7 +99,15 @@ export class GameHUD extends Phaser.Scene {
   // weapon, and room counter ignore this — toggling Hide Timings doesn't
   // strip out information you'd want to keep visible mid-run.
   private timingsVisible = true;
-
+  // Hold-Space-to-restart state. holdStartedAt is undefined when the key
+  // isn't held; set on keydown and cleared on keyup or after the restart
+  // fires.
+  private spaceKey?: Phaser.Input.Keyboard.Key;
+  private holdStartedAt?: number;
+  private holdRestartFired = false;
+  private holdLabel?: Phaser.GameObjects.Text;
+  private holdBarBg?: Phaser.GameObjects.Rectangle;
+  private holdBarFill?: Phaser.GameObjects.Rectangle;
   constructor() {
     super({ key: "GameHUD" });
   }
@@ -170,6 +187,15 @@ export class GameHUD extends Phaser.Scene {
     const state = getActiveState();
     state.on("runComplete", this.onRunComplete, this);
 
+    this.buildHoldRestartWidget();
+
+    const kb = this.input.keyboard;
+    if (kb) {
+      this.spaceKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+      this.spaceKey.on("down", this.onSpaceDown, this);
+      this.spaceKey.on("up", this.onSpaceUp, this);
+    }
+
     this.events.on("shutdown", this.cleanup, this);
     // The PauseMenu emits this on the cross-scene game registry so the HUD
     // can react to a toggle without needing a back-pointer.
@@ -184,6 +210,8 @@ export class GameHUD extends Phaser.Scene {
   }
 
   update(): void {
+    this.updateHoldRestart();
+
     const state = getActiveState();
 
     if (this.timeText) {
@@ -434,6 +462,122 @@ export class GameHUD extends Phaser.Scene {
     this.latchedTotalMs = totalMs;
   }
 
+  /**
+   * Hold-Space-to-restart UI lives bottom-center, just above the HP bar.
+   * Hidden by default — only fades in once the player has held SPACE
+   * past the grace period.
+   */
+  private buildHoldRestartWidget(): void {
+    const cx = this.scale.width / 2;
+    const baseY = this.scale.height - 60;
+
+    this.holdLabel = this.add
+      .text(cx, baseY - 14, "HOLD [ SPACE ] TO RESTART", {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_CAPTION,
+        color: hex(BONE_WHITE),
+        stroke: hex(TEXT_STROKE),
+        strokeThickness: 2,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_FILL)
+      .setVisible(false);
+
+    this.holdBarBg = this.add
+      .rectangle(cx, baseY, HOLD_BAR_WIDTH, HOLD_BAR_HEIGHT, MIDNIGHT, 0.7)
+      .setOrigin(0.5)
+      .setStrokeStyle(1, BONE_WHITE, 0.8)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_BG)
+      .setVisible(false);
+
+    this.holdBarFill = this.add
+      .rectangle(
+        cx - HOLD_BAR_WIDTH / 2 + 1,
+        baseY,
+        0,
+        HOLD_BAR_HEIGHT - 2,
+        ACCENT_PRIMARY,
+        1,
+      )
+      .setOrigin(0, 0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_FILL)
+      .setVisible(false);
+  }
+
+  private onSpaceDown(): void {
+    if (this.holdRestartFired) return;
+    if (this.holdStartedAt !== undefined) return;
+    this.holdStartedAt = this.time.now;
+  }
+
+  private onSpaceUp(): void {
+    this.holdStartedAt = undefined;
+    this.holdRestartFired = false;
+    this.hideHoldFeedback();
+  }
+
+  private updateHoldRestart(): void {
+    if (this.holdRestartFired) return;
+    if (this.holdStartedAt === undefined) {
+      this.hideHoldFeedback();
+      return;
+    }
+    const elapsed = this.time.now - this.holdStartedAt;
+    if (elapsed < HOLD_FEEDBACK_GRACE_MS) {
+      this.hideHoldFeedback();
+      return;
+    }
+    if (elapsed >= HOLD_RESTART_MS) {
+      this.holdRestartFired = true;
+      this.hideHoldFeedback();
+      this.fireRestart();
+      return;
+    }
+    const ratio = Phaser.Math.Clamp(elapsed / HOLD_RESTART_MS, 0, 1);
+    this.showHoldFeedback(ratio);
+  }
+
+  private showHoldFeedback(ratio: number): void {
+    this.holdLabel?.setVisible(true);
+    this.holdBarBg?.setVisible(true);
+    if (this.holdBarFill) {
+      this.holdBarFill.setVisible(true);
+      this.holdBarFill.width = Math.max(0, (HOLD_BAR_WIDTH - 2) * ratio);
+    }
+  }
+
+  private hideHoldFeedback(): void {
+    this.holdLabel?.setVisible(false);
+    this.holdBarBg?.setVisible(false);
+    if (this.holdBarFill) {
+      this.holdBarFill.setVisible(false);
+      this.holdBarFill.width = 0;
+    }
+  }
+
+  /**
+   * Tear down every game scene and bounce to MainMenu, mirroring the
+   * Pause-menu Restart Run path. Closes the WS via resetSync so the
+   * server drops the run state — the new run will go through the queue
+   * (Space/Enter on MainMenu) before launching.
+   */
+  private fireRestart(): void {
+    // Mirrors PauseMenu.restart — stops every overlay so MainMenu loads
+    // clean. Don't this.scene.stop() self before starting MainMenu;
+    // scene.start handles the swap and an explicit pre-stop can leave the
+    // scene plugin in a state where the start no-ops.
+    this.scene.stop("Game");
+    this.scene.stop("InventoryMenu");
+    this.scene.stop("ShopMenu");
+    this.scene.stop("PauseMenu");
+    this.scene.stop("WinScreen");
+    resetSync();
+    this.scene.start("MainMenu");
+  }
+
   private onDoorUnlockedToast(): void {
     this.showToast("LEVEL CLEAR - DOOR UNLOCKED");
   }
@@ -499,6 +643,20 @@ export class GameHUD extends Phaser.Scene {
       this,
     );
     this.game.events.off("doorUnlockedToast", this.onDoorUnlockedToast, this);
+
+    if (this.spaceKey) {
+      this.spaceKey.off("down", this.onSpaceDown, this);
+      this.spaceKey.off("up", this.onSpaceUp, this);
+      this.spaceKey = undefined;
+    }
+    this.holdStartedAt = undefined;
+    this.holdRestartFired = false;
+    this.holdLabel?.destroy();
+    this.holdBarBg?.destroy();
+    this.holdBarFill?.destroy();
+    this.holdLabel = undefined;
+    this.holdBarBg = undefined;
+    this.holdBarFill = undefined;
 
     this.timeText?.destroy();
     this.timePanel?.destroy();
