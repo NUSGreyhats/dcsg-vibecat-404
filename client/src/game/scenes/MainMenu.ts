@@ -207,6 +207,29 @@ export class MainMenu extends Phaser.Scene {
       window.open("/register", "_blank", "noopener,noreferrer");
     });
 
+    const leaderboardLink = this.add
+      .text(
+        contentX + MainMenu.INPUT_WIDTH,
+        panelY + 146,
+        "[ Leaderboard ↗ ]",
+        {
+          fontFamily: FONT_FAMILY,
+          fontSize: FONT_SIZE_SMALL,
+          color: hex(ACCENT_PRIMARY),
+        },
+      )
+      .setOrigin(1, 0)
+      .setInteractive({ useHandCursor: true });
+    leaderboardLink.on("pointerover", () =>
+      leaderboardLink.setColor(hex(TEXT_PRIMARY)),
+    );
+    leaderboardLink.on("pointerout", () =>
+      leaderboardLink.setColor(hex(ACCENT_PRIMARY)),
+    );
+    leaderboardLink.on("pointerdown", () => {
+      window.open("/leaderboard", "_blank", "noopener,noreferrer");
+    });
+
     this.drawSponsorsPanel(panelX, sponsorTop);
 
     this.connect();
