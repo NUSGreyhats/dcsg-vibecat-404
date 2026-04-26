@@ -40,6 +40,14 @@ import (
 // so a single tick can react to the freshest snapshot.
 const TickInterval = 2 * time.Second
 
+// TickTimeout bounds how long a single tick can block on DB or HTTP
+// I/O. queue.PopHead is invoked under a.mu, so a wedged SQLite (busy
+// past its 5 s busy_timeout) would otherwise also block Admitted /
+// ForceFree / AdmittedSnapshot. 4 s leaves ~1 s of slack inside the
+// 5 s SQLite busy_timeout before the context cancels and the tick
+// gives up — the next tick will retry.
+const TickTimeout = 4 * time.Second
+
 // TurnTTL bounds a single admitted turn. After this, the admission
 // expires regardless of state — the player either finishes or forfeits.
 // Spec: 5 minutes.
@@ -71,10 +79,10 @@ type SlotStatus struct {
 
 // admission is one in-memory admittedSet entry.
 type admission struct {
-	PlayerID    string
-	AdmittedAt  time.Time
-	StartedAt   time.Time // zero until first observed in live-games
-	LastSeenAt  time.Time // last live-games observation (zero until first seen)
+	PlayerID   string
+	AdmittedAt time.Time
+	StartedAt  time.Time // zero until first observed in live-games
+	LastSeenAt time.Time // last live-games observation (zero until first seen)
 }
 
 // OverrideMaxFunc returns the admin-set queue admission cap. ok=false
@@ -175,11 +183,13 @@ func (a *Advancer) run(ctx context.Context) {
 }
 
 func (a *Advancer) tick(ctx context.Context) {
+	tickCtx, cancel := context.WithTimeout(ctx, TickTimeout)
+	defer cancel()
 	var live []livegames.Entry
 	if a.live != nil {
 		live = a.live.Snapshot()
 	}
-	a.step(ctx, a.now(), a.fetchMax(ctx), live)
+	a.step(tickCtx, a.now(), a.fetchMax(tickCtx), live)
 }
 
 // step is the pure tick logic, factored out of tick() so tests can drive

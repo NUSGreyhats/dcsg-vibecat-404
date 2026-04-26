@@ -45,8 +45,8 @@ The admin panel is gated by a one-time-code flow that delivers the code through 
 **Login flow:**
 
 1. `GET /admin/login` — public. Renders an HTML page with a "Send code to Telegram" button and (when the `admin_login` cookie is present) an OTP input field.
-2. `POST /admin/login` — generates a 6-digit code and a `session_id` (16 random bytes encoded as 32 hex characters), stores `(session_id, sha256(session_id || otp), expires_at)` in `pending_admin_logins`, sets the `admin_login=<session_id>` cookie (HttpOnly, Secure, SameSite=Lax, 5-min Max-Age), and posts the code to the configured chat via `https://api.telegram.org/bot<token>/sendMessage`. The Telegram message uses `parse_mode=Markdown` and wraps the OTP in backticks so it renders as inline code — mobile clients then expose tap-to-copy on the digits. Rate-limited to 5 requests per 15 minutes per source IP (X-Forwarded-For is honoured only when the immediate peer is private/loopback so an internet client can't spoof the header to bypass the cap).
-3. `POST /admin/verify` — reads the OTP from the form body and the `session_id` from the cookie, looks up the row, increments `attempts` (rejecting after 5), verifies the hashed OTP, and on success deletes the row and sets a fresh `admin_session=<exp>.<hmac>` cookie (HttpOnly, Secure, SameSite=Lax, 24 h Max-Age) before redirecting to `/admin/`.
+2. `POST /admin/login` — generates a 6-digit code and a `session_id` (16 random bytes encoded as 32 hex characters), stores `(session_id, sha256(session_id || 0x00 || otp), expires_at)` in `pending_admin_logins` (the `0x00` separator forces a length boundary so `sessionID="ab"+otp="cd"` and `sessionID="abc"+otp="d"` hash differently), sets the `admin_login=<session_id>` cookie (HttpOnly, Secure when the request is HTTPS or arrived via an `X-Forwarded-Proto: https` proxy, SameSite=Lax, both `Max-Age` and matching `Expires` set to 5 min), and posts the code to the configured chat via `https://api.telegram.org/bot<token>/sendMessage`. The Telegram message uses `parse_mode=Markdown` and wraps the OTP in backticks so it renders as inline code — mobile clients then expose tap-to-copy on the digits. Rate-limited to 5 requests per 15 minutes per source IP (X-Forwarded-For is honoured only when the immediate peer is private/loopback so an internet client can't spoof the header to bypass the cap).
+3. `POST /admin/verify` — reads the OTP from the form body and the `session_id` from the cookie, looks up the row, increments `attempts` (rejecting after 5), verifies the hashed OTP, and on success deletes the row and sets a fresh `admin_session=<exp>.<hmac>` cookie (HttpOnly, Secure as above, SameSite=Lax, both `Max-Age` and matching `Expires` set to 24 h) before redirecting to `/admin/`. Cookie deletion paths (`HandleLogout`, `unauthorized()`) emit `Set-Cookie` with the same `Secure` attribute so HTTPS clients can reliably clear a Secure-issued cookie.
 4. `GET /admin/logout` — clears `admin_session`.
 5. All other `/admin/*` requests pass through middleware that verifies the `admin_session` cookie's HMAC + expiry; failures redirect to `/admin/login`.
 
@@ -57,7 +57,7 @@ The admin panel is gated by a one-time-code flow that delivers the code through 
 ```sql
 CREATE TABLE pending_admin_logins (
     session_id   TEXT PRIMARY KEY,
-    otp_hash     BLOB NOT NULL,         -- sha256(session_id || otp)
+    otp_hash     BLOB NOT NULL,         -- sha256(session_id || 0x00 || otp)
     expires_at   INTEGER NOT NULL,      -- unix seconds, 5 min after issue
     attempts     INTEGER NOT NULL DEFAULT 0,
     created_at   INTEGER NOT NULL

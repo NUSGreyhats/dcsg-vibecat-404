@@ -98,6 +98,16 @@ const (
 	cookieSession = "admin_session"
 )
 
+// isSecureRequest reports whether response cookies should carry
+// Secure. True when the connection is TLS or the immediate proxy
+// terminated TLS upstream and forwarded X-Forwarded-Proto. Used by
+// both issuance and deletion paths so the Set-Cookie attributes
+// match — some browsers refuse to clear a Secure-issued cookie via
+// a non-Secure Set-Cookie.
+func isSecureRequest(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
 // ErrDisabled is returned by hot-path methods when the gate is
 // configured off (no bot token / chat). Callers should answer 503.
 var ErrDisabled = errors.New("adminauth: disabled")
@@ -383,6 +393,7 @@ func (s *Service) unauthorized(w http.ResponseWriter, r *http.Request) {
 		Path:     "/admin",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
@@ -432,8 +443,9 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    sessionID,
 		Path:     "/admin",
 		Expires:  s.now().Add(otpTTL),
+		MaxAge:   int(otpTTL.Seconds()),
 		HttpOnly: true,
-		Secure:   r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"),
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -485,8 +497,9 @@ func (s *Service) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		Value:    s.signSession(exp),
 		Path:     "/admin",
 		Expires:  exp,
+		MaxAge:   int(SessionTTL.Seconds()),
 		HttpOnly: true,
-		Secure:   r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"),
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	// Clear admin_login — it's been consumed.
@@ -496,6 +509,7 @@ func (s *Service) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		Path:     "/admin",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -509,6 +523,7 @@ func (s *Service) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/admin",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	if strings.Contains(r.Header.Get("Accept"), "text/html") {
