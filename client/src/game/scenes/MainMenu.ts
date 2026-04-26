@@ -40,16 +40,16 @@ const SPONSORS: ReadonlyArray<SponsorSpec> = [
     imageSrc: "assets/htx_logo.png",
   },
   {
-    label: "OtterSec",
-    placeholder: "◉",
-    url: "https://osec.io/",
-    imageSrc: "assets/ottersec_logo.png",
-  },
-  {
     label: "Niklaus",
     placeholder: "N",
     url: "",
     imageSrc: "assets/niklas_logo.png",
+  },
+  {
+    label: "OtterSec",
+    placeholder: "◉",
+    url: "https://osec.io/",
+    imageSrc: "assets/ottersec_logo.png",
   },
 ];
 
