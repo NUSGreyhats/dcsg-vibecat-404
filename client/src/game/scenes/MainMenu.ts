@@ -624,8 +624,11 @@ export class MainMenu extends Phaser.Scene {
       // Already in queue from a previous tab/session. Treat as queued
       // and fall into the poll loop.
     } else if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new Error(body.error ?? `Queue join failed (HTTP ${res.status}).`);
+      // Lobby queue handlers respond with text/plain via http.Error,
+      // not JSON, so prefer the raw response text. Fall back to a
+      // generic message only if the body is empty.
+      const text = (await res.text().catch(() => "")).trim();
+      throw new Error(text || `Queue join failed (HTTP ${res.status}).`);
     } else {
       const body = (await res.json()) as {
         position: number;

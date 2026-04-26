@@ -162,7 +162,11 @@ func (a *Advancer) run(ctx context.Context) {
 }
 
 func (a *Advancer) tick(ctx context.Context) {
-	a.step(a.now(), a.fetchMax(ctx), a.live.Snapshot())
+	var live []livegames.Entry
+	if a.live != nil {
+		live = a.live.Snapshot()
+	}
+	a.step(a.now(), a.fetchMax(ctx), live)
 }
 
 // step is the pure tick logic, factored out of tick() so tests can drive

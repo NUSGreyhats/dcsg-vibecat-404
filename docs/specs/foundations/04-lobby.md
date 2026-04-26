@@ -9,7 +9,7 @@ Separate service (Repo B) that manages FIFO turn-taking in production, serves th
 | Endpoint                       | Method | Purpose                                                 |
 | ------------------------------ | ------ | ------------------------------------------------------- |
 | `/api/register`                | POST   | `{ display_name, contact, password }` → `{ player_id }` |
-| `/api/queue/join`              | POST   | `{ player_id, password }` → `{ position, est_wait_ms, admitted }`. Returns `503` when `QUEUE_ENABLED` is unset. |
+| `/api/queue/join`              | POST   | `{ player_id, password }` → `{ position, est_wait_ms, admitted }`. Returns `503` when `QUEUE_ENABLED` is unset. `est_wait_ms = max(0, position-1) * AVG_TURN_MS`, so the front of the line and admitted callers report `0`. |
 | `/api/queue/status/:player_id` | GET    | `{ position, est_wait_ms, admitted }`. `position == 0 && admitted` ⇒ allowlisted; client should open the WS. |
 | `/api/queue/:player_id`        | DELETE | `{ password }` — leave queue                            |
 | `/api/leaderboard`             | GET    | Rankings from `game.db`                                 |
@@ -29,7 +29,53 @@ See [03-identity-auth.md](./03-identity-auth.md) for the registration / verifica
 - `/admin/winners` — decrypt + export contact info.
 - `/admin/slot` — force-free slot, adjust `MAX_CONCURRENT`.
 
-Admin auth: basic auth or IP whitelist (TBD — see open questions in [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md)).
+### Admin auth (Telegram OTP)
+
+The admin panel is gated by a one-time-code flow that delivers the code through a configured Telegram chat instead of email. The chat itself is the access-control list — anyone in the chat is an admin — so there's no separate "allowed admins" allowlist to keep in sync.
+
+**Required env (lobby):**
+
+| Var                       | Purpose                                                                  |
+| ------------------------- | ------------------------------------------------------------------------ |
+| `TELEGRAM_BOT_TOKEN`      | Bot token from `@BotFather`. Empty → admin disabled (503).               |
+| `TELEGRAM_ADMIN_CHAT_ID`  | Numeric chat ID where OTPs are sent. Group or single user.               |
+| `ADMIN_SESSION_SECRET`    | HMAC key for session cookies. ≥ 32 bytes, hex- or base64-encoded.        |
+
+**Login flow:**
+
+1. `GET /admin/login` — public. Renders an HTML page with a "Send code to Telegram" button and (when the `admin_login` cookie is present) an OTP input field.
+2. `POST /admin/login` — generates a 6-digit code and a 32-byte `session_id`, stores `(session_id, sha256(session_id || otp), expires_at)` in `pending_admin_logins`, sets the `admin_login=<session_id>` cookie (HttpOnly, Secure, SameSite=Lax, 5-min Max-Age), and posts the code to the configured chat via `https://api.telegram.org/bot<token>/sendMessage`. Rate-limited 5/hour per IP.
+3. `POST /admin/verify` — reads the OTP from the form body and the `session_id` from the cookie, looks up the row, increments `attempts` (rejecting after 5), verifies the hashed OTP, and on success deletes the row and sets a fresh `admin_session=<exp>.<hmac>` cookie (HttpOnly, Secure, SameSite=Lax, 24 h Max-Age) before redirecting to `/admin/`.
+4. `GET /admin/logout` — clears `admin_session`.
+5. All other `/admin/*` requests pass through middleware that verifies the `admin_session` cookie's HMAC + expiry; failures redirect to `/admin/login`.
+
+**Session cookie shape:** `<exp_unix>.<base64url(hmac_sha256(secret, exp_unix))>`. Stateless on the server — no DB lookup on the hot path. Rotation requires changing `ADMIN_SESSION_SECRET`, which forcibly invalidates every issued cookie.
+
+**Schema (`lobby.db`):**
+
+```sql
+CREATE TABLE pending_admin_logins (
+    session_id   TEXT PRIMARY KEY,
+    otp_hash     BLOB NOT NULL,         -- sha256(session_id || otp)
+    expires_at   INTEGER NOT NULL,      -- unix seconds, 5 min after issue
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    created_at   INTEGER NOT NULL
+);
+CREATE INDEX idx_pending_admin_expires ON pending_admin_logins(expires_at);
+```
+
+A periodic sweep (or opportunistic delete during issue/verify) prunes expired rows; the table stays small.
+
+**Threat model:**
+
+- **OTP brute force:** 6 digits = 1 M space, 5 attempts per session, 5-min TTL. Even a fully concurrent attacker who steals the `admin_login` cookie has a `5 / 1_000_000` chance per session. Not session-binding the OTP would let an attacker race many sessions; we session-bind via cookie.
+- **Cookie theft:** session cookies are HttpOnly + Secure + SameSite=Lax. Compromise = full admin until expiry; recovery is rotating `ADMIN_SESSION_SECRET`.
+- **Telegram outage:** admin login is unavailable for the duration. Acceptable — there's no anti-cheat or live-state path that needs admin during an outage; runs continue, leaderboard moderation just defers.
+- **Bot token leak:** an attacker can spam the chat with bogus OTPs but cannot log in, because they don't have the `session_id` cookie. We rotate the bot token via BotFather and update env.
+
+**Why this over basic auth:** no shared password to rotate / leak / forget; no SMTP infrastructure; the chat itself is the audit log of who logged in when.
+
+See [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md) open questions for the prior IP-allowlist alternative; that remains a viable belt-and-braces add-on if we want network-layer scoping on top.
 
 ## Queue ↔ game server handoff
 

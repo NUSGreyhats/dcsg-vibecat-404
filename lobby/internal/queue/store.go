@@ -7,6 +7,7 @@
 package queue
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -90,6 +91,12 @@ func Leave(db *sql.DB, playerID string) error {
 
 // Position returns the 1-based position of player_id in the queue, or
 // 0 if they aren't queued. Position 1 == front of line.
+//
+// Ties on joined_at are broken by player_id ascending. UnixMilli
+// timestamps can collide under concurrent joins, and SQLite without an
+// explicit ordering would leave FIFO-among-ties undefined; the
+// (joined_at, player_id) tuple gives a total order that's stable
+// across PopHead, Position, and List.
 func Position(db *sql.DB, playerID string) (int, error) {
 	var joinedAt int64
 	err := db.QueryRow(
@@ -104,8 +111,9 @@ func Position(db *sql.DB, playerID string) (int, error) {
 	}
 	var ahead int
 	if err := db.QueryRow(
-		`SELECT COUNT(*) FROM queue_entries WHERE joined_at < ?`,
-		joinedAt,
+		`SELECT COUNT(*) FROM queue_entries
+          WHERE joined_at < ? OR (joined_at = ? AND player_id < ?)`,
+		joinedAt, joinedAt, playerID,
 	).Scan(&ahead); err != nil {
 		return 0, fmt.Errorf("queue: position count: %w", err)
 	}
@@ -125,35 +133,53 @@ func Length(db *sql.DB) (int, error) {
 // (nil, nil) when the queue is empty — callers should treat that as
 // "no work" rather than an error.
 //
-// Implemented as a transaction so concurrent advancer ticks (or an
-// admin "advance" click) can't double-pop the same head.
+// Uses BEGIN IMMEDIATE so concurrent callers can't both SELECT the
+// same head row before either takes the write lock. With SQLite's
+// default DEFERRED transactions two goroutines could each scan the
+// row, then the second DELETE would affect zero rows but the goroutine
+// would still return the same Entry — a double-admit. IMMEDIATE
+// acquires the write lock at BEGIN, serialising the SELECT+DELETE
+// pair. database/sql doesn't expose isolation upgrades on the modernc
+// driver, so we run the upgrade against an explicit Conn.
 func PopHead(db *sql.DB) (*Entry, error) {
-	tx, err := db.Begin()
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("queue: pop begin: %w", err)
+		return nil, fmt.Errorf("queue: pop conn: %w", err)
 	}
-	defer tx.Rollback()
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, fmt.Errorf("queue: pop begin immediate: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(ctx, `ROLLBACK`)
+		}
+	}()
 
 	var e Entry
-	err = tx.QueryRow(
+	err = conn.QueryRowContext(ctx,
 		`SELECT player_id, joined_at FROM queue_entries
-          ORDER BY joined_at ASC LIMIT 1`,
+          ORDER BY joined_at ASC, player_id ASC LIMIT 1`,
 	).Scan(&e.PlayerID, &e.JoinedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			_, _ = conn.ExecContext(ctx, `ROLLBACK`)
+			committed = true
 			return nil, nil
 		}
 		return nil, fmt.Errorf("queue: pop scan: %w", err)
 	}
-	if _, err := tx.Exec(
-		`DELETE FROM queue_entries WHERE player_id = ?`,
-		e.PlayerID,
+	if _, err := conn.ExecContext(ctx,
+		`DELETE FROM queue_entries WHERE player_id = ?`, e.PlayerID,
 	); err != nil {
 		return nil, fmt.Errorf("queue: pop delete: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, fmt.Errorf("queue: pop commit: %w", err)
 	}
+	committed = true
 	return &e, nil
 }
 
@@ -164,7 +190,7 @@ func List(db *sql.DB, limit int) ([]Entry, error) {
 	}
 	rows, err := db.Query(
 		`SELECT player_id, joined_at FROM queue_entries
-          ORDER BY joined_at ASC LIMIT ?`,
+          ORDER BY joined_at ASC, player_id ASC LIMIT ?`,
 		limit,
 	)
 	if err != nil {

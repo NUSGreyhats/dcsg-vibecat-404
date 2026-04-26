@@ -3,6 +3,7 @@ package queue
 import (
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -172,6 +173,65 @@ func TestLengthAndList(t *testing.T) {
 		if entries[i].PlayerID != want {
 			t.Errorf("list[%d] = %s, want %s", i, entries[i].PlayerID, want)
 		}
+	}
+}
+
+// TestPopHeadConcurrentNoDoubleAdmit hammers PopHead from many goroutines
+// against a small queue and confirms no player_id is returned twice. With
+// SQLite's default DEFERRED transactions two goroutines could each SELECT
+// the same head row before either took the write lock, then the second
+// DELETE would affect zero rows but still return the previously-selected
+// entry — a double-admit. The IMMEDIATE-locking fix should make that
+// race impossible.
+func TestPopHeadConcurrentNoDoubleAdmit(t *testing.T) {
+	db, err := Open(openTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	const n = 50
+	for i := 0; i < n; i++ {
+		// Use the SAME joined_at on every entry to maximally stress
+		// the (joined_at, player_id) tiebreaker AND the head-pick
+		// race; player_id ASC chooses a deterministic head.
+		id := "player-" + string(rune('a'+i%26)) + string(rune('a'+(i/26)%26)) + string(rune('0'+i%10))
+		// Pad each id to 32 chars to mirror real player IDs.
+		for len(id) < 32 {
+			id += "x"
+		}
+		if err := Join(db, id, 1000); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var (
+		mu   sync.Mutex
+		seen = map[string]int{}
+		wg   sync.WaitGroup
+	)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e, err := PopHead(db)
+			if err != nil || e == nil {
+				return
+			}
+			mu.Lock()
+			seen[e.PlayerID]++
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	for id, count := range seen {
+		if count != 1 {
+			t.Errorf("player %s popped %d times — race", id, count)
+		}
+	}
+	if got, _ := Length(db); got != 0 {
+		t.Errorf("after concurrent pops: %d remaining, want 0", got)
 	}
 }
 

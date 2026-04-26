@@ -110,7 +110,7 @@ The **lobby** is the only publicly-addressable service — it terminates all bro
 | Lobby `:3000`            | **Yes** | Public VPS in dev/test. DEF CON LAN in prod. TLS terminated at a reverse proxy (Caddy or nginx) in front of the Docker Compose stack — the container itself serves plain HTTP. |
 | Game server `:8080` (WS) | **Yes** | Same host as lobby. WebSocket, upgraded from the same domain. Reverse proxy routes `/ws` (player) and `/ws/spectate` (read-only spectator) → `:8080`; everything else → `:3000`. See [04-lobby.md#live-spectating](./04-lobby.md#live-spectating) and [02-protocol.md#spectator-protocol](./02-protocol.md#spectator-protocol). |
 | Game server `/internal/slot-status` | No | Bound to loopback or a Docker-internal network. Lobby polls it; never exposed externally. |
-| Admin panel (`/admin/*`) | **No, in practice** | Lives on the lobby, but gated by basic auth / IP allowlist (TBD — see [04-lobby.md](./04-lobby.md#admin-panel-auth-protected)). |
+| Admin panel (`/admin/*`) | **No, in practice** | Lives on the lobby, gated by Telegram-OTP login (see [04-lobby.md § Admin auth](./04-lobby.md#admin-auth-telegram-otp)). |
 
 The dev/test lobby VPS is also the host for the stripped source (served at `/source/`), so there is **one public domain per environment** covering everything a player sees.
 

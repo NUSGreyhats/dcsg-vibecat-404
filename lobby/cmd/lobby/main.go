@@ -22,12 +22,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/greyhats/defcon-game/lobby/internal/admin"
+	"github.com/greyhats/defcon-game/lobby/internal/adminauth"
 	"github.com/greyhats/defcon-game/lobby/internal/advancer"
 	"github.com/greyhats/defcon-game/lobby/internal/leaderboard"
 	"github.com/greyhats/defcon-game/lobby/internal/livegames"
@@ -42,6 +44,21 @@ import (
 // only ever surfaced to a waiting player as informational.
 const avgTurnMs = 180_000
 
+// maxQueueBodyBytes caps incoming JSON for /api/queue/{join,leave}.
+// Mirrors the limit pkg/identity uses for /api/login etc. — the
+// payloads are tiny ({player_id, password}); 4 KiB is well over real
+// payloads but stops a long body from chewing memory.
+const maxQueueBodyBytes = 4 * 1024
+
+// playerIDPattern is the canonical 32-hex-character shape produced by
+// identity.NewPlayerID. Queue endpoints reject anything else early so
+// malformed IDs don't reach the DB.
+var playerIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+func validPlayerID(s string) bool {
+	return playerIDPattern.MatchString(s)
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
@@ -52,8 +69,9 @@ func main() {
 	allowlistPath := envDefault("ALLOWLIST_PATH", "/data/allowlist.json")
 	gameServerURL := envDefault("GAME_SERVER_URL", "http://game-server:8080")
 	sourceTarball := envDefault("SOURCE_TARBALL", "/app/source.tar.gz")
-	adminUser := os.Getenv("ADMIN_USER")
-	adminPassHash := []byte(os.Getenv("ADMIN_PASS_HASH"))
+	telegramBotToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	telegramChatID := os.Getenv("TELEGRAM_ADMIN_CHAT_ID")
+	adminSessionSecret := []byte(os.Getenv("ADMIN_SESSION_SECRET"))
 	queueEnabled := strings.EqualFold(os.Getenv("QUEUE_ENABLED"), "true")
 
 	identityDB, err := identity.OpenDB(identityDBPath)
@@ -73,7 +91,26 @@ func main() {
 		log.Fatalf("admin schema: %v", err)
 	}
 
-	auth := &admin.Auth{User: adminUser, PassHash: adminPassHash}
+	// lobby.db is opened unconditionally — both the queue (when
+	// QUEUE_ENABLED=true) and adminauth (always, when admin creds are
+	// set) live there. Opening with no consumers is cheap.
+	lobbyDB, err := queue.Open(lobbyDBPath)
+	if err != nil {
+		log.Fatalf("open lobby db: %v", err)
+	}
+	defer lobbyDB.Close()
+	if err := adminauth.EnsureSchema(lobbyDB); err != nil {
+		log.Fatalf("adminauth schema: %v", err)
+	}
+
+	authSvc, err := adminauth.New(lobbyDB, adminauth.Config{
+		BotToken:      telegramBotToken,
+		ChatID:        telegramChatID,
+		SessionSecret: adminSessionSecret,
+	})
+	if err != nil {
+		log.Fatalf("adminauth: %v", err)
+	}
 
 	identitySvc := identity.NewService(identityDB)
 
@@ -91,17 +128,14 @@ func main() {
 	// AUTH_MODE=identity don't spuriously rewrite allowlist.json (the
 	// game server would ignore it, but the disk churn is wasted) and
 	// public /api/queue/* returns 503 instead of accepting joins that
-	// will never advance.
+	// will never advance. The lobby.db handle (lobbyDB) is always
+	// opened above; the advancer just borrows it.
 	var (
 		queueDB *sql.DB
 		adv     *advancer.Advancer
 	)
 	if queueEnabled {
-		queueDB, err = queue.Open(lobbyDBPath)
-		if err != nil {
-			log.Fatalf("open lobby db: %v", err)
-		}
-		defer queueDB.Close()
+		queueDB = lobbyDB
 		adv = advancer.New(queueDB, livePoller, gameServerURL, allowlistPath)
 		adv.Start(ctx)
 	}
@@ -202,10 +236,39 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(entries)
 	})
-	// /admin/* — Basic-auth-gated moderation panel. Auth.Wrap returns
-	// 503 "admin disabled" if ADMIN_USER is empty, so a deployment that
-	// hasn't configured creds can't accidentally serve flag/delete.
-	mux.Handle("/admin/", auth.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// /admin/login + /admin/verify + /admin/logout are public — they
+	// have to be reachable to bootstrap a session. They internally
+	// 503 when admin auth isn't configured.
+	mux.HandleFunc("/admin/login", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			authSvc.ServeLoginPage(w, r, web.AdminLoginHTML)
+		case http.MethodPost:
+			authSvc.HandleLogin(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/admin/verify", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		authSvc.HandleVerify(w, r)
+	})
+	mux.HandleFunc("/admin/logout", func(w http.ResponseWriter, r *http.Request) {
+		authSvc.HandleLogout(w, r)
+	})
+
+	// /admin/* — Telegram-OTP-gated moderation panel. authSvc.Wrap
+	// returns 503 "admin disabled" when TELEGRAM_BOT_TOKEN /
+	// TELEGRAM_ADMIN_CHAT_ID / ADMIN_SESSION_SECRET aren't all set,
+	// so a deployment that hasn't configured the bot can't
+	// accidentally serve flag/delete.
+	mux.Handle("/admin/", authSvc.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// /admin/login, /admin/verify, /admin/logout are intercepted
+		// by the more-specific HandleFunc registrations above, so
+		// they never reach this gated branch.
 		switch {
 		case r.Method == http.MethodGet && (r.URL.Path == "/admin/" || r.URL.Path == "/admin"):
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -302,8 +365,8 @@ func main() {
 
 	go func() {
 		adminEnabled := "off"
-		if adminUser != "" && len(adminPassHash) > 0 {
-			adminEnabled = "on (user=" + adminUser + ")"
+		if authSvc.Enabled() {
+			adminEnabled = "on (telegram chat=" + telegramChatID + ")"
 		}
 		queueState := "off"
 		if queueEnabled {
@@ -374,12 +437,20 @@ func queueJoinHandler(w http.ResponseWriter, r *http.Request, queueDB, identityD
 		PlayerID string `json:"player_id"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxQueueBodyBytes)).Decode(&body); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
 	if body.PlayerID == "" || body.Password == "" {
 		http.Error(w, "player_id and password required", http.StatusBadRequest)
+		return
+	}
+	if !validPlayerID(body.PlayerID) {
+		// Wrong format gets the same 401 as a real auth failure to
+		// keep the surface uniform; brute-force probing of player_id
+		// shouldn't get a free format-validity oracle.
+		_ = identity.DummyCompare(body.Password)
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
 	p, err := identity.Lookup(identityDB, body.PlayerID)
@@ -428,7 +499,7 @@ func queueJoinHandler(w http.ResponseWriter, r *http.Request, queueDB, identityD
 // status leaks nothing the WS auth wouldn't already).
 func queueStatusHandler(w http.ResponseWriter, r *http.Request, queueDB *sql.DB, adv *advancer.Advancer) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/queue/status/")
-	if id == "" || strings.Contains(id, "/") {
+	if !validPlayerID(id) {
 		http.Error(w, "invalid player_id", http.StatusBadRequest)
 		return
 	}
@@ -454,14 +525,14 @@ func queueStatusHandler(w http.ResponseWriter, r *http.Request, queueDB *sql.DB,
 // here; admins use /admin/queue.
 func queueLeaveHandler(w http.ResponseWriter, r *http.Request, queueDB, identityDB *sql.DB) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/queue/")
-	if id == "" || strings.Contains(id, "/") {
+	if !validPlayerID(id) {
 		http.Error(w, "invalid player_id", http.StatusBadRequest)
 		return
 	}
 	var body struct {
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxQueueBodyBytes)).Decode(&body); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
@@ -498,14 +569,24 @@ func queueLeaveHandler(w http.ResponseWriter, r *http.Request, queueDB, identity
 
 // writeQueueStatus serialises the public {position, est_wait_ms, admitted}
 // shape used by both /api/queue/join and /api/queue/status.
+//
+// est_wait_ms estimates the time the caller will wait *until admission*,
+// so it's `(position - 1) * avg` — the player at the front of the line
+// (position 1) waits roughly until the current admit's turn ends, but
+// for the public API we surface 0 as "you're up next, send the WS auth".
+// Admitted callers (position == 0) also report 0.
 func writeQueueStatus(w http.ResponseWriter, position int, admitted bool) {
+	wait := int64(0)
+	if position > 1 {
+		wait = int64(position-1) * avgTurnMs
+	}
 	body := struct {
 		Position  int   `json:"position"`
 		EstWaitMs int64 `json:"est_wait_ms"`
 		Admitted  bool  `json:"admitted"`
 	}{
 		Position:  position,
-		EstWaitMs: int64(position) * avgTurnMs,
+		EstWaitMs: wait,
 		Admitted:  admitted,
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -515,6 +596,7 @@ func writeQueueStatus(w http.ResponseWriter, position int, admitted bool) {
 // adminQueueJSON returns the current queue + admittedSet for the admin
 // panel. queue is sorted oldest-first (= front of line first).
 func adminQueueJSON(w http.ResponseWriter, queueEnabled bool, queueDB *sql.DB, adv *advancer.Advancer) {
+	w.Header().Set("Content-Type", "application/json")
 	if !queueEnabled {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"enabled": false,
@@ -535,7 +617,6 @@ func adminQueueJSON(w http.ResponseWriter, queueEnabled bool, queueDB *sql.DB, a
 			"joined_at": e.JoinedAt,
 		})
 	}
-	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"enabled":  true,
 		"queue":    queueOut,
@@ -550,7 +631,7 @@ func adminQueueKick(w http.ResponseWriter, queueEnabled bool, queueDB *sql.DB, p
 		http.Error(w, "queue disabled", http.StatusServiceUnavailable)
 		return
 	}
-	if playerID == "" || strings.Contains(playerID, "/") {
+	if !validPlayerID(playerID) {
 		http.Error(w, "invalid player_id", http.StatusBadRequest)
 		return
 	}
@@ -573,7 +654,7 @@ func adminSlotFree(w http.ResponseWriter, queueEnabled bool, adv *advancer.Advan
 		http.Error(w, "queue disabled", http.StatusServiceUnavailable)
 		return
 	}
-	if playerID == "" || strings.Contains(playerID, "/") {
+	if !validPlayerID(playerID) {
 		http.Error(w, "invalid player_id", http.StatusBadRequest)
 		return
 	}
