@@ -370,6 +370,10 @@ export class GameHUD extends Phaser.Scene {
       this.weaponText.displayHeight,
     );
     this.weaponPanel.setSize(totalWidth + PANEL_PAD_X * 2, totalHeight + PANEL_PAD_Y * 2);
+    this.weaponPanel.setPosition(
+      this.weaponText.x - PANEL_PAD_X * (1 - 2 * this.weaponPanel.originX),
+      this.weaponText.y - PANEL_PAD_Y * (1 - 2 * this.weaponPanel.originY),
+    );
     this.weaponPanel.setVisible(true);
   }
 

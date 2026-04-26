@@ -177,6 +177,17 @@ export class PauseMenu extends Phaser.Scene {
           })
           .setOrigin(0.5)
           .setDepth(DEPTH_MODAL_TEXT);
+        t.setInteractive({ useHandCursor: true });
+        t.on("pointerover", () => {
+          if (this.page !== "main") return;
+          this.selected = i;
+          this.renderPage();
+        });
+        t.on("pointerdown", () => {
+          if (this.page !== "main") return;
+          this.selected = i;
+          this.activate();
+        });
         this.body.push(t);
       }
     } else {
@@ -196,7 +207,9 @@ export class PauseMenu extends Phaser.Scene {
           color: hex(TEXT_MUTED),
         })
         .setOrigin(0.5)
-        .setDepth(DEPTH_MODAL_TEXT);
+        .setDepth(DEPTH_MODAL_TEXT)
+        .setInteractive({ useHandCursor: true });
+      this.hint.on("pointerdown", () => this.back());
 
       const labelX = cx - 160;
       const valueX = cx + 160;
