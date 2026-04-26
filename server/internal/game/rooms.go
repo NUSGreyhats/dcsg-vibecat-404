@@ -7,16 +7,15 @@ import (
 	"github.com/greyhats/defcon-game/server/internal/protocol"
 )
 
-// RoomTemplate is the static definition of a room's contents, consumed by
-// LoadRoom to produce concrete RoomState + the protocol.RoomData shipped to
-// the client. Initial enemies and pickups are NOT part of the template —
-// they're authored as object-layer markers in the tilemap (see
-// parseTilemapEnemies / parseTilemapPickups). Waves and doors stay in code
-// because they carry behaviour (trigger thresholds, target rooms) that
-// doesn't map cleanly to a Tiled object.
+// RoomTemplate is the static definition of a room's contents, consumed
+// by LoadRoom to produce concrete RoomState + the protocol.RoomData
+// shipped to the client. Initial enemies, pickups, and reinforcement
+// waves are NOT part of the template — they're authored as object-layer
+// markers in the tilemap (see parseTilemapEnemiesAndWaves /
+// parseTilemapPickups). Doors stay in code because they carry the
+// target-room link, which doesn't map cleanly to a Tiled object.
 type RoomTemplate struct {
 	TilemapID string
-	Waves     []WaveDef
 	Doors     []DoorDef
 }
 
@@ -110,12 +109,13 @@ func CheckAllEnemiesDead(r *RoomState) {
 // are spawned in ascending EntityID order; waves are pre-seeded after all
 // initial enemies, in wave-slot order.
 //
-// `enemies` is the room's initial enemy spawn list (production callers
-// pass TilemapEnemies(r.RoomIndex); tests can pass a hand-built slice).
+// `enemies` and `waves` are the room's initial enemy spawns and
+// reinforcement waves (production callers pass TilemapEnemies /
+// TilemapWaves; tests pass hand-built slices).
 //
 // Returns a protocol.RoomData suitable for S2C_RUN_STARTED or S2C_ROOM_LOAD.
 // Doors always ship as Locked: true — the unlock is a separate broadcast.
-func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, enemies []EnemySpawnDef, now time.Time) protocol.RoomData {
+func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, enemies []EnemySpawnDef, waves []WaveDef, now time.Time) protocol.RoomData {
 	// Reset collections for the new room.
 	r.Enemies = map[uint32]*EnemyState{}
 	r.Pickups = map[uint32]*PickupState{}
@@ -148,7 +148,7 @@ func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, enemies []EnemyS
 	}
 
 	r.InitialPop = len(ordered)
-	seedWaves(r, rng, tmpl.Waves)
+	seedWaves(r, rng, waves)
 
 	// Pickups are authored exclusively in the tilemap (Health/Ammo
 	// point objects on the object layer). See parseTilemapPickups.

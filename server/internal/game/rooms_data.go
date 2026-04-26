@@ -62,17 +62,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// 5 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-4",
-		Waves: []WaveDef{
-			{Mobs: []WaveMobDef{
-				{Type: EnemyKamikaze, X: 240, Y: 500},
-				{Type: EnemyKamikaze, X: 1040, Y: 500},
-			}},
-			{Mobs: []WaveMobDef{
-				{Type: EnemyGrunt, X: 320, Y: 180},
-				{Type: EnemyGrunt, X: 960, Y: 180},
-				{Type: EnemyRunner, X: 640, Y: 540},
-			}},
-		},
 		Doors: []DoorDef{
 			{DoorID: 491, X: 1220, Y: 384, TargetRoom: 5},
 		},
@@ -83,16 +72,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// 5 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-5",
-		Waves: []WaveDef{
-			{Mobs: []WaveMobDef{
-				{Type: EnemyRunner, X: 200, Y: 500},
-				{Type: EnemyRunner, X: 1080, Y: 500},
-			}},
-			{Mobs: []WaveMobDef{
-				{Type: EnemyTank, X: 640, Y: 500},
-				{Type: EnemyGrunt, X: 640, Y: 200},
-			}},
-		},
 		Doors: []DoorDef{
 			{DoorID: 591, X: 1220, Y: 384, TargetRoom: 6},
 		},
@@ -103,17 +82,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-6",
-		Waves: []WaveDef{
-			{Mobs: []WaveMobDef{
-				{Type: EnemyKamikaze, X: 320, Y: 540},
-				{Type: EnemyKamikaze, X: 960, Y: 540},
-			}},
-			{Mobs: []WaveMobDef{
-				{Type: EnemyTank, X: 640, Y: 540},
-				{Type: EnemyRunner, X: 260, Y: 180},
-				{Type: EnemyRunner, X: 1020, Y: 180},
-			}},
-		},
 		Doors: []DoorDef{
 			{DoorID: 691, X: 640, Y: 40, TargetRoom: 7},
 		},
@@ -124,17 +92,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-7",
-		Waves: []WaveDef{
-			{Mobs: []WaveMobDef{
-				{Type: EnemyRunner, X: 320, Y: 540},
-				{Type: EnemyRunner, X: 960, Y: 540},
-			}},
-			{Mobs: []WaveMobDef{
-				{Type: EnemyTank, X: 640, Y: 540},
-				{Type: EnemyRunner, X: 240, Y: 400},
-				{Type: EnemyRunner, X: 1040, Y: 400},
-			}},
-		},
 		Doors: []DoorDef{
 			{DoorID: 791, X: 1220, Y: 384, TargetRoom: 8},
 		},
@@ -145,18 +102,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-8",
-		Waves: []WaveDef{
-			{Mobs: []WaveMobDef{
-				{Type: EnemyRunner, X: 220, Y: 500},
-				{Type: EnemyRunner, X: 1060, Y: 500},
-				{Type: EnemyKamikaze, X: 640, Y: 540},
-			}},
-			{Mobs: []WaveMobDef{
-				{Type: EnemyTank, X: 640, Y: 180},
-				{Type: EnemyGrunt, X: 320, Y: 540},
-				{Type: EnemyGrunt, X: 960, Y: 540},
-			}},
-		},
 		Doors: []DoorDef{
 			{DoorID: 891, X: 1220, Y: 384, TargetRoom: 9},
 		},
@@ -167,18 +112,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-9",
-		Waves: []WaveDef{
-			{Mobs: []WaveMobDef{
-				{Type: EnemyKamikaze, X: 200, Y: 520},
-				{Type: EnemyKamikaze, X: 1080, Y: 520},
-				{Type: EnemyRunner, X: 640, Y: 540},
-			}},
-			{Mobs: []WaveMobDef{
-				{Type: EnemyTank, X: 640, Y: 540},
-				{Type: EnemyKamikaze, X: 240, Y: 180},
-				{Type: EnemyKamikaze, X: 1040, Y: 180},
-			}},
-		},
 		Doors: []DoorDef{
 			{DoorID: 991, X: 640, Y: 40, TargetRoom: 10},
 		},
@@ -200,29 +133,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// wave 2 can chunk half the player's HP.
 	{
 		TilemapID: "room-10",
-		Waves: []WaveDef{
-			// Wave 1 — 5 runners at radius ~300, 72° spacing.
-			{Mobs: []WaveMobDef{
-				{Type: EnemyRunner, X: 925, Y: 477},
-				{Type: EnemyRunner, X: 640, Y: 684},
-				{Type: EnemyRunner, X: 355, Y: 477},
-				{Type: EnemyRunner, X: 464, Y: 141},
-				{Type: EnemyRunner, X: 816, Y: 141},
-			}},
-			// Wave 2 — 10 kamikazes along the perimeter.
-			{Mobs: []WaveMobDef{
-				{Type: EnemyKamikaze, X: 120, Y: 80},
-				{Type: EnemyKamikaze, X: 520, Y: 80},
-				{Type: EnemyKamikaze, X: 760, Y: 80},
-				{Type: EnemyKamikaze, X: 1160, Y: 80},
-				{Type: EnemyKamikaze, X: 320, Y: 688},
-				{Type: EnemyKamikaze, X: 640, Y: 688},
-				{Type: EnemyKamikaze, X: 960, Y: 688},
-				{Type: EnemyKamikaze, X: 80, Y: 384},
-				{Type: EnemyKamikaze, X: 1200, Y: 200},
-				{Type: EnemyKamikaze, X: 1200, Y: 568},
-			}},
-		},
 		Doors: nil,
 	},
 }

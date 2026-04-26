@@ -32,26 +32,24 @@ func TestLoadRoomRNGConsumptionInvariant(t *testing.T) {
 		t.Fatalf("test assumes WaveTriggers=[0.66,0.33]; update the golden first if tuning")
 	}
 
-	tmpl := &RoomTemplate{
-		TilemapID: "test",
-		Waves: []WaveDef{
-			{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 600, Y: 300}}},
-			{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 700, Y: 300}}},
-			{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 800, Y: 300}}},
-		},
-	}
+	tmpl := &RoomTemplate{TilemapID: "test"}
 	// Deliberately out-of-order — LoadRoom must sort ascending by
 	// EntityID before seeding.
 	enemies := []EnemySpawnDef{
 		{EntityID: 2, Type: EnemyGrunt, X: 400, Y: 300},
 		{EntityID: 1, Type: EnemyGrunt, X: 500, Y: 300},
 	}
+	waves := []WaveDef{
+		{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 600, Y: 300}}},
+		{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 700, Y: 300}}},
+		{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 800, Y: 300}}},
+	}
 
 	const seed = int64(42)
 	rng := rand.New(rand.NewSource(seed))
 	r := NewRoomState(0) // room 0 = no wall grid; positions pass through clean
 	now := time.Unix(1_700_000_000, 0)
-	_ = LoadRoom(r, rng, tmpl, enemies, now)
+	_ = LoadRoom(r, rng, tmpl, enemies, waves, now)
 
 	// Post-condition: skip rule honored.
 	if len(r.PendingWaves) != 1 {

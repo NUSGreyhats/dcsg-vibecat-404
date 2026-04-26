@@ -84,10 +84,14 @@ type tiledLayer struct {
 }
 
 type tiledObject struct {
-	Name string  `json:"name"`
-	Type string  `json:"type"`
-	X    float32 `json:"x"`
-	Y    float32 `json:"y"`
+	Name string `json:"name"`
+	// Tiled emits `type` (1.8 and earlier) or `class` (1.9+) for the
+	// object's class field. Read both — exporters can pick either.
+	Type       string              `json:"type"`
+	Class      string              `json:"class"`
+	X          float32             `json:"x"`
+	Y          float32             `json:"y"`
+	Properties []tiledTileProperty `json:"properties"`
 }
 
 type tiledMap struct {
@@ -141,6 +145,13 @@ var tilemapPickups [12][]PickupSpawnDef
 // so RNG consumption order stays deterministic across replays.
 var tilemapEnemies [12][]EnemySpawnDef
 
+// tilemapWaves holds reinforcement-wave mobs authored as object-layer
+// markers. Wave membership comes from the marker name's "WaveN" prefix:
+// "Wave1 Grunt" → slot 0, "Wave2 Tank" → slot 1, etc. Each room's slice
+// is dense (slot index = wave-slot) and is consumed by LoadRoom in
+// declaration order, matching the seedWaves contract.
+var tilemapWaves [12][]WaveDef
+
 // init parses the embedded tilemaps at process start. A failure on
 // any room is fatal — the binary shouldn't boot with missing
 // collision data.
@@ -161,7 +172,7 @@ func init() {
 		wallGrids[i] = parseWallGrid(uint8(i), &m)
 		playerSpawns[i] = parsePlayerSpawn(&m)
 		tilemapPickups[i] = parseTilemapPickups(uint8(i), &m)
-		tilemapEnemies[i] = parseTilemapEnemies(uint8(i), &m)
+		tilemapEnemies[i], tilemapWaves[i] = parseTilemapEnemiesAndWaves(uint8(i), &m)
 	}
 }
 
@@ -237,68 +248,144 @@ func TilemapPickups(roomIndex uint8) []PickupSpawnDef {
 	return tilemapPickups[roomIndex]
 }
 
-// archetypeFromMarker maps a Tiled object's name/type to its enemy
-// archetype ID. Returns (0, false) when the marker isn't an enemy.
-// Both fields are checked so authors can use Tiled's `type` dropdown
-// or just rename the object — same lenient pattern as PlayerSpawn.
-func archetypeFromMarker(name, typ string) (uint8, bool) {
-	for _, s := range [2]string{typ, name} {
-		switch s {
-		case "Grunt":
-			return EnemyGrunt, true
-		case "Runner":
-			return EnemyRunner, true
-		case "Tank":
-			return EnemyTank, true
-		case "Kamikaze":
-			return EnemyKamikaze, true
-		case "Boss":
-			return EnemyBoss, true
+// archetypeFromString maps a single string (a Tiled `class`, `type`, or
+// `name` field) to its enemy archetype ID. Returns (0, false) when the
+// string isn't a known archetype.
+func archetypeFromString(s string) (uint8, bool) {
+	switch s {
+	case "Grunt":
+		return EnemyGrunt, true
+	case "Runner":
+		return EnemyRunner, true
+	case "Tank":
+		return EnemyTank, true
+	case "Kamikaze":
+		return EnemyKamikaze, true
+	case "Boss":
+		return EnemyBoss, true
+	}
+	return 0, false
+}
+
+// archetypeFromMarker resolves an enemy archetype from a Tiled object,
+// preferring `class` (Tiled 1.9+) then `type` (older), then `name` (so
+// initial-enemy markers without a class still work). Returns (0, false)
+// when the marker isn't an enemy.
+func archetypeFromMarker(o tiledObject) (uint8, bool) {
+	for _, s := range [3]string{o.Class, o.Type, o.Name} {
+		if t, ok := archetypeFromString(s); ok {
+			return t, true
 		}
 	}
 	return 0, false
 }
 
-// parseTilemapEnemies walks every objectgroup layer for point objects
-// whose `type` (or `name`) matches an enemy archetype and returns them
-// as EnemySpawnDef values. The position is the *base* spawn — RNG
-// jitter (±50 px) and wall snapping happen later in SpawnEnemy.
+// waveSlotFromObject reads the 1-based "wave" int property authored on
+// the Tiled object. Returns (0, false) when the property is absent or
+// non-positive — caller treats those as initial-enemy markers.
+func waveSlotFromObject(o tiledObject) (int, bool) {
+	for _, p := range o.Properties {
+		if p.Name != "wave" {
+			continue
+		}
+		// Tiled int properties unmarshal as float64 in JSON. Accept
+		// both float64 and int just in case an author uses string
+		// inputs that the JSON layer pre-coerces.
+		switch v := p.Value.(type) {
+		case float64:
+			n := int(v)
+			if n >= 1 {
+				return n, true
+			}
+		case int:
+			if v >= 1 {
+				return v, true
+			}
+		}
+		return 0, false
+	}
+	return 0, false
+}
+
+// parseTilemapEnemiesAndWaves walks every objectgroup layer once and
+// splits enemy markers into initial spawns vs. wave reinforcements.
 //
-// EntityIDs are slot-based (`roomIndex*100 + slot`) starting at 1 so
-// they sit below the pickup band (50..89) and door band (91..99). The
-// slice is sorted ascending by EntityID by the caller — Tiled's object
-// iteration order determines slot, so re-ordering objects in Tiled
-// changes RNG consumption (and therefore replays of older runs).
-func parseTilemapEnemies(roomIndex uint8, m *tiledMap) []EnemySpawnDef {
-	var out []EnemySpawnDef
+//   - Initial: marker class/type matches an archetype (e.g. "Grunt") and
+//     no `wave` property is set.
+//   - Wave:    marker has a `wave` int property (1-based slot). The
+//     archetype still comes from class/type — the name typically
+//     carries a "Wave1 Grunt" label for visibility in Tiled but
+//     isn't parsed by the server.
+//
+// Initial-enemy EntityIDs are slot-based (`roomIndex*100 + slot`) in the
+// 1..49 band; pickups occupy 50..89 and doors 91..99. Wave mobs get IDs
+// at fire time from RoomState.NextEnemyID, like before.
+//
+// Tiled object iteration order is the slot order — re-ordering objects
+// in Tiled changes RNG consumption and therefore invalidates older
+// replays.
+func parseTilemapEnemiesAndWaves(roomIndex uint8, m *tiledMap) ([]EnemySpawnDef, []WaveDef) {
+	var initial []EnemySpawnDef
+	waveBuckets := map[int][]WaveMobDef{}
+	maxSlot := -1
 	for _, L := range m.Layers {
 		if L.Type != "objectgroup" {
 			continue
 		}
 		for _, o := range L.Objects {
-			t, ok := archetypeFromMarker(o.Name, o.Type)
+			arch, ok := archetypeFromMarker(o)
 			if !ok {
 				continue
 			}
-			id := uint32(roomIndex)*100 + uint32(len(out)+1)
-			out = append(out, EnemySpawnDef{
+			if slot1, isWave := waveSlotFromObject(o); isWave {
+				slot := slot1 - 1
+				waveBuckets[slot] = append(waveBuckets[slot], WaveMobDef{
+					Type: arch,
+					X:    o.X,
+					Y:    o.Y,
+				})
+				if slot > maxSlot {
+					maxSlot = slot
+				}
+				continue
+			}
+			id := uint32(roomIndex)*100 + uint32(len(initial)+1)
+			initial = append(initial, EnemySpawnDef{
 				EntityID: id,
-				Type:     t,
+				Type:     arch,
 				X:        o.X,
 				Y:        o.Y,
 			})
 		}
 	}
-	return out
+	if maxSlot < 0 {
+		return initial, nil
+	}
+	waves := make([]WaveDef, maxSlot+1)
+	for slot, mobs := range waveBuckets {
+		waves[slot] = WaveDef{Mobs: mobs}
+	}
+	return initial, waves
 }
 
-// TilemapEnemies returns the enemy spawns authored in the room's Tiled
-// JSON, or nil if the room has none.
+// TilemapEnemies returns the initial-enemy spawns authored in the room's
+// Tiled JSON, or nil if the room has none.
 func TilemapEnemies(roomIndex uint8) []EnemySpawnDef {
 	if int(roomIndex) >= len(tilemapEnemies) {
 		return nil
 	}
 	return tilemapEnemies[roomIndex]
+}
+
+// TilemapWaves returns the reinforcement waves authored in the room's
+// Tiled JSON. Slots are dense (slot 0 = "Wave1", slot 1 = "Wave2"); a
+// gap (e.g. only "Wave2" markers) yields an empty WaveDef in the lower
+// slot. Returns nil if the room has no wave markers.
+func TilemapWaves(roomIndex uint8) []WaveDef {
+	if int(roomIndex) >= len(tilemapWaves) {
+		return nil
+	}
+	return tilemapWaves[roomIndex]
 }
 
 func parseWallGrid(roomIndex uint8, m *tiledMap) *wallGrid {

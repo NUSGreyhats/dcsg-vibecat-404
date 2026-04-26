@@ -294,7 +294,7 @@ func (e *Engine) initRun(startTime int64) bool {
 	e.room = NewRoomState(1)
 
 	tmpl := RoomTemplates[1]
-	roomData := LoadRoom(e.room, e.run.MobRNG, tmpl, TilemapEnemies(1), now)
+	roomData := LoadRoom(e.room, e.run.MobRNG, tmpl, TilemapEnemies(1), TilemapWaves(1), now)
 
 	// Honour Room 1's authored PlayerSpawn marker. NewPlayerState has
 	// only the heuristic bottom-center position; this overrides it.
@@ -666,7 +666,7 @@ func (e *Engine) transitionToRoom(nextRoom uint8, now time.Time) {
 		e.sendError("bad_room", "no template for room")
 		return
 	}
-	roomData := LoadRoom(e.room, e.run.MobRNG, tmpl, TilemapEnemies(nextRoom), now)
+	roomData := LoadRoom(e.room, e.run.MobRNG, tmpl, TilemapEnemies(nextRoom), TilemapWaves(nextRoom), now)
 
 	// Place the player on a non-wall tile near the bottom-center of the
 	// new room. Without this, a player entering through a door flush

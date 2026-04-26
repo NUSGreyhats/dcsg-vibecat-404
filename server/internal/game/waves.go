@@ -87,12 +87,21 @@ func AdvanceWaves(r *RoomState, now time.Time) []uint32 {
 	// Fire pass — one-way latch: armed waves always fire, even if the room
 	// cleared during the arm delay. The player armed it by killing fast;
 	// they collect the consequence.
+	//
+	// Waves fire in declaration order: a later-slot wave is held back
+	// until every earlier slot has fired. Without this gate, fast kills
+	// can arm both waves in the same tick, and an unlucky jitter pair
+	// (+1500ms on slot 0, -1500ms on slot 1) lets the later wave spawn
+	// up to 3s before the earlier one.
 	for i := range r.PendingWaves {
 		w := &r.PendingWaves[i]
 		if !w.Armed || w.Fired {
 			continue
 		}
 		if now.Before(w.FireAt) {
+			continue
+		}
+		if i > 0 && !r.PendingWaves[i-1].Fired {
 			continue
 		}
 		for _, pm := range w.Mobs {
