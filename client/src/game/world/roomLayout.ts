@@ -2,7 +2,6 @@ import Phaser from "phaser";
 
 import type { RoomData } from "../../net/packet";
 import { ROOM_HEIGHT, ROOM_WIDTH } from "../constants";
-import { Door } from "../entities/Door";
 import { Enemy } from "../entities/Enemy";
 import { Pickup } from "../entities/Pickup";
 import {
@@ -16,10 +15,36 @@ import {
   TEXT_PRIMARY,
 } from "../ui/tokens";
 
+/**
+ * Lightweight door reference. Doors are tiles on the Walls tilemap
+ * layer — there's no separate GameObject. The position lets the scene
+ * do a proximity trigger; the tile coords + unlocked GID let it swap
+ * the rendered sprite when S2C_DOOR_UNLOCKED arrives.
+ */
+export type DoorRef = {
+  doorId: number;
+  x: number;
+  y: number;
+  targetRoom: number;
+  tileX: number;
+  tileY: number;
+  unlockedGid: number;
+};
+
 export type RoomObjects = {
   enemies: Map<number, Enemy>;
   pickups: Map<number, Pickup>;
-  doors: Map<number, Door>;
+  doors: Map<number, DoorRef>;
+};
+
+/**
+ * paintRoomBackground returns the created tile/background GameObjects
+ * plus a direct reference to the Walls tile layer (when the room has a
+ * tilemap). The scene uses the layer ref to swap door tiles on unlock.
+ */
+export type PaintedBackground = {
+  created: Phaser.GameObjects.GameObject[];
+  wallsLayer?: Phaser.Tilemaps.TilemapLayer;
 };
 
 export type BuiltRoom = RoomObjects;
@@ -57,14 +82,16 @@ function tintForRoom(data: RoomData): number {
 }
 
 /**
- * Destroy every enemy/pickup/door in `objs` and clear the maps.
+ * Destroy every enemy/pickup in `objs` and clear the maps. Doors are
+ * tilemap tiles owned by paintRoomBackground — they get torn down with
+ * the rest of the tilemap on room transition, so this just clears the
+ * lookup map.
  */
 export function clearRoom(objs: RoomObjects): void {
   objs.enemies.forEach((e) => e.destroy());
   objs.enemies.clear();
   objs.pickups.forEach((p) => p.destroy());
   objs.pickups.clear();
-  objs.doors.forEach((d) => d.destroy());
   objs.doors.clear();
 }
 
@@ -72,14 +99,16 @@ export function clearRoom(objs: RoomObjects): void {
  * Paint a flat background + perimeter walls for the room. If the
  * tilemap asset keyed by `data.tilemap_id` is loaded we render it;
  * otherwise we fall back to a tinted rectangle so the level is still
- * playable. Returns every GameObject created so the scene can destroy
- * them on room transition.
+ * playable. Returns every GameObject created plus a direct ref to the
+ * Walls tile layer (when present) — the scene needs the Walls layer to
+ * swap door tiles on S2C_DOOR_UNLOCKED.
  */
 export function paintRoomBackground(
   scene: Phaser.Scene,
   data: RoomData,
-): Phaser.GameObjects.GameObject[] {
+): PaintedBackground {
   const created: Phaser.GameObjects.GameObject[] = [];
+  let wallsLayer: Phaser.Tilemaps.TilemapLayer | undefined;
 
   if (scene.cache.tilemap.exists(data.tilemap_id)) {
     try {
@@ -96,9 +125,12 @@ export function paintRoomBackground(
             if (layer) {
               layer.setDepth(DEPTH_TILEMAP);
               created.push(layer);
+              if (layerData.name === "Walls") {
+                wallsLayer = layer;
+              }
             }
           }
-          return created;
+          return { created, wallsLayer };
         }
       }
     } catch {
@@ -167,17 +199,18 @@ export function paintRoomBackground(
   label.setDepth(DEPTH_BADGE);
   created.push(label);
 
-  return created;
+  return { created, wallsLayer: undefined };
 }
 
 /**
  * Build fresh enemy/pickup/door objects for the given room data.
- * Returned maps are keyed by server entity id / door id.
+ * Doors are tile-based — `doors` is just a lookup map for the proximity
+ * trigger and the unlock-time tile swap; no GameObjects are created.
  */
 export function buildRoom(scene: Phaser.Scene, data: RoomData): RoomObjects {
   const enemies = new Map<number, Enemy>();
   const pickups = new Map<number, Pickup>();
-  const doors = new Map<number, Door>();
+  const doors = new Map<number, DoorRef>();
 
   for (const spawn of data.enemies) {
     const enemy = new Enemy(scene, {
@@ -197,8 +230,15 @@ export function buildRoom(scene: Phaser.Scene, data: RoomData): RoomObjects {
   }
 
   for (const def of data.doors) {
-    const door = new Door(scene, def);
-    doors.set(door.doorId, door);
+    doors.set(def.door_id, {
+      doorId: def.door_id,
+      x: def.x,
+      y: def.y,
+      targetRoom: def.target_room,
+      tileX: def.tile_x,
+      tileY: def.tile_y,
+      unlockedGid: def.unlocked_gid,
+    });
   }
 
   return { enemies, pickups, doors };

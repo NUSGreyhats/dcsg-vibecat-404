@@ -10,11 +10,11 @@ import { Player } from "../entities/Player";
 import { Enemy } from "../entities/Enemy";
 import { Bullet } from "../entities/Bullet";
 import { Pickup } from "../entities/Pickup";
-import { Door } from "../entities/Door";
 import {
   paintRoomBackground,
   buildRoom,
   type BuiltRoom,
+  type DoorRef,
 } from "../world/roomLayout";
 import {
   cameraShake,
@@ -57,8 +57,11 @@ export class Game extends Phaser.Scene {
   enemies: Map<number, Enemy> = new Map();
   projectiles: Map<number, Bullet> = new Map();
   pickups: Map<number, Pickup> = new Map();
-  doors: Map<number, Door> = new Map();
+  doors: Map<number, DoorRef> = new Map();
   backgroundObjs: Phaser.GameObjects.GameObject[] = [];
+  /** Walls tile layer for the current room, when the room has a tilemap.
+   *  Used to swap door tile sprites on S2C_DOOR_UNLOCKED. */
+  private wallsLayer?: Phaser.Tilemaps.TilemapLayer;
   controls!: Controls;
   inputSendAcc = 0;
   private nextShootAt = 0;
@@ -91,7 +94,9 @@ export class Game extends Phaser.Scene {
       return;
     }
 
-    this.backgroundObjs = paintRoomBackground(this, roomData);
+    const painted = paintRoomBackground(this, roomData);
+    this.backgroundObjs = painted.created;
+    this.wallsLayer = painted.wallsLayer;
     const built = buildRoom(this, roomData);
     this.enemies = built.enemies;
     this.pickups = built.pickups;
@@ -184,10 +189,15 @@ export class Game extends Phaser.Scene {
         sync.sendInteract(nearest.id, nearest.type);
       }
 
+      // Door radius: door center sits at the top wall (y≈16); the
+      // player can only get to ~y=44 before the wall blocks them, so a
+      // tight 28-px radius required pixel-perfect horizontal alignment.
+      // 56 px (≈1.75 tiles) gives ~36 px of horizontal slack while still
+      // requiring the player to walk up to the wall.
       const doorId = this.nearestUnlockedDoorId(
         this.player.x,
         this.player.y,
-        28,
+        56,
       );
       if (doorId !== null && !this.requestedDoorIds.has(doorId)) {
         this.requestedDoorIds.add(doorId);
@@ -312,13 +322,17 @@ export class Game extends Phaser.Scene {
     this.projectiles.clear();
     for (const p of this.pickups.values()) p.destroy();
     this.pickups.clear();
-    for (const d of this.doors.values()) d.destroy();
+    // Doors are tile entries on the Walls tilemap layer (torn down with
+    // the rest of the tilemap below) — just clear the lookup map.
     this.doors.clear();
+    this.wallsLayer = undefined;
     this.requestedPickupIds.clear();
     this.requestedDoorIds.clear();
 
     // Rebuild with the new room data.
-    this.backgroundObjs = paintRoomBackground(this, room);
+    const painted = paintRoomBackground(this, room);
+    this.backgroundObjs = painted.created;
+    this.wallsLayer = painted.wallsLayer;
     const built: BuiltRoom = buildRoom(this, room);
     this.enemies = built.enemies;
     this.pickups = built.pickups;
@@ -333,8 +347,16 @@ export class Game extends Phaser.Scene {
     }
   }
 
-  private onDoorUnlocked(doorId: number): void {
-    this.doors.get(doorId)?.setUnlocked(true);
+  private onDoorUnlocked(
+    _doorId: number,
+    tileX: number,
+    tileY: number,
+    unlockedGid: number,
+  ): void {
+    // Swap the locked-door tile sprite for its unlocked variant. The
+    // door's collision/proximity behaviour is driven from the server's
+    // unlockedDoors set — this is purely visual.
+    this.wallsLayer?.putTileAt(unlockedGid, tileX, tileY, true);
   }
 
   private onEntityDied(entityId: number): void {
@@ -523,8 +545,9 @@ export class Game extends Phaser.Scene {
     this.projectiles.clear();
     for (const p of this.pickups.values()) p.destroy();
     this.pickups.clear();
-    for (const d of this.doors.values()) d.destroy();
+    // Doors are tilemap tiles; the layer was destroyed via backgroundObjs above.
     this.doors.clear();
+    this.wallsLayer = undefined;
 
     this.player?.destroy();
     this.player = undefined;

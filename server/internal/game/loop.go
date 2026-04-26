@@ -397,8 +397,13 @@ func (e *Engine) stepTick(now time.Time) {
 		}
 	}
 
-	for _, doorID := range UnlockDoorsIfClear(e.room) {
-		e.send(protocol.S2CDoorUnlocked, protocol.DoorUnlockedData{DoorID: doorID})
+	for _, d := range UnlockDoorsIfClear(e.room) {
+		e.send(protocol.S2CDoorUnlocked, protocol.DoorUnlockedData{
+			DoorID:      d.DoorID,
+			TileX:       d.TileX,
+			TileY:       d.TileY,
+			UnlockedGID: d.UnlockedGID,
+		})
 	}
 
 	e.updateElapsed(now)

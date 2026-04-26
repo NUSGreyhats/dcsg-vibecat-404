@@ -118,6 +118,10 @@ export type DoorDef = {
   y: number;
   target_room: number;
   locked: boolean;
+  // Tile coords + unlocked-variant GID for sprite-swap on unlock.
+  tile_x: number;
+  tile_y: number;
+  unlocked_gid: number;
 };
 
 export type PlayerSnapshot = {

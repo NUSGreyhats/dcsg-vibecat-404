@@ -30,9 +30,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// and basic combat without reinforcement pressure.
 	{
 		TilemapID: "room-1",
-		Doors: []DoorDef{
-			{DoorID: 191, X: 1220, Y: 384, TargetRoom: 2},
-		},
 	},
 
 	// ---- Room 2 — introduce runners ----
@@ -41,9 +38,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// clean fight before waves enter the picture in room 4+.
 	{
 		TilemapID: "room-2",
-		Doors: []DoorDef{
-			{DoorID: 291, X: 1220, Y: 384, TargetRoom: 3},
-		},
 	},
 
 	// ---- Room 3 — first tank ----
@@ -52,9 +46,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// still in tutorial mode.
 	{
 		TilemapID: "room-3",
-		Doors: []DoorDef{
-			{DoorID: 391, X: 640, Y: 40, TargetRoom: 4},
-		},
 	},
 
 	// ---- Room 4 — first kamikaze ----
@@ -62,9 +53,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// 5 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-4",
-		Doors: []DoorDef{
-			{DoorID: 491, X: 1220, Y: 384, TargetRoom: 5},
-		},
 	},
 
 	// ---- Room 5 — mid-game pressure ----
@@ -72,9 +60,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// 5 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-5",
-		Doors: []DoorDef{
-			{DoorID: 591, X: 1220, Y: 384, TargetRoom: 6},
-		},
 	},
 
 	// ---- Room 6 — tank pair ----
@@ -82,9 +67,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-6",
-		Doors: []DoorDef{
-			{DoorID: 691, X: 640, Y: 40, TargetRoom: 7},
-		},
 	},
 
 	// ---- Room 7 — runner swarm ----
@@ -92,9 +74,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-7",
-		Doors: []DoorDef{
-			{DoorID: 791, X: 1220, Y: 384, TargetRoom: 8},
-		},
 	},
 
 	// ---- Room 8 — mixed late game ----
@@ -102,9 +81,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-8",
-		Doors: []DoorDef{
-			{DoorID: 891, X: 1220, Y: 384, TargetRoom: 9},
-		},
 	},
 
 	// ---- Room 9 — kamikaze gauntlet ----
@@ -112,9 +88,6 @@ var RoomTemplates = [11]*RoomTemplate{
 	// 6 initial mobs: triggers at ≤3 and ≤1.
 	{
 		TilemapID: "room-9",
-		Doors: []DoorDef{
-			{DoorID: 991, X: 640, Y: 40, TargetRoom: 10},
-		},
 	},
 
 	// ---- Room 10 — boss room. No doors; run ends when boss dies. ----
@@ -133,6 +106,5 @@ var RoomTemplates = [11]*RoomTemplate{
 	// wave 2 can chunk half the player's HP.
 	{
 		TilemapID: "room-10",
-		Doors: nil,
 	},
 }

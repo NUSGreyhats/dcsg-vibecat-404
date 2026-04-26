@@ -152,6 +152,22 @@ var tilemapEnemies [12][]EnemySpawnDef
 // declaration order, matching the seedWaves contract.
 var tilemapWaves [12][]WaveDef
 
+// tilemapDoors holds doors detected as locked-door tiles on the Walls
+// layer. Each entry carries the tile position so the client can swap
+// the sprite to the matching unlocked variant when the room clears.
+var tilemapDoors [12][]DoorDef
+
+// lockedToUnlockedDoorGID maps each locked-door GID (as it appears in
+// the room JSON) to its unlocked variant. Tiled's UI shows local tile
+// IDs (0-indexed), but JSON exports add firstgid=1, so the locked tiles
+// the artist sees in Tiled as 145/149/153 are 146/150/154 in the JSON.
+// The unlocked sprite sits one slot past the locked one.
+var lockedToUnlockedDoorGID = map[int]int{
+	146: 147,
+	150: 151,
+	154: 155,
+}
+
 // init parses the embedded tilemaps at process start. A failure on
 // any room is fatal — the binary shouldn't boot with missing
 // collision data.
@@ -173,6 +189,7 @@ func init() {
 		playerSpawns[i] = parsePlayerSpawn(&m)
 		tilemapPickups[i] = parseTilemapPickups(uint8(i), &m)
 		tilemapEnemies[i], tilemapWaves[i] = parseTilemapEnemiesAndWaves(uint8(i), &m)
+		tilemapDoors[i] = parseTilemapDoors(uint8(i), &m)
 	}
 }
 
@@ -386,6 +403,64 @@ func TilemapWaves(roomIndex uint8) []WaveDef {
 		return nil
 	}
 	return tilemapWaves[roomIndex]
+}
+
+// parseTilemapDoors scans the Walls tile layer for locked-door tiles
+// (GIDs in lockedToUnlockedDoorGID) and emits one DoorDef per match.
+//
+//   - Position is the tile center (col*32+16, row*32+16).
+//   - TargetRoom is `roomIndex + 1` — rooms are linear; the boss room
+//     should not declare any door tiles.
+//   - DoorID is slot-based (`roomIndex*100 + 90 + slot`) in the 91..99
+//     band, parallel to the existing pickup/enemy ID layout.
+//   - Tiles are walked in row-major order so DoorIDs stay stable across
+//     loads of the same tilemap.
+//
+// Door tiles also classify as cellSolid via parseWallGrid (locked or
+// unlocked, the player walks up to but not through them — entering is a
+// proximity trigger, not a walk-through).
+func parseTilemapDoors(roomIndex uint8, m *tiledMap) []DoorDef {
+	var out []DoorDef
+	for _, L := range m.Layers {
+		if L.Type != "tilelayer" || L.Name != "Walls" {
+			continue
+		}
+		if L.Width != GridCols || L.Height != GridRows {
+			return nil
+		}
+		for i, raw := range L.Data {
+			if raw == 0 {
+				continue
+			}
+			gid := raw & 0x1FFFFFFF // strip flip bits
+			unlocked, ok := lockedToUnlockedDoorGID[gid]
+			if !ok {
+				continue
+			}
+			col := i % GridCols
+			row := i / GridCols
+			id := uint32(roomIndex)*100 + 90 + uint32(len(out)+1)
+			out = append(out, DoorDef{
+				DoorID:      id,
+				X:           float32(col)*TileSize + TileSize/2,
+				Y:           float32(row)*TileSize + TileSize/2,
+				TargetRoom:  roomIndex + 1,
+				TileX:       col,
+				TileY:       row,
+				UnlockedGID: unlocked,
+			})
+		}
+	}
+	return out
+}
+
+// TilemapDoors returns the doors detected in the room's Walls layer, or
+// nil if the room has none.
+func TilemapDoors(roomIndex uint8) []DoorDef {
+	if int(roomIndex) >= len(tilemapDoors) {
+		return nil
+	}
+	return tilemapDoors[roomIndex]
 }
 
 func parseWallGrid(roomIndex uint8, m *tiledMap) *wallGrid {
