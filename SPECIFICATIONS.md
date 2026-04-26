@@ -5,6 +5,8 @@ A single-player dungeon-crawler speedrun with a shared leaderboard. Players clea
 **Format:** Individual speedrun + exploitation
 **Stack:** Go backend, Phaser 3 frontend, WebSocket transport
 
+> **Looking to run it?** [`README.md`](README.md) has quick-start, the env-var reference, and the dev / test / prod-cutover deployment recipes. This file is the spec index for designers and implementers.
+
 ## The real spec lives in [`docs/specs/`](docs/specs/README.md)
 
 This file is a thin index. Start at [`docs/specs/README.md`](docs/specs/README.md) for orientation and reading order. Individual components are broken down into small, topic-focused files so a human or agent can implement one piece without paging through the whole design.
