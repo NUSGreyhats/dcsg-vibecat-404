@@ -196,8 +196,10 @@ func TestOTPWrongCodeBumpsAttempts(t *testing.T) {
 	loginCookie := pickCookie(rec.Result().Cookies(), cookieLogin)
 	correct := extractOTP(t, fake.last)
 
-	// 5 wrong attempts, then on the 6th even the correct OTP fails
-	// because the row was deleted at attempt 5.
+	// 5 wrong attempts bump the counter to otpMaxAttempts; the next
+	// verify (whether OTP is right or wrong) sees attempts >= max,
+	// deletes the pending login, and returns 401. So even a correct
+	// OTP on the 6th call is rejected.
 	wrong := "000000"
 	if wrong == correct {
 		wrong = "111111"

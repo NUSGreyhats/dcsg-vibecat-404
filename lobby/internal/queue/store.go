@@ -41,6 +41,8 @@ func Open(path string) (*sql.DB, error) {
             joined_at  INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_queue_joined_at ON queue_entries(joined_at);
+        CREATE INDEX IF NOT EXISTS idx_queue_joined_at_player_id
+            ON queue_entries(joined_at, player_id);
     `); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("queue: schema: %w", err)
@@ -141,8 +143,10 @@ func Length(db *sql.DB) (int, error) {
 // acquires the write lock at BEGIN, serialising the SELECT+DELETE
 // pair. database/sql doesn't expose isolation upgrades on the modernc
 // driver, so we run the upgrade against an explicit Conn.
-func PopHead(db *sql.DB) (*Entry, error) {
-	ctx := context.Background()
+//
+// ctx bounds the DB work — pass the advancer's tick context so a
+// wedged DB can't stall the goroutine through a full shutdown.
+func PopHead(ctx context.Context, db *sql.DB) (*Entry, error) {
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("queue: pop conn: %w", err)

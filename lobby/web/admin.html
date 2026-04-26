@@ -85,6 +85,22 @@
       activate FIFO turn-taking.</p>
     </div>
     <div id="queue-active" hidden>
+      <h3 style="font-size:13px; color:var(--muted); margin:8px 0 4px; text-transform:uppercase;">Concurrency cap</h3>
+      <p style="margin:4px 0 8px; color:var(--muted); font-size:12px;">
+        Queue admission cap. <code>0</code> pauses new admissions without
+        kicking already-admitted players. Changes take effect within ~2 s
+        on the next advancer tick. The game server's
+        <code>MAX_CONCURRENT</code> env is the absolute backstop —
+        admitting beyond it will fail the WS upgrade as <em>server full</em>,
+        so keep this value &le; the env.
+      </p>
+      <form id="settings-form" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+        <label for="max-concurrent" style="color:var(--muted); font-size:12px;">Max concurrent:</label>
+        <input id="max-concurrent" name="value" type="number" min="0" max="1024" step="1"
+          style="background:var(--midnight); color:var(--bone); border:1px solid var(--mid-blue); padding:4px 8px; font-family:inherit; font-size:13px; width:90px;">
+        <button type="submit" style="background:transparent; color:var(--mid-blue); border:1px solid var(--mid-blue); cursor:pointer; padding:4px 12px; font-family:inherit; font-size:12px;">Save</button>
+        <span id="settings-status" style="color:var(--muted); font-size:12px;"></span>
+      </form>
       <h3 style="font-size:13px; color:var(--muted); margin:8px 0 4px; text-transform:uppercase;">Admitted (currently allowlisted)</h3>
       <table id="admitted-tbl">
         <thead><tr><th>Player ID</th><th></th></tr></thead>
@@ -251,6 +267,62 @@
 
   loadQueue();
   setInterval(loadQueue, 3000);
+
+  const settingsForm = document.getElementById('settings-form');
+  const maxConcurrentInput = document.getElementById('max-concurrent');
+  const settingsStatus = document.getElementById('settings-status');
+
+  function setSettingsStatus(msg, isError) {
+    settingsStatus.textContent = msg;
+    settingsStatus.style.color = isError ? 'var(--danger)' : 'var(--muted)';
+  }
+
+  async function loadSettings() {
+    try {
+      const res = await fetch('/admin/settings.json');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const body = await res.json();
+      maxConcurrentInput.value = String(body.max_concurrent);
+      setSettingsStatus('Current: ' + body.max_concurrent, false);
+    } catch (err) {
+      setSettingsStatus('Load failed: ' + err.message, true);
+    }
+  }
+
+  async function saveSettings(value) {
+    const res = await fetch('/admin/settings/max-concurrent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(text || ('HTTP ' + res.status));
+    }
+  }
+
+  settingsForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const raw = maxConcurrentInput.value.trim();
+    if (raw === '') {
+      setSettingsStatus('Value required', true);
+      return;
+    }
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 0 || n > 1024) {
+      setSettingsStatus('Value must be 0–1024', true);
+      return;
+    }
+    setSettingsStatus('Saving…', false);
+    try {
+      await saveSettings(n);
+      await loadSettings();
+    } catch (err) {
+      setSettingsStatus('Save failed: ' + err.message, true);
+    }
+  });
+
+  loadSettings();
 
   rowsEl.addEventListener('click', async (ev) => {
     const btn = ev.target.closest('button');

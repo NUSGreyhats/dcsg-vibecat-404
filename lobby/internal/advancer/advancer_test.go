@@ -1,6 +1,7 @@
 package advancer
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -25,7 +26,7 @@ func newAdvancerTest(t *testing.T) (*Advancer, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	a := New(db, nil, "http://unused", allowlistPath)
+	a := New(db, nil, "http://unused", allowlistPath, nil)
 	return a, allowlistPath
 }
 
@@ -56,7 +57,7 @@ func TestAdmitsFromQueueWithinMax(t *testing.T) {
 		}
 	}
 
-	a.step(now, 4, nil)
+	a.step(context.Background(),now, 4, nil)
 
 	got := readAllowed(t, path)
 	sort.Strings(got)
@@ -78,19 +79,19 @@ func TestAFKForfeit(t *testing.T) {
 	if err := queue.Join(a.db, "alice", 1000); err != nil {
 		t.Fatal(err)
 	}
-	a.step(t0, 1, nil)
+	a.step(context.Background(),t0, 1, nil)
 	if !equalStrings(readAllowed(t, path), []string{"alice"}) {
 		t.Fatalf("after admit: %v", readAllowed(t, path))
 	}
 
 	// Within grace: still admitted, not yet started.
-	a.step(t0.Add(StartGrace-time.Second), 1, nil)
+	a.step(context.Background(),t0.Add(StartGrace-time.Second), 1, nil)
 	if !equalStrings(readAllowed(t, path), []string{"alice"}) {
 		t.Errorf("within grace: %v, want [alice]", readAllowed(t, path))
 	}
 
 	// Past grace, never seen in live → AFK forfeit.
-	a.step(t0.Add(StartGrace+time.Second), 1, nil)
+	a.step(context.Background(),t0.Add(StartGrace+time.Second), 1, nil)
 	if got := readAllowed(t, path); len(got) != 0 {
 		t.Errorf("past grace: %v, want empty", got)
 	}
@@ -103,23 +104,23 @@ func TestPostRunGrace(t *testing.T) {
 	if err := queue.Join(a.db, "alice", 1000); err != nil {
 		t.Fatal(err)
 	}
-	a.step(t0, 1, nil)
+	a.step(context.Background(),t0, 1, nil)
 
 	// Player appears in live-games — run started.
 	live := []livegames.Entry{{PlayerID: "alice"}}
-	a.step(t0.Add(2*time.Second), 1, live)
+	a.step(context.Background(),t0.Add(2*time.Second), 1, live)
 
 	// Run keeps appearing for a while.
-	a.step(t0.Add(20*time.Second), 1, live)
+	a.step(context.Background(),t0.Add(20*time.Second), 1, live)
 
 	// Run vanishes (completed or disconnected).
-	a.step(t0.Add(25*time.Second), 1, nil)
+	a.step(context.Background(),t0.Add(25*time.Second), 1, nil)
 	if !equalStrings(readAllowed(t, path), []string{"alice"}) {
 		t.Errorf("immediately after vanish: %v, want [alice] (in grace)", readAllowed(t, path))
 	}
 
 	// 16 s after last sighting: grace expired, evicted.
-	a.step(t0.Add(25*time.Second).Add(PostRunGrace+time.Second), 1, nil)
+	a.step(context.Background(),t0.Add(25*time.Second).Add(PostRunGrace+time.Second), 1, nil)
 	if got := readAllowed(t, path); len(got) != 0 {
 		t.Errorf("after grace: %v, want empty", got)
 	}
@@ -132,17 +133,17 @@ func TestTurnTTLEviction(t *testing.T) {
 	if err := queue.Join(a.db, "alice", 1000); err != nil {
 		t.Fatal(err)
 	}
-	a.step(t0, 1, nil)
+	a.step(context.Background(),t0, 1, nil)
 
 	// Player keeps showing up in live-games — they're playing fine.
 	live := []livegames.Entry{{PlayerID: "alice"}}
-	a.step(t0.Add(time.Minute), 1, live)
+	a.step(context.Background(),t0.Add(time.Minute), 1, live)
 	if !equalStrings(readAllowed(t, path), []string{"alice"}) {
 		t.Fatalf("at 1 min: %v", readAllowed(t, path))
 	}
 
 	// 5 min + 1 s: TTL pops the slot regardless of liveness.
-	a.step(t0.Add(TurnTTL+time.Second), 1, live)
+	a.step(context.Background(),t0.Add(TurnTTL+time.Second), 1, live)
 	if got := readAllowed(t, path); len(got) != 0 {
 		t.Errorf("past TTL: %v, want empty", got)
 	}
@@ -157,13 +158,13 @@ func TestEvictedSlotImmediatelyRefilled(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	a.step(t0, 1, nil)
+	a.step(context.Background(),t0, 1, nil)
 	if !equalStrings(readAllowed(t, path), []string{"alice"}) {
 		t.Fatalf("first admit: %v", readAllowed(t, path))
 	}
 
 	// Alice AFK forfeits → bob should fill in the same tick.
-	a.step(t0.Add(StartGrace+time.Second), 1, nil)
+	a.step(context.Background(),t0.Add(StartGrace+time.Second), 1, nil)
 	if !equalStrings(readAllowed(t, path), []string{"bob"}) {
 		t.Errorf("after AFK kick: %v, want [bob]", readAllowed(t, path))
 	}
@@ -176,7 +177,7 @@ func TestForceFree(t *testing.T) {
 	if err := queue.Join(a.db, "alice", 1000); err != nil {
 		t.Fatal(err)
 	}
-	a.step(t0, 1, nil)
+	a.step(context.Background(),t0, 1, nil)
 
 	if !a.ForceFree("alice") {
 		t.Error("ForceFree: returned false for present player")
@@ -196,7 +197,7 @@ func TestAtomicWriteAndIdempotent(t *testing.T) {
 	if err := queue.Join(a.db, "alice", 1000); err != nil {
 		t.Fatal(err)
 	}
-	a.step(t0, 1, nil)
+	a.step(context.Background(),t0, 1, nil)
 	first, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +205,7 @@ func TestAtomicWriteAndIdempotent(t *testing.T) {
 
 	// Same set on a later tick: no rewrite.
 	live := []livegames.Entry{{PlayerID: "alice"}}
-	a.step(t0.Add(time.Second), 1, live)
+	a.step(context.Background(),t0.Add(time.Second), 1, live)
 	second, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -221,6 +222,62 @@ func TestAtomicWriteAndIdempotent(t *testing.T) {
 	}
 }
 
+// TestFetchMaxOverrideWinsOverSlotStatus verifies the admin-set
+// override is consulted before /internal/slot-status. The slot-status
+// HTTP call would fail fast against http://unused, returning fallback
+// (4); the override returns 2 and that's what fetchMax surfaces.
+func TestFetchMaxOverrideWinsOverSlotStatus(t *testing.T) {
+	a, _ := newAdvancerTest(t)
+	a.overrideMax = func() (int, bool) { return 2, true }
+	if got := a.fetchMax(context.Background()); got != 2 {
+		t.Errorf("fetchMax with override=2: got %d, want 2", got)
+	}
+
+	// Override returning ok=false → falls through to slot-status,
+	// which fails against http://unused → fallback.
+	a.overrideMax = func() (int, bool) { return 0, false }
+	if got := a.fetchMax(context.Background()); got != fallbackMax {
+		t.Errorf("fetchMax without override (slot-status unreachable): got %d, want fallback %d", got, fallbackMax)
+	}
+
+	// Override = 0 means "pause" — that's a valid distinct value, NOT
+	// a fall-through.
+	a.overrideMax = func() (int, bool) { return 0, true }
+	if got := a.fetchMax(context.Background()); got != 0 {
+		t.Errorf("fetchMax with override=0 (pause): got %d, want 0", got)
+	}
+}
+
+// TestOverrideZeroPausesAdmissions verifies that override=0 stops new
+// admissions (queue grows) but does NOT kick already-admitted players.
+func TestOverrideZeroPausesAdmissions(t *testing.T) {
+	a, path := newAdvancerTest(t)
+	t0 := time.Unix(1_000_000, 0)
+
+	// First tick admits alice with cap=1.
+	if err := queue.Join(a.db, "alice", 1000); err != nil {
+		t.Fatal(err)
+	}
+	a.step(context.Background(), t0, 1, nil)
+	if !equalStrings(readAllowed(t, path), []string{"alice"}) {
+		t.Fatalf("first tick: %v, want [alice]", readAllowed(t, path))
+	}
+
+	// Bob queues, but next tick is paused (max=0). Alice stays
+	// admitted (within grace, run not yet started); bob waits.
+	if err := queue.Join(a.db, "bob", 2000); err != nil {
+		t.Fatal(err)
+	}
+	a.step(context.Background(), t0.Add(time.Second), 0, nil)
+	if !equalStrings(readAllowed(t, path), []string{"alice"}) {
+		t.Errorf("paused tick: %v, want [alice] (no new admits, no kicks)", readAllowed(t, path))
+	}
+	pos, _ := queue.Position(a.db, "bob")
+	if pos != 1 {
+		t.Errorf("bob position during pause = %d, want 1", pos)
+	}
+}
+
 func TestAdmittedSnapshotAndAdmitted(t *testing.T) {
 	a, _ := newAdvancerTest(t)
 	t0 := time.Unix(1_000_000, 0)
@@ -229,7 +286,7 @@ func TestAdmittedSnapshotAndAdmitted(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	a.step(t0, 2, nil)
+	a.step(context.Background(),t0, 2, nil)
 
 	if !a.Admitted("alice") || !a.Admitted("bob") {
 		t.Error("Admitted: missed admitted player")

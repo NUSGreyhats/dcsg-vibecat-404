@@ -64,13 +64,17 @@ graph TB
 | Concern            | Game Server (Repo A)                                                                                             | Lobby Service (Repo B)                                                      |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | **Responsibility** | Game logic, WebSocket, leaderboard writes, replays                                                               | Queue FIFO, player identity, public webapp, admin tools, serves stripped game-server source |
-| **Concurrency**    | `MAX_CONCURRENT` env var. Unlimited in dev/test, `4` in prod                                                     | N/A — manages queue, doesn't run games                                            |
+| **Concurrency**    | `MAX_CONCURRENT` env var (absolute backstop). Unlimited in dev/test, `4` in prod. Queue admission cap lives on the lobby (admin-tunable, default seed `4`) — see [04-lobby.md § Concurrency cap](./04-lobby.md#concurrency-cap). | N/A — manages queue, doesn't run games |
 | **Database**       | `game.db` — leaderboard, completed runs, replay data                                                             | `lobby.db` — queue entries, identity. **Reads** `game.db` for leaderboard display |
 | **Auth**           | `AUTH_MODE=open` (dev/test): any connection. `AUTH_MODE=token` (prod): require valid hex player ID in `C2S_AUTH` | Issues hex player IDs, manages queue, provides admin panel                        |
 | **Repo**           | `defcon-dungeon/game-server`                                                                                     | `defcon-dungeon/lobby`                                                      |
 | **Deployed**       | Always                                                                                                           | Prod only (optional in test for queue testing)                                    |
 
 ## Deployment Topology (Production)
+
+The official competition deployment is the **LAN-on-PC** topology below: a single venue PC running the full Compose stack, with players connecting through a router on the venue LAN. The same PC drives a wall display (LAN leaderboard + recorded-gameplay reel) and doubles as a play station for competitors who didn't bring a laptop.
+
+A **cloud mirror** of the same stack runs unofficially on a public VPS for remote/post-event play. Same compose file, same images, same admin panel — only the leaderboard and queue state diverge (separate `/data/` per deployment). Admins lean on the runtime concurrency cap (see [04-lobby.md § Concurrency cap](./04-lobby.md#concurrency-cap)) when remote-audience load needs throttling.
 
 ```mermaid
 graph LR

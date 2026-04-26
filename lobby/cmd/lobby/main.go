@@ -34,6 +34,7 @@ import (
 	"github.com/greyhats/defcon-game/lobby/internal/leaderboard"
 	"github.com/greyhats/defcon-game/lobby/internal/livegames"
 	"github.com/greyhats/defcon-game/lobby/internal/queue"
+	"github.com/greyhats/defcon-game/lobby/internal/settings"
 	"github.com/greyhats/defcon-game/lobby/web"
 	"github.com/greyhats/defcon-game/pkg/identity"
 )
@@ -102,6 +103,9 @@ func main() {
 	if err := adminauth.EnsureSchema(lobbyDB); err != nil {
 		log.Fatalf("adminauth schema: %v", err)
 	}
+	if err := settings.EnsureSchema(lobbyDB); err != nil {
+		log.Fatalf("settings schema: %v", err)
+	}
 
 	authSvc, err := adminauth.New(lobbyDB, adminauth.Config{
 		BotToken:      telegramBotToken,
@@ -136,7 +140,21 @@ func main() {
 	)
 	if queueEnabled {
 		queueDB = lobbyDB
-		adv = advancer.New(queueDB, livePoller, gameServerURL, allowlistPath)
+		// overrideMax is consulted on every advancer tick, so admin-set
+		// changes take effect within ~2 s without a restart. lobby.db
+		// always has a row (EnsureSchema seeds DefaultMaxConcurrent),
+		// so ok=true is the normal case. ok=false only when the DB
+		// read errors — the advancer then falls through to
+		// /internal/slot-status as defense-in-depth.
+		overrideMax := func() (int, bool) {
+			n, err := settings.GetMaxConcurrent(lobbyDB)
+			if err != nil {
+				log.Printf("settings: get max concurrent: %v", err)
+				return 0, false
+			}
+			return n, true
+		}
+		adv = advancer.New(queueDB, livePoller, gameServerURL, allowlistPath, overrideMax)
 		adv.Start(ctx)
 	}
 
@@ -331,6 +349,10 @@ func main() {
 		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/admin/slot/free/"):
 			id := strings.TrimPrefix(r.URL.Path, "/admin/slot/free/")
 			adminSlotFree(w, queueEnabled, adv, id)
+		case r.Method == http.MethodGet && r.URL.Path == "/admin/settings.json":
+			adminSettingsJSON(w, lobbyDB)
+		case r.Method == http.MethodPost && r.URL.Path == "/admin/settings/max-concurrent":
+			adminSetMaxConcurrent(w, r, lobbyDB)
 		default:
 			http.NotFound(w, r)
 		}
@@ -660,6 +682,46 @@ func adminSlotFree(w http.ResponseWriter, queueEnabled bool, adv *advancer.Advan
 	}
 	if !adv.ForceFree(playerID) {
 		http.Error(w, "not admitted", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// adminSettingsJSON returns the current lobby_settings the admin
+// panel cares about. max_concurrent is always present — the schema
+// seeds settings.DefaultMaxConcurrent on first boot.
+func adminSettingsJSON(w http.ResponseWriter, lobbyDB *sql.DB) {
+	w.Header().Set("Content-Type", "application/json")
+	n, err := settings.GetMaxConcurrent(lobbyDB)
+	if err != nil {
+		log.Printf("admin: settings get: %v", err)
+		http.Error(w, "settings read failed", http.StatusInternalServerError)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"max_concurrent": n,
+	})
+}
+
+// adminSetMaxConcurrent writes the queue admission cap. Body:
+// `{"value": int}`. 0 pauses new admissions without kicking
+// already-admitted players; the upper sanity rail of 1024 is far
+// above any realistic concurrency we'd run.
+func adminSetMaxConcurrent(w http.ResponseWriter, r *http.Request, lobbyDB *sql.DB) {
+	var body struct {
+		Value int `json:"value"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxQueueBodyBytes)).Decode(&body); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if body.Value < 0 || body.Value > 1024 {
+		http.Error(w, "value out of range", http.StatusBadRequest)
+		return
+	}
+	if err := settings.SetMaxConcurrent(lobbyDB, body.Value); err != nil {
+		log.Printf("admin: settings set: %v", err)
+		http.Error(w, "set failed", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

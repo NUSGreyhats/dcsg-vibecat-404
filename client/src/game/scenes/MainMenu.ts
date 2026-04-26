@@ -808,7 +808,16 @@ export class MainMenu extends Phaser.Scene {
         resolve(val);
       };
       const onKey = (ev: KeyboardEvent) => {
-        if (ev.key === "Enter" || ev.key === " ") {
+        // Space reports as ev.key " " on modern browsers but "Spacebar"
+        // on legacy Edge/IE; ev.code is consistently "Space" everywhere.
+        // Match all three so the START prompt is keyboard-operable
+        // wherever the page loads.
+        if (
+          ev.key === "Enter" ||
+          ev.code === "Space" ||
+          ev.key === " " ||
+          ev.key === "Spacebar"
+        ) {
           ev.preventDefault();
           cleanup(true);
         }

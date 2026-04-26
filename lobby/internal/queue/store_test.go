@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"sync"
@@ -120,8 +121,9 @@ func TestPopHead(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	ctx := context.Background()
 	for _, want := range []string{"alice", "bob", "carol"} {
-		e, err := PopHead(db)
+		e, err := PopHead(ctx, db)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,7 +134,7 @@ func TestPopHead(t *testing.T) {
 			t.Errorf("pop = %s, want %s", e.PlayerID, want)
 		}
 	}
-	e, err := PopHead(db)
+	e, err := PopHead(ctx, db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,11 +212,12 @@ func TestPopHeadConcurrentNoDoubleAdmit(t *testing.T) {
 		seen = map[string]int{}
 		wg   sync.WaitGroup
 	)
+	ctx := context.Background()
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			e, err := PopHead(db)
+			e, err := PopHead(ctx, db)
 			if err != nil || e == nil {
 				return
 			}

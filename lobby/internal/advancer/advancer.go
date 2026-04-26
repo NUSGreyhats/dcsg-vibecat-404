@@ -77,6 +77,12 @@ type admission struct {
 	LastSeenAt  time.Time // last live-games observation (zero until first seen)
 }
 
+// OverrideMaxFunc returns the admin-set queue admission cap. ok=false
+// means no override is set, in which case fetchMax falls back to the
+// game server's /internal/slot-status. ok=true with n=0 is valid and
+// pauses admissions without kicking already-admitted players.
+type OverrideMaxFunc func() (int, bool)
+
 // Advancer ties together the queue store, live-games snapshot, slot
 // poll, and the on-disk allowlist.
 type Advancer struct {
@@ -86,15 +92,21 @@ type Advancer struct {
 	allowlistPath string
 	client        *http.Client
 	now           func() time.Time
+	overrideMax   OverrideMaxFunc
 
 	mu       sync.Mutex
 	admitted map[string]*admission // keyed by player_id
 	written  []string              // last allowlist contents we wrote (sorted)
 }
 
-// New constructs the advancer. The allowlist file is created on the
-// first tick, not here.
-func New(db *sql.DB, live *livegames.Poller, gameServerURL, allowlistPath string) *Advancer {
+// New constructs the advancer. It does not create the allowlist file;
+// that only happens when a tick actually has admitted IDs to write.
+// An admitted set that stays empty across ticks won't produce a file
+// — the absent file is itself "no admissions" to the game server.
+//
+// overrideMax may be nil. When non-nil it's consulted on each tick
+// before /internal/slot-status; ok=true wins, including n=0 (pause).
+func New(db *sql.DB, live *livegames.Poller, gameServerURL, allowlistPath string, overrideMax OverrideMaxFunc) *Advancer {
 	return &Advancer{
 		db:            db,
 		live:          live,
@@ -102,6 +114,7 @@ func New(db *sql.DB, live *livegames.Poller, gameServerURL, allowlistPath string
 		allowlistPath: allowlistPath,
 		client:        &http.Client{Timeout: time.Second},
 		now:           time.Now,
+		overrideMax:   overrideMax,
 		admitted:      map[string]*admission{},
 	}
 }
@@ -166,13 +179,13 @@ func (a *Advancer) tick(ctx context.Context) {
 	if a.live != nil {
 		live = a.live.Snapshot()
 	}
-	a.step(a.now(), a.fetchMax(ctx), live)
+	a.step(ctx, a.now(), a.fetchMax(ctx), live)
 }
 
 // step is the pure tick logic, factored out of tick() so tests can drive
 // it with a fixed clock and synthetic snapshots without touching HTTP or
-// the live-games poller.
-func (a *Advancer) step(now time.Time, max int, live []livegames.Entry) {
+// the live-games poller. ctx bounds the queue.PopHead DB work.
+func (a *Advancer) step(ctx context.Context, now time.Time, max int, live []livegames.Entry) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -207,7 +220,7 @@ func (a *Advancer) step(now time.Time, max int, live []livegames.Entry) {
 
 	// 3. Admit from queue while there's room.
 	for len(a.admitted) < max {
-		head, err := queue.PopHead(a.db)
+		head, err := queue.PopHead(ctx, a.db)
 		if err != nil {
 			log.Printf("advancer: pop head: %v", err)
 			break
@@ -279,10 +292,17 @@ func (a *Advancer) writeAllowlistLocked() error {
 	return nil
 }
 
-// fetchMax queries /internal/slot-status. On any failure it returns the
-// fallback cap; the game server's semaphore is the real cap on
-// concurrency, so a stale `max` is bounded in blast radius.
+// fetchMax returns the queue admission cap for this tick. The
+// admin-set override (if present) wins, including n=0 (pause). Else
+// queries /internal/slot-status; on any failure returns the fallback
+// cap. The game server's semaphore is the real cap on concurrency,
+// so a stale `max` is bounded in blast radius.
 func (a *Advancer) fetchMax(ctx context.Context) int {
+	if a.overrideMax != nil {
+		if n, ok := a.overrideMax(); ok {
+			return n
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.gameServerURL+"/internal/slot-status", nil)
 	if err != nil {
 		return fallbackMax

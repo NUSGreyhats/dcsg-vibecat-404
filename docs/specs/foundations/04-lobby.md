@@ -23,11 +23,12 @@ See [03-identity-auth.md](./03-identity-auth.md) for the registration / verifica
 
 ## Admin panel (auth-protected)
 
-- `/admin/queue` — list queued players, kick from line, force-free an admitted slot. (`reorder` / `pause` not yet implemented; spec target.)
+- `/admin/queue` — list queued players, kick from line, force-free an admitted slot.
 - `/admin/leaderboard` — flag, remove entries.
 - `/admin/replay/:replay_id` — download replay JSON (input log + seed). Moderators-only; not exposed publicly so input logs can't be data-mined for the intentional bugs.
 - `/admin/winners` — decrypt + export contact info.
-- `/admin/slot` — force-free slot, adjust `MAX_CONCURRENT`.
+- `/admin/slot` — force-free a slot.
+- `/admin/settings` — set the queue admission cap (see [Concurrency cap](#concurrency-cap)). `0` pauses new admissions without kicking already-admitted players. (Pause = cap-to-0; explicit reorder is not yet implemented.)
 
 ### Admin auth (Telegram OTP)
 
@@ -77,9 +78,37 @@ A periodic sweep (or opportunistic delete during issue/verify) prunes expired ro
 
 See [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md) open questions for the prior IP-allowlist alternative; that remains a viable belt-and-braces add-on if we want network-layer scoping on top.
 
+### Concurrency cap
+
+The queue's admission cap is owned by the lobby and persisted in `lobby.db`. On first boot the schema seeds a default of `4`; admins set the runtime value from the panel without restarting either service:
+
+| Endpoint                         | Method | Body                 | Purpose                                                                                      |
+| -------------------------------- | ------ | -------------------- | -------------------------------------------------------------------------------------------- |
+| `/admin/settings.json`           | GET    | —                    | `{ "max_concurrent": <int> }`. Always present.                                              |
+| `/admin/settings/max-concurrent` | POST   | `{ "value": <int> }` | Set the cap. `0..1024`. Takes effect on the next advancer tick (~2 s).                       |
+
+Cap semantics:
+
+- **Set N**: the advancer admits up to N players from the queue. The game server's env-set `MAX_CONCURRENT` remains the absolute backstop — admitting beyond it just means players hit `server full` on WS upgrade, so admins should keep this value `≤` the env.
+- **`0`**: pause new admissions. Already-admitted players keep their slot; the queue grows. Setting `>0` resumes admissions on the next tick.
+- **Persistence**: the value lives in `lobby.db` (`lobby_settings` table) and survives a lobby restart. EnsureSchema's `INSERT OR IGNORE` only seeds when the row is missing, so an admin's edit is never clobbered by a redeploy.
+
+Schema (`lobby.db`):
+
+```sql
+CREATE TABLE lobby_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+-- seeded on first boot: ('max_concurrent', '4').
+-- value is a string-encoded non-negative integer.
+```
+
+If the DB read errors at tick time the advancer falls back to `/internal/slot-status` (defense-in-depth); under normal operation it reads `lobby_settings.max_concurrent`.
+
 ## Queue ↔ game server handoff
 
-Lobby polls `GET /internal/slot-status` on the game server every 2 s. When a slot is free **and** a player is at the front of the queue, lobby writes that `player_id` into the shared `allowlist.json`. The game server reads `allowlist.json` when a new WebSocket connection sends `C2S_AUTH` under `AUTH_MODE=token`.
+Lobby's advancer rewrites the shared `allowlist.json` every 2 s with the players it has admitted up to the cap above. The game server reads `allowlist.json` when a new WebSocket connection sends `C2S_AUTH` under `AUTH_MODE=token`. `/internal/slot-status` is no longer the source of truth for the cap — it remains as a defense-in-depth fallback only.
 
 ## Queue rules
 
@@ -174,7 +203,7 @@ Lobby split rolling out in five phases under epic #26:
 - **Phase 2 (#22, merged):** public leaderboard + replay download. Lobby owns `/api/leaderboard`, `/api/replay/:replay_id`, and the `/leaderboard` HTML page; reads `game.db` over WAL alongside the game-server writer. Replay download verifies the stored checksum on read.
 - **Phase 3 (#23, in flight):** live spectating. Lobby owns `/api/live` and the `/spectate` selector page; `/spectate/:player_id` viewer URLs serve a static spectator client bundle from the client container. Game server adds `/internal/live-games` (loopback) and `/ws/spectate` upgrade with caps + per-IP rate limit + read-only enforcement; per-engine spectator fan-out with non-blocking drop-on-full + catchup snapshot on register.
 - **Phase 4 (#24, merged):** source serving + non-queue admin (`/source.tar.gz`, `/admin/leaderboard`, `/admin/winners`, `/admin/replay/:replay_id`).
-- **Phase 5 (#25, in flight):** FIFO queue + slot handoff via `allowlist.json`. Lobby owns `lobby.db` (queue store), the queue HTTP API (`/api/queue/{join,status,leave}`), the slot advancer goroutine (rewrites `/data/allowlist.json` on each tick), and the `/admin/queue` panel. Game server's allowlist reader gained refresh-on-miss to close the admit→connect race. Gated on `QUEUE_ENABLED=true` on the lobby + `AUTH_MODE=token` on the game server.
+- **Phase 5 (#25, in flight):** FIFO queue + slot handoff via `allowlist.json`. Lobby owns `lobby.db` (queue store + `lobby_settings`), the queue HTTP API (`/api/queue/{join,status,leave}`), the slot advancer goroutine (rewrites `/data/allowlist.json` on each tick), the `/admin/queue` panel, and the runtime concurrency cap at `/admin/settings/max-concurrent` (default seed `4`). Game server's allowlist reader gained refresh-on-miss to close the admit→connect race. Gated on `QUEUE_ENABLED=true` on the lobby + `AUTH_MODE=token` on the game server.
 
 The two-repo target in [01-architecture.md](./01-architecture.md) was relaxed to a single repo with three modules (`server/`, `lobby/`, `pkg/`) coordinated via `go.work` + `replace` directives. Both binaries open the same `/data/identity.db` (SQLite WAL).
 

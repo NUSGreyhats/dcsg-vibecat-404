@@ -106,7 +106,7 @@ docker logs <project>-lobby-1 | tail -1
 | ------------------ | ---------------------- | ------------------------------------------------------------------------ |
 | `LISTEN_ADDR`      | `:8080`                | Bind addr.                                                               |
 | `AUTH_MODE`        | `identity`             | `open` / `identity` / `token`. `token` requires the queue + allowlist.   |
-| `MAX_CONCURRENT`   | `64`                   | WS slot semaphore. Set to `4` for prod.                                  |
+| `MAX_CONCURRENT`   | `64`                   | WS slot semaphore on the game server (absolute backstop). Set to `4` for prod. The queue admission cap lives on the lobby (`/admin/` → Concurrency cap, default seed `4`); keep it `≤` this env value or admitted players will hit `server full`. |
 | `GAME_DB`          | `/data/game.db`        | SQLite path for completed runs (writer).                                 |
 | `IDENTITY_DB`      | `/data/identity.db`    | SQLite path for `players` (read-only on this side).                      |
 | `ALLOWLIST_PATH`   | `/data/allowlist.json` | File watched under `AUTH_MODE=token`. Read-only here; lobby writes it.   |
