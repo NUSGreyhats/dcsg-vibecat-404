@@ -114,6 +114,7 @@ export const DEPTH_WALL_FALLBACK = -50;
 export const DEPTH_BADGE = -40;
 export const DEPTH_TILEMAP = -30;
 export const DEPTH_PLAYER = 10;
+export const DEPTH_FX = 20;
 export const DEPTH_SPLASH = -10;
 export const DEPTH_HUD_BG = 1000;
 export const DEPTH_HUD_FILL = 1001;
