@@ -9,8 +9,8 @@ Separate service (Repo B) that manages FIFO turn-taking in production, serves th
 | Endpoint                       | Method | Purpose                                                 |
 | ------------------------------ | ------ | ------------------------------------------------------- |
 | `/api/register`                | POST   | `{ display_name, contact, password }` → `{ player_id }` |
-| `/api/queue/join`              | POST   | `{ player_id, password }` → `{ position, est_wait_ms }` |
-| `/api/queue/status/:player_id` | GET    | Current position                                        |
+| `/api/queue/join`              | POST   | `{ player_id, password }` → `{ position, est_wait_ms, admitted }`. Returns `503` when `QUEUE_ENABLED` is unset. |
+| `/api/queue/status/:player_id` | GET    | `{ position, est_wait_ms, admitted }`. `position == 0 && admitted` ⇒ allowlisted; client should open the WS. |
 | `/api/queue/:player_id`        | DELETE | `{ password }` — leave queue                            |
 | `/api/leaderboard`             | GET    | Rankings from `game.db`                                 |
 | `/api/live`                    | GET    | JSON list of currently-playing games. See [Live spectating](#live-spectating). |
@@ -23,7 +23,7 @@ See [03-identity-auth.md](./03-identity-auth.md) for the registration / verifica
 
 ## Admin panel (auth-protected)
 
-- `/admin/queue` — reorder, kick, advance, pause.
+- `/admin/queue` — list queued players, kick from line, force-free an admitted slot. (`reorder` / `pause` not yet implemented; spec target.)
 - `/admin/leaderboard` — flag, remove entries.
 - `/admin/replay/:replay_id` — download replay JSON (input log + seed). Moderators-only; not exposed publicly so input logs can't be data-mined for the intentional bugs.
 - `/admin/winners` — decrypt + export contact info.
@@ -116,7 +116,7 @@ Spectators receive a near-identical packet stream to the player — enough to re
 
 - Package layout (target): `cmd/admin/`, `internal/queue/`, `internal/identity/`, `internal/admin/`, `web/`.
 - Queue storage: SQLite `lobby.db`, single `queue_entries` table: `(player_id, joined_at, position)`.
-- Notification to waiting clients: TBD — SSE, WebSocket, or short polling (see open questions).
+- Notification to waiting clients: short polling. Clients hit `GET /api/queue/status/:player_id` every 2 s while waiting; when the response includes `admitted: true` the client opens the WS. Cadence matches the advancer tick so one extra poll is the worst-case latency between admission and connect.
 - `/internal/slot-status` and `/internal/live-games` are game-server endpoints the lobby polls; neither is exposed on the public interface (bind to loopback or require shared secret).
 - The live-games cache (2 s TTL) lives in the lobby process, not on disk. If the game server is down, `/api/live` returns `[]` rather than erroring.
 
@@ -127,8 +127,8 @@ Lobby split rolling out in five phases under epic #26:
 - **Phase 1 (#21, merged):** `lobby/` service stood up; identity HTTP serving (`/api/register`, `/api/login`, `/api/verify`, `/api/health`, `/register`) extracted from the monolith. Caddy routes identity endpoints to lobby.
 - **Phase 2 (#22, merged):** public leaderboard + replay download. Lobby owns `/api/leaderboard`, `/api/replay/:replay_id`, and the `/leaderboard` HTML page; reads `game.db` over WAL alongside the game-server writer. Replay download verifies the stored checksum on read.
 - **Phase 3 (#23, in flight):** live spectating. Lobby owns `/api/live` and the `/spectate` selector page; `/spectate/:player_id` viewer URLs serve a static spectator client bundle from the client container. Game server adds `/internal/live-games` (loopback) and `/ws/spectate` upgrade with caps + per-IP rate limit + read-only enforcement; per-engine spectator fan-out with non-blocking drop-on-full + catchup snapshot on register.
-- **Phase 4 (#24, not started):** source serving + non-queue admin (`/source/*`, `/admin/leaderboard`, `/admin/winners`).
-- **Phase 5 (#25, not started):** FIFO queue + slot handoff via `allowlist.json`. Only required when `MAX_CONCURRENT=4` for prod.
+- **Phase 4 (#24, merged):** source serving + non-queue admin (`/source.tar.gz`, `/admin/leaderboard`, `/admin/winners`, `/admin/replay/:replay_id`).
+- **Phase 5 (#25, in flight):** FIFO queue + slot handoff via `allowlist.json`. Lobby owns `lobby.db` (queue store), the queue HTTP API (`/api/queue/{join,status,leave}`), the slot advancer goroutine (rewrites `/data/allowlist.json` on each tick), and the `/admin/queue` panel. Game server's allowlist reader gained refresh-on-miss to close the admit→connect race. Gated on `QUEUE_ENABLED=true` on the lobby + `AUTH_MODE=token` on the game server.
 
 The two-repo target in [01-architecture.md](./01-architecture.md) was relaxed to a single repo with three modules (`server/`, `lobby/`, `pkg/`) coordinated via `go.work` + `replace` directives. Both binaries open the same `/data/identity.db` (SQLite WAL).
 

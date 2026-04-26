@@ -559,7 +559,27 @@ export class MainMenu extends Phaser.Scene {
         player_id: string;
         display_name: string;
       };
+
+      // Queue gate (Phase 5). When the lobby has QUEUE_ENABLED=true the
+      // game server enforces AUTH_MODE=token, so we must be admitted
+      // before the WS auth will pass. waitForQueueAdmission returns
+      // immediately when the queue is disabled (503) or we've already
+      // been admitted; otherwise it polls and updates statusText until
+      // we reach the front of the line.
+      try {
+        await this.waitForQueueAdmission(body.player_id, password);
+      } catch (err) {
+        console.error("[MainMenu] queue: failed", err);
+        this.statusText?.setText(
+          err instanceof Error ? err.message : "Queue error.",
+        );
+        this.statusText?.setColor(hex(ERROR));
+        this.submitting = false;
+        return;
+      }
+
       this.statusText?.setText("Authenticating...");
+      this.statusText?.setColor(hex(TEXT_MUTED));
       // Cache for auto-relogin on subsequent runs (Restart, Play Again,
       // page refresh). Cleared by onError if the server rejects the id.
       setCachedPlayerId(body.player_id);
@@ -570,6 +590,96 @@ export class MainMenu extends Phaser.Scene {
       this.statusText?.setColor(hex(ERROR));
       this.submitting = false;
     }
+  }
+
+  /**
+   * Polls /api/queue/status until the player has been admitted, or
+   * resolves immediately if the queue is disabled (503) or the join
+   * response says admitted=true.
+   *
+   * On position > 0 the method updates statusText to show line
+   * position + estimated wait. Aborts only on a hard error (network
+   * down, bad credentials); otherwise it keeps polling — the spec's
+   * 5-min turn TTL means even a long wait is bounded.
+   */
+  private async waitForQueueAdmission(
+    playerId: string,
+    password: string,
+  ): Promise<void> {
+    let res: Response;
+    try {
+      res = await fetch("/api/queue/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ player_id: playerId, password }),
+      });
+    } catch {
+      throw new Error("Network error contacting queue.");
+    }
+    if (res.status === 503) {
+      // Queue feature off — proceed straight to WS auth.
+      return;
+    }
+    if (res.status === 409) {
+      // Already in queue from a previous tab/session. Treat as queued
+      // and fall into the poll loop.
+    } else if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `Queue join failed (HTTP ${res.status}).`);
+    } else {
+      const body = (await res.json()) as {
+        position: number;
+        est_wait_ms: number;
+        admitted: boolean;
+      };
+      if (body.admitted) return;
+      this.renderQueueStatus(body.position, body.est_wait_ms);
+    }
+
+    // Poll every 2 s until we're admitted. Identical cadence to the
+    // lobby advancer tick so we shouldn't usually wait more than one
+    // poll past the actual admit.
+    const pollMs = 2000;
+    while (true) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      let statusRes: Response;
+      try {
+        statusRes = await fetch(
+          "/api/queue/status/" + encodeURIComponent(playerId),
+        );
+      } catch {
+        // Transient network glitch — keep trying. The user can refresh
+        // to bail out.
+        continue;
+      }
+      if (statusRes.status === 404) {
+        // We were popped + AFK-evicted, or admin-kicked. Surface as a
+        // recoverable error so the user can re-login.
+        throw new Error("Queue slot expired. Log in again.");
+      }
+      if (!statusRes.ok) {
+        // 503 mid-poll: queue disabled while we were waiting (admin
+        // intervention?). Just proceed to auth — game server will
+        // accept us if AUTH_MODE relaxed.
+        if (statusRes.status === 503) return;
+        continue;
+      }
+      const status = (await statusRes.json()) as {
+        position: number;
+        est_wait_ms: number;
+        admitted: boolean;
+      };
+      if (status.admitted) return;
+      this.renderQueueStatus(status.position, status.est_wait_ms);
+    }
+  }
+
+  private renderQueueStatus(position: number, estWaitMs: number): void {
+    const minutes = Math.max(0, Math.round(estWaitMs / 60_000));
+    const ord = position === 1 ? "1st" : position === 2 ? "2nd" : position === 3 ? "3rd" : `${position}th`;
+    const wait = minutes <= 1 ? "<1 min" : `~${minutes} min`;
+    this.statusText?.setText(`In queue: ${ord} in line · ${wait} wait`);
+    this.statusText?.setColor(hex(WARNING));
   }
 
   private onAuthOk(_displayName: string): void {

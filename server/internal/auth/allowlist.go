@@ -13,6 +13,13 @@ import (
 //
 // See docs/specs/foundations/03-identity-auth.md — the lobby service is the
 // producer; the game server is the consumer.
+//
+// Hits go through the TTL cache (cheap). Misses force one extra disk
+// reload before final reject — closes the lobby admit → player connect
+// race window where a freshly-written allowlist hasn't been picked up
+// yet. With a 2 s TTL the worst case was a 2 s spurious "not on
+// allowlist" rejection right after admission; refresh-on-miss
+// collapses that to a single disk read per failed auth attempt.
 type Allowlist struct {
 	path string
 	mu   sync.Mutex
@@ -28,11 +35,26 @@ func NewAllowlist(path string) *Allowlist {
 }
 
 // Has reports whether playerID is in the allowlist, refreshing the cache
-// from disk if it has expired.
+// from disk if it has expired. On a cache miss (player not present), it
+// forces a fresh read once before returning false — this keeps the hot
+// path cheap (TTL-cached) while collapsing the admit→connect race that
+// the lobby produces on every queue advance.
 func (a *Allowlist) Has(playerID string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	_ = a.refresh()
+	_ = a.refresh(false)
+	if a.ids == nil {
+		return false
+	}
+	if _, ok := a.ids[playerID]; ok {
+		return true
+	}
+	// Miss: force-refresh and re-check. Bounded to one extra disk read
+	// per missed auth attempt, which is fine — auth is per-WS-connect
+	// and the failure path already costs a TLS round-trip.
+	if err := a.refresh(true); err != nil {
+		return false
+	}
 	if a.ids == nil {
 		return false
 	}
@@ -40,13 +62,14 @@ func (a *Allowlist) Has(playerID string) bool {
 	return ok
 }
 
-// refresh reloads the allowlist from disk if the TTL has expired. Caller
-// must hold a.mu.
+// refresh reloads the allowlist from disk. If force is false, the read is
+// skipped when the TTL hasn't expired; if force is true, the read always
+// happens. Caller must hold a.mu.
 //
 // A missing file is treated as the empty set (not an error) — in prod the
 // lobby may not have seeded the file yet.
-func (a *Allowlist) refresh() error {
-	if a.ids != nil && time.Since(a.read) <= a.ttl {
+func (a *Allowlist) refresh(force bool) error {
+	if !force && a.ids != nil && time.Since(a.read) <= a.ttl {
 		return nil
 	}
 	data, err := os.ReadFile(a.path)

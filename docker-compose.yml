@@ -8,8 +8,12 @@ services:
       # identity mode: WS C2S_AUTH requires the player_id to exist in
       # identity.db. Players must register (username + password) before
       # they can play.
-      AUTH_MODE: "identity"
-      MAX_CONCURRENT: "64"
+      # Set AUTH_MODE=token + MAX_CONCURRENT=4 + lobby's QUEUE_ENABLED=true
+      # for the prod cutover. Default dev posture is identity-mode with
+      # a generous concurrency cap, so anyone who's registered can play
+      # without waiting in line.
+      AUTH_MODE: "${AUTH_MODE:-identity}"
+      MAX_CONCURRENT: "${MAX_CONCURRENT:-64}"
       GAME_DB: "/data/game.db"
       IDENTITY_DB: "/data/identity.db"
       ALLOWLIST_PATH: "/data/allowlist.json"
@@ -39,6 +43,13 @@ services:
       # hash is bcrypt; generate one with `htpasswd -bnBC 10 USER PASSWORD`.
       ADMIN_USER: "${ADMIN_USER:-}"
       ADMIN_PASS_HASH: "${ADMIN_PASS_HASH:-}"
+      # FIFO queue + slot handoff (Phase 5 #25). Off by default so dev
+      # deploys don't write allowlist.json. Set QUEUE_ENABLED=true
+      # together with the game-server's AUTH_MODE=token + MAX_CONCURRENT=4
+      # for the prod cutover.
+      QUEUE_ENABLED: "${QUEUE_ENABLED:-false}"
+      LOBBY_DB: "/data/lobby.db"
+      ALLOWLIST_PATH: "/data/allowlist.json"
       # Stripped source baked into the lobby image as a single tarball
       # by the strip stage in lobby/Dockerfile. /source serves an HTML
       # download page; /source.tar.gz streams the file. Override only
