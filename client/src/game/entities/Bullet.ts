@@ -2,7 +2,7 @@ import Phaser from "phaser";
 
 import type { ProjSnapshot } from "../../net/packet";
 import { isHitstopped } from "../fx";
-import { TRACER_YELLOW } from "../ui/tokens";
+import { DEPTH_PROJECTILE_TRAIL, TRACER_YELLOW } from "../ui/tokens";
 
 const LERP_FACTOR = 0.4;
 const FALLBACK_WIDTH = 8;
@@ -39,7 +39,7 @@ export class Bullet extends Phaser.GameObjects.Container {
     this.targetY = snap.y;
 
     this.trail = scene.add.graphics();
-    this.trail.setDepth(1);
+    this.trail.setDepth(DEPTH_PROJECTILE_TRAIL);
     this.trail.setBlendMode(Phaser.BlendModes.ADD);
 
     if (scene.textures.exists("bullets")) {
