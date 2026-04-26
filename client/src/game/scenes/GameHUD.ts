@@ -111,16 +111,18 @@ export class GameHUD extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD_FILL);
 
-    // Coin counter sits below the room indicator on the right side. The
-    // shop opens with "B" — see ShopMenu.
+    // Coin counter sits in the bottom-left, just above the HP bar.
+    // Top-right is reserved for the splits panel, so the coin readout
+    // lives next to the other "stat" widget. Shop opens with "B" — see
+    // ShopMenu.
     this.coinText = this.add
-      .text(w - GUTTER_MEDIUM, 30, "$ 0", {
+      .text(GUTTER_MEDIUM, h - 32, "$ 0", {
         ...HUD_TEXT_STYLE,
         color: hex(COIN_GOLD),
       })
-      .setOrigin(1, 0)
+      .setOrigin(0, 1)
       .setScrollFactor(0)
-      .setDepth(DEPTH_HUD_BG);
+      .setDepth(DEPTH_HUD_FILL);
 
     this.buildSplitsPanel(w);
 
