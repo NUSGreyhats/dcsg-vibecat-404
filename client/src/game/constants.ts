@@ -20,4 +20,10 @@ export const WS_URL = (() => {
 // Tick intervals (server runs at 20 Hz).
 export const INPUT_SEND_INTERVAL_MS = 50;
 
+// Mirrors server `HoldFireCooldownMult` (server/internal/game/constants.go).
+// Applied to the per-shot cooldown when a SHOOT is sent with `released=false`
+// (a held continuation). Must match the server value or the local throttle
+// will queue shots the server then rejects. See issue #62.
+export const HOLD_FIRE_COOLDOWN_MULT = 2;
+
 export const WALK_ANIM_FRAMERATE = 8;

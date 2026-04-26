@@ -5,6 +5,7 @@ import {
   ROOM_WIDTH,
   ROOM_HEIGHT,
   INPUT_SEND_INTERVAL_MS,
+  HOLD_FIRE_COOLDOWN_MULT,
 } from "../constants";
 import { Player } from "../entities/Player";
 import { Enemy } from "../entities/Enemy";
@@ -157,10 +158,10 @@ export class Game extends Phaser.Scene {
           const id = weaponFromServerId(sp.weapon_id);
           const baseCd = WEAPON_STATS[id].cooldownMs;
           const stacks = sp.fire_rate_stacks ?? 0;
-          // Mirror the server's HoldFireCooldownMult (=2) so the local
-          // throttle doesn't queue shots the server will reject. Held
-          // continuations fire at 50% rate; fresh clicks at full rate.
-          const heldMult = released ? 1 : 2;
+          // Mirror the server's HoldFireCooldownMult so the local throttle
+          // doesn't queue shots the server will reject. Held continuations
+          // fire at the penalised rate; fresh clicks at full weapon rate.
+          const heldMult = released ? 1 : HOLD_FIRE_COOLDOWN_MULT;
           this.nextShootAt = now + (baseCd * heldMult) / (1 + 0.1 * stacks);
 
           // Muzzle flash + camera shake fire on every shot. The
