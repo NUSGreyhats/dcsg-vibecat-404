@@ -61,7 +61,7 @@ export type C2SDataFor<T extends C2SType> = T extends typeof C2SType.AUTH
 export type S2CDataFor<T extends S2CType> = T extends typeof S2CType.AUTH_OK
   ? { display_name: string }
   : T extends typeof S2CType.RUN_STARTED
-    ? { seed: number; room: RoomData }
+    ? { seed: number; room: RoomData; display_name?: string }
     : T extends typeof S2CType.STATE
       ? {
           elapsed_ms: number;
