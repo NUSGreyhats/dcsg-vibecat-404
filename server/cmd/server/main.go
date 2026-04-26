@@ -132,10 +132,19 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
-	// Identity HTTP endpoints, /register, /api/leaderboard, and /api/replay/:id
-	// all live on the lobby service. The game server still imports
-	// pkg/identity for WS-time Lookup in authCheck above and writes to
-	// game.db via the leaderboard goroutine started below.
+	// Identity HTTP endpoints (/api/login, /api/register, /api/verify) are
+	// owned by the lobby service in prod. Mount them on the game server
+	// too when DEV_MOUNT_IDENTITY=1 so a single `go run ./cmd/server`
+	// works end-to-end without also running the lobby. Off by default —
+	// prod docker-compose keeps these on the lobby for separation.
+	if envDefault("DEV_MOUNT_IDENTITY", "") != "" {
+		identity.NewService(identityDB).Register(mux)
+		log.Printf("dev: mounted identity routes (/api/login, /api/register, /api/verify)")
+	}
+	// /register page, /api/leaderboard, /api/replay/:id, and admin all
+	// stay on the lobby service. The game server imports pkg/identity for
+	// WS-time Lookup in authCheck above and writes to game.db via the
+	// leaderboard goroutine started below.
 
 	srv := &http.Server{
 		Addr:              addr,

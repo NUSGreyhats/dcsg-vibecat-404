@@ -1,9 +1,14 @@
 import { defineConfig } from 'vite';
 
-// Game server expected at :8080 in dev. Override with GAME_SERVER if you
-// need to point Vite at a different host/port.
+// Game server (WebSocket gameplay) on :8080; lobby (identity HTTP +
+// leaderboard + admin) on :3001. By default everything proxies to the
+// game server, which works when you run it with DEV_MOUNT_IDENTITY=1
+// (mounts /api/login etc. on :8080) — single-binary dev. Set
+// LOBBY_SERVER to point identity/leaderboard/admin routes at a real
+// lobby instead.
 const gameServer = process.env.GAME_SERVER ?? 'http://localhost:8080';
 const gameServerWs = gameServer.replace(/^http/, 'ws');
+const lobbyServer = process.env.LOBBY_SERVER ?? gameServer;
 
 export default defineConfig({
     base: './',
@@ -26,9 +31,15 @@ export default defineConfig({
         // proxies down to the Go server — same URL shape as prod Caddy.
         port: 5173,
         proxy: {
+            // WebSocket endpoints (gameplay + spectator) live on the game
+            // server. Everything HTTP — identity, leaderboard, replay,
+            // /register page, admin — is on the lobby service.
             '/ws': { target: gameServerWs, ws: true, changeOrigin: true },
-            '/api': { target: gameServer, changeOrigin: true },
-            '/register': { target: gameServer, changeOrigin: true },
+            '/api': { target: lobbyServer, changeOrigin: true },
+            '/register': { target: lobbyServer, changeOrigin: true },
+            '/leaderboard': { target: lobbyServer, changeOrigin: true },
+            '/spectate': { target: lobbyServer, changeOrigin: true },
+            '/admin': { target: lobbyServer, changeOrigin: true },
         },
     }
 });

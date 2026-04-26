@@ -145,8 +145,15 @@ func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, now time.Time) p
 	r.InitialPop = len(ordered)
 	seedWaves(r, rng, tmpl.Waves)
 
-	pickupOut := make([]protocol.PickupSpawn, 0, len(tmpl.Pickups))
-	for _, def := range tmpl.Pickups {
+	// Tilemap-authored Health/Ammo objects win over the template's
+	// Pickups slice when present. This lets level designers move pickup
+	// placement out of code and into Tiled. See parseTilemapPickups.
+	pickups := tmpl.Pickups
+	if tmPickups := TilemapPickups(r.RoomIndex); len(tmPickups) > 0 {
+		pickups = tmPickups
+	}
+	pickupOut := make([]protocol.PickupSpawn, 0, len(pickups))
+	for _, def := range pickups {
 		r.Pickups[def.EntityID] = &PickupState{
 			EntityID: def.EntityID,
 			Type:     def.Type,

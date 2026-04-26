@@ -37,19 +37,39 @@ type wallGrid [GridRows][GridCols]cellKind
 // an empty grid (outer bounds only).
 var wallGrids [12]*wallGrid
 
-// waterGIDs are the tileset GIDs that render as water. They live in the
-// "Walls" layer because they block movement, but bullets fly over them.
-// Range: tileset rows 2..6 × cols 0..11 (0-indexed) at firstgid=1, 12 cols.
-var waterGIDs = func() map[int]struct{} {
-	const cols = 12
-	m := make(map[int]struct{}, 60)
-	for r := 2; r <= 6; r++ {
-		for c := 0; c <= 11; c++ {
-			m[r*cols+c+1] = struct{}{}
+// roomWaterGIDs is the per-room set of GIDs (already firstgid-adjusted)
+// whose embedded tileset entry carries `water=true`. Tiles in this set
+// still live on the "Walls" layer and block movement, but projectiles
+// fly over them. Populated by parseWaterGIDs from each room JSON's
+// inline tileset definition.
+var roomWaterGIDs [12]map[int]struct{}
+
+// parseWaterGIDs walks the room's embedded tilesets and returns the set
+// of GIDs whose tile entry has `water=true` in its properties block.
+// Tiled inlines the tileset (including custom properties) on export
+// when the tileset is embedded, so this is the authoritative source —
+// the standalone .tsx file can lag.
+func parseWaterGIDs(m *tiledMap) map[int]struct{} {
+	out := map[int]struct{}{}
+	for _, ts := range m.Tilesets {
+		first := ts.FirstGID
+		if first <= 0 {
+			first = 1
+		}
+		for _, t := range ts.Tiles {
+			for _, p := range t.Properties {
+				if p.Name != "water" || p.Type != "bool" {
+					continue
+				}
+				if v, ok := p.Value.(bool); ok && v {
+					out[t.ID+first] = struct{}{}
+					break
+				}
+			}
 		}
 	}
-	return m
-}()
+	return out
+}
 
 // tiledLayer / tiledObject / tiledMap mirror the subset of the Tiled JSON
 // schema we care about: a "Walls" tile layer whose non-zero cells are
@@ -71,9 +91,33 @@ type tiledObject struct {
 }
 
 type tiledMap struct {
-	Width  int          `json:"width"`
-	Height int          `json:"height"`
-	Layers []tiledLayer `json:"layers"`
+	Width    int             `json:"width"`
+	Height   int             `json:"height"`
+	Layers   []tiledLayer    `json:"layers"`
+	Tilesets []tiledTilesetR `json:"tilesets"`
+}
+
+// tiledTilesetR captures the room's inline tileset definition. Tiled
+// inlines per-tile properties (including the `water` flag this code
+// keys off) when the tileset is exported as embedded — see
+// parseWaterGIDs.
+type tiledTilesetR struct {
+	FirstGID int                `json:"firstgid"`
+	Tiles    []tiledTilesetTile `json:"tiles"`
+}
+
+type tiledTilesetTile struct {
+	ID         int                `json:"id"`
+	Properties []tiledTileProperty `json:"properties"`
+}
+
+type tiledTileProperty struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	// Value is `any` because Tiled exports it polymorphically per property
+	// type (bool / float / string / int). Callers narrow with a type
+	// assertion. JSON-Unmarshal yields bool / float64 / string here.
+	Value any `json:"value"`
 }
 
 // playerSpawn captures the authored PlayerSpawn marker for a room. `ok`
@@ -87,8 +131,15 @@ type playerSpawn struct {
 // playerSpawns is keyed by room index (1..11), parallel to wallGrids.
 var playerSpawns [12]playerSpawn
 
-// init parses the embedded tilemaps at process start. A failure on one
-// room is logged via panic — the binary shouldn't boot with missing walls.
+// tilemapPickups holds Health/Ammo pickups authored as object-layer
+// markers in the room's Tiled JSON. Keyed by room index (1..11). Empty
+// slice = no tilemap-authored pickups; LoadRoom falls back to the
+// RoomTemplate.Pickups slice in that case.
+var tilemapPickups [12][]PickupSpawnDef
+
+// init parses the embedded tilemaps at process start. A failure on
+// any room is fatal — the binary shouldn't boot with missing
+// collision data.
 func init() {
 	for i := 1; i <= 10; i++ {
 		name := fmt.Sprintf("tilemaps/room-%d.json", i)
@@ -100,9 +151,12 @@ func init() {
 		if err := json.Unmarshal(raw, &m); err != nil {
 			panic(fmt.Sprintf("walls: parse %s: %v", name, err))
 		}
-		grid := parseWallGrid(&m)
-		wallGrids[i] = grid
+		// Water set must be parsed before parseWallGrid so the grid
+		// can classify cellWater vs cellSolid using the per-room map.
+		roomWaterGIDs[i] = parseWaterGIDs(&m)
+		wallGrids[i] = parseWallGrid(uint8(i), &m)
 		playerSpawns[i] = parsePlayerSpawn(&m)
+		tilemapPickups[i] = parseTilemapPickups(uint8(i), &m)
 	}
 }
 
@@ -136,8 +190,52 @@ func PlayerSpawnAt(roomIndex uint8) (x, y float32, ok bool) {
 	return s.X, s.Y, s.ok
 }
 
-func parseWallGrid(m *tiledMap) *wallGrid {
+// parseTilemapPickups walks every objectgroup layer for point objects
+// whose Tiled `type` (or `name`) is "Health" or "Ammo" and returns them
+// as PickupSpawnDef values. Object order in Tiled determines slot index,
+// which feeds a deterministic EntityID — replays remain byte-stable as
+// long as the tilemap isn't re-authored.
+func parseTilemapPickups(roomIndex uint8, m *tiledMap) []PickupSpawnDef {
+	var out []PickupSpawnDef
+	for _, L := range m.Layers {
+		if L.Type != "objectgroup" {
+			continue
+		}
+		for _, o := range L.Objects {
+			var t uint8
+			switch {
+			case o.Type == "Health" || o.Name == "Health":
+				t = PickupHealthPotion
+			case o.Type == "Ammo" || o.Name == "Ammo":
+				t = PickupAmmoCrate
+			default:
+				continue
+			}
+			id := uint32(roomIndex)*100 + 50 + uint32(len(out)+1)
+			out = append(out, PickupSpawnDef{
+				EntityID: id,
+				Type:     t,
+				X:        o.X,
+				Y:        o.Y,
+			})
+		}
+	}
+	return out
+}
+
+// TilemapPickups returns the Health/Ammo pickups authored in the room's
+// Tiled JSON, or nil if the room has none (or no tilemap). Callers should
+// fall back to RoomTemplate.Pickups when this returns nil.
+func TilemapPickups(roomIndex uint8) []PickupSpawnDef {
+	if int(roomIndex) >= len(tilemapPickups) {
+		return nil
+	}
+	return tilemapPickups[roomIndex]
+}
+
+func parseWallGrid(roomIndex uint8, m *tiledMap) *wallGrid {
 	var g wallGrid
+	water := roomWaterGIDs[roomIndex]
 	for _, L := range m.Layers {
 		if L.Type != "tilelayer" {
 			continue
@@ -153,9 +251,15 @@ func parseWallGrid(m *tiledMap) *wallGrid {
 			if tileID == 0 {
 				continue
 			}
+			// Tiled encodes per-tile flip flags in the top 3 bits of the
+			// GID (H=0x80000000, V=0x40000000, D=0x20000000). Mask them
+			// off before lookup, otherwise a flipped water tile reads as
+			// an unknown GID and gets classified as cellSolid — which
+			// makes projectiles bounce off it.
+			gid := tileID & 0x1FFFFFFF
 			r := i / GridCols
 			c := i % GridCols
-			if _, isWater := waterGIDs[tileID]; isWater {
+			if _, isWater := water[gid]; isWater {
 				g[r][c] = cellWater
 			} else {
 				g[r][c] = cellSolid
