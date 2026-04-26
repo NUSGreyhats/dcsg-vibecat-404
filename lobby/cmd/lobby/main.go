@@ -516,6 +516,15 @@ func queueJoinHandler(w http.ResponseWriter, r *http.Request, queueDB, identityD
 		http.Error(w, "position lookup failed", http.StatusInternalServerError)
 		return
 	}
+	// pos==0 here means Position couldn't find the row — possible if
+	// the advancer popped the just-inserted head between the INSERT
+	// and the Position SELECT. Re-check Admitted so the caller sees
+	// {position:0, admitted:true} instead of a confusing
+	// {position:0, admitted:false} that would render as "0th in line".
+	if pos == 0 && adv != nil && adv.Admitted(body.PlayerID) {
+		writeQueueStatus(w, 0, true)
+		return
+	}
 	writeQueueStatus(w, pos, false)
 }
 

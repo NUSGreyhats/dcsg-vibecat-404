@@ -190,7 +190,7 @@ Spectators receive a near-identical packet stream to the player — enough to re
 ## Implementation notes
 
 - Package layout (target): `cmd/admin/`, `internal/queue/`, `internal/identity/`, `internal/admin/`, `web/`.
-- Queue storage: SQLite `lobby.db`, single `queue_entries` table: `(player_id, joined_at, position)`.
+- Queue storage: SQLite `lobby.db`, single `queue_entries` table: `(player_id, joined_at)`. Position is derived from FIFO order at read time (`COUNT(*) WHERE joined_at < ? OR (joined_at = ? AND player_id < ?)`), not stored — concurrent joins/leaves don't have to renumber siblings.
 - Notification to waiting clients: short polling. Clients hit `GET /api/queue/status/:player_id` every 2 s while waiting; when the response includes `admitted: true` the client renders an explicit "YOU'RE UP — press START" overlay rather than auto-opening the WS. The speedrun timer must not start without an intentional player action: an admitted player who walked away from the keyboard would otherwise lose the run instantly. The overlay's 50 s client-side countdown leaves ~10 s of margin before the lobby's 60 s `StartGrace` AFK eviction; an unclicked overlay times out, the player isn't authed, and the next advancer tick reclaims the slot. Cadence matches the advancer tick so one extra poll is the worst-case latency between admission and the prompt.
 - `/internal/slot-status` and `/internal/live-games` are game-server endpoints the lobby polls; neither is exposed on the public interface (bind to loopback or require shared secret).
 - The live-games cache (2 s TTL) lives in the lobby process, not on disk. If the game server is down, `/api/live` returns `[]` rather than erroring.

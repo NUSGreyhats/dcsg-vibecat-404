@@ -54,7 +54,8 @@ func TestRefreshOnMissPicksUpFreshAdmit(t *testing.T) {
 	writeAllowlist(t, path, "old-admit")
 
 	a := NewAllowlist(path)
-	a.ttl = time.Hour // keep the cache warm so the file rewrite won't be picked up via normal TTL expiry
+	a.ttl = time.Hour      // keep the cache warm so the file rewrite won't be picked up via normal TTL expiry
+	a.forceMinInterval = 0 // exercise unthrottled refresh-on-miss; the throttle has its own dedicated test
 
 	// Warm the cache.
 	if !a.Has("old-admit") {
@@ -82,12 +83,60 @@ func TestRefreshOnMissReturnsFalseForRealMisses(t *testing.T) {
 	writeAllowlist(t, path, "alice")
 	a := NewAllowlist(path)
 	a.ttl = time.Hour
+	a.forceMinInterval = 0
 
 	if !a.Has("alice") {
 		t.Fatal("warm-up")
 	}
 	if a.Has("eve") {
 		t.Error("eve genuinely missing — should still be false")
+	}
+}
+
+// TestRefreshOnMissThrottled — repeated misses for the same wrong
+// player_id (typo, brute force) must not turn auth into an I/O hot
+// path. Within forceMinInterval, only the first miss does a forced
+// reload; subsequent ones answer from the cached map without
+// touching disk. After the throttle window, the next miss is allowed
+// to refresh again.
+func TestRefreshOnMissThrottled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "allowlist.json")
+	writeAllowlist(t, path, "alice")
+	a := NewAllowlist(path)
+	a.ttl = time.Hour
+	a.forceMinInterval = 100 * time.Millisecond
+
+	// Warm the cache.
+	if !a.Has("alice") {
+		t.Fatal("warm-up")
+	}
+
+	// First miss force-refreshes (sets a.forced).
+	if a.Has("eve") {
+		t.Fatal("eve missing")
+	}
+	firstForce := a.forced
+	if firstForce.IsZero() {
+		t.Fatal("first miss didn't record forced refresh")
+	}
+
+	// Within the throttle window: misses do NOT bump a.forced.
+	for i := 0; i < 5; i++ {
+		if a.Has("eve") {
+			t.Fatal("eve still missing")
+		}
+	}
+	if !a.forced.Equal(firstForce) {
+		t.Errorf("forced bumped during throttle window: %v → %v", firstForce, a.forced)
+	}
+
+	// After the window, a miss is allowed to refresh again.
+	a.forced = time.Now().Add(-time.Second)
+	if a.Has("eve") {
+		t.Fatal("eve still missing")
+	}
+	if !a.forced.After(firstForce) {
+		t.Error("post-window miss didn't refresh")
 	}
 }
 

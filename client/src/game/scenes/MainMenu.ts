@@ -700,11 +700,21 @@ export class MainMenu extends Phaser.Scene {
   }
 
   private renderQueueStatus(position: number, estWaitMs: number): void {
-    const minutes = Math.max(0, Math.round(estWaitMs / 60_000));
+    // Math.ceil over Math.round so a 61 s wait reads "~2 min" rather
+    // than "<1 min" — overstating by ≤59 s is friendlier than a
+    // surprise "you said <1 min, why am I still waiting?".
+    const minutes = Math.max(0, Math.ceil(estWaitMs / 60_000));
     const wait = minutes <= 1 ? "<1 min" : `~${minutes} min`;
-    this.statusText?.setText(
-      `In queue: ${this.formatOrdinal(position)} in line · ${wait} wait`,
-    );
+    // position<=0 normally arrives via the admitted=true short-circuit
+    // upstream, but a Join→Position race on the lobby could leak
+    // {position:0, admitted:false} into here. Render a neutral
+    // "Checking admission…" string instead of "0th in line" until the
+    // next status poll (1 s later) clarifies.
+    const message =
+      position > 0
+        ? `In queue: ${this.formatOrdinal(position)} in line · ${wait} wait`
+        : `Queue status: Checking admission… · ${wait} wait`;
+    this.statusText?.setText(message);
     this.statusText?.setColor(hex(WARNING));
   }
 
