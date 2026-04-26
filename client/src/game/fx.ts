@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import type { WeaponId } from "./weapons";
-import { BLOOD_RED, TRACER_YELLOW } from "./ui/tokens";
+import { BLOOD_RED, DEPTH_FX, TRACER_YELLOW } from "./ui/tokens";
 
 /**
  * Game-feel effects: hit-flash, hitstop, screen shake, muzzle flash,
@@ -121,7 +121,7 @@ export function spawnImpactBurst(
     const v = Phaser.Math.FloatBetween(speed * 0.4, speed);
     const size = Phaser.Math.Between(sizeMin, sizeMax);
     const p = scene.add.rectangle(x, y, size, size, color);
-    p.setDepth(11);
+    p.setDepth(DEPTH_FX);
     scene.tweens.add({
       targets: p,
       x: x + Math.cos(angle) * v * (life / 1000),
