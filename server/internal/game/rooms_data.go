@@ -34,10 +34,6 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 102, Type: EnemyGrunt, X: 800, Y: 300},
 			{EntityID: 103, Type: EnemyGrunt, X: 600, Y: 420},
 		},
-		Pickups: []PickupSpawnDef{
-			{EntityID: 151, Type: PickupHealthPotion, X: 300, Y: 600},
-			{EntityID: 152, Type: PickupAmmoCrate, X: 960, Y: 600},
-		},
 		Doors: []DoorDef{
 			{DoorID: 191, X: 1220, Y: 384, TargetRoom: 2},
 		},
@@ -55,10 +51,6 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 203, Type: EnemyRunner, X: 640, Y: 180},
 			{EntityID: 204, Type: EnemyRunner, X: 640, Y: 450},
 		},
-		Pickups: []PickupSpawnDef{
-			{EntityID: 251, Type: PickupHealthPotion, X: 180, Y: 620},
-			{EntityID: 252, Type: PickupAmmoCrate, X: 1100, Y: 620},
-		},
 		Doors: []DoorDef{
 			{DoorID: 291, X: 1220, Y: 384, TargetRoom: 3},
 		},
@@ -75,10 +67,6 @@ var RoomTemplates = [12]*RoomTemplate{
 			{EntityID: 302, Type: EnemyRunner, X: 900, Y: 240},
 			{EntityID: 303, Type: EnemyTank, X: 640, Y: 360},
 			{EntityID: 304, Type: EnemyGrunt, X: 480, Y: 460},
-		},
-		Pickups: []PickupSpawnDef{
-			{EntityID: 351, Type: PickupAmmoCrate, X: 200, Y: 640},
-			{EntityID: 352, Type: PickupHealthPotion, X: 1080, Y: 640},
 		},
 		Doors: []DoorDef{
 			{DoorID: 391, X: 640, Y: 40, TargetRoom: 4},
@@ -108,10 +96,6 @@ var RoomTemplates = [12]*RoomTemplate{
 				{Type: EnemyRunner, X: 640, Y: 540},
 			}},
 		},
-		Pickups: []PickupSpawnDef{
-			{EntityID: 451, Type: PickupHealthPotion, X: 180, Y: 640},
-			{EntityID: 452, Type: PickupAmmoCrate, X: 1100, Y: 640},
-		},
 		Doors: []DoorDef{
 			{DoorID: 491, X: 1220, Y: 384, TargetRoom: 5},
 		},
@@ -138,10 +122,6 @@ var RoomTemplates = [12]*RoomTemplate{
 				{Type: EnemyTank, X: 640, Y: 500},
 				{Type: EnemyGrunt, X: 640, Y: 200},
 			}},
-		},
-		Pickups: []PickupSpawnDef{
-			{EntityID: 551, Type: PickupAmmoCrate, X: 200, Y: 640},
-			{EntityID: 552, Type: PickupHealthPotion, X: 1080, Y: 640},
 		},
 		Doors: []DoorDef{
 			{DoorID: 591, X: 1220, Y: 384, TargetRoom: 6},
@@ -172,10 +152,6 @@ var RoomTemplates = [12]*RoomTemplate{
 				{Type: EnemyRunner, X: 1020, Y: 180},
 			}},
 		},
-		Pickups: []PickupSpawnDef{
-			{EntityID: 651, Type: PickupHealthPotion, X: 220, Y: 640},
-			{EntityID: 652, Type: PickupAmmoCrate, X: 1060, Y: 640},
-		},
 		Doors: []DoorDef{
 			{DoorID: 691, X: 640, Y: 40, TargetRoom: 7},
 		},
@@ -204,10 +180,6 @@ var RoomTemplates = [12]*RoomTemplate{
 				{Type: EnemyRunner, X: 240, Y: 400},
 				{Type: EnemyRunner, X: 1040, Y: 400},
 			}},
-		},
-		Pickups: []PickupSpawnDef{
-			{EntityID: 751, Type: PickupHealthPotion, X: 200, Y: 640},
-			{EntityID: 752, Type: PickupAmmoCrate, X: 1080, Y: 640},
 		},
 		Doors: []DoorDef{
 			{DoorID: 791, X: 1220, Y: 384, TargetRoom: 8},
@@ -239,10 +211,6 @@ var RoomTemplates = [12]*RoomTemplate{
 				{Type: EnemyGrunt, X: 960, Y: 540},
 			}},
 		},
-		Pickups: []PickupSpawnDef{
-			{EntityID: 851, Type: PickupAmmoCrate, X: 200, Y: 640},
-			{EntityID: 852, Type: PickupHealthPotion, X: 1080, Y: 640},
-		},
 		Doors: []DoorDef{
 			{DoorID: 891, X: 1220, Y: 384, TargetRoom: 9},
 		},
@@ -272,10 +240,6 @@ var RoomTemplates = [12]*RoomTemplate{
 				{Type: EnemyKamikaze, X: 240, Y: 180},
 				{Type: EnemyKamikaze, X: 1040, Y: 180},
 			}},
-		},
-		Pickups: []PickupSpawnDef{
-			{EntityID: 951, Type: PickupHealthPotion, X: 200, Y: 640},
-			{EntityID: 952, Type: PickupAmmoCrate, X: 1080, Y: 640},
 		},
 		Doors: []DoorDef{
 			{DoorID: 991, X: 640, Y: 40, TargetRoom: 10},
@@ -310,11 +274,6 @@ var RoomTemplates = [12]*RoomTemplate{
 				{Type: EnemyGrunt, X: 640, Y: 560},
 				{Type: EnemyGrunt, X: 640, Y: 180},
 			}},
-		},
-		Pickups: []PickupSpawnDef{
-			{EntityID: 1051, Type: PickupAmmoCrate, X: 200, Y: 640},
-			{EntityID: 1052, Type: PickupAmmoCrate, X: 1080, Y: 640},
-			{EntityID: 1053, Type: PickupHealthPotion, X: 640, Y: 660},
 		},
 		Doors: []DoorDef{
 			{DoorID: 1091, X: 1220, Y: 384, TargetRoom: 11},
@@ -363,13 +322,6 @@ var RoomTemplates = [12]*RoomTemplate{
 				{Type: EnemyKamikaze, X: 1200, Y: 200},
 				{Type: EnemyKamikaze, X: 1200, Y: 568},
 			}},
-		},
-		Pickups: []PickupSpawnDef{
-			{EntityID: 1151, Type: PickupHealthPotion, X: 200, Y: 600},
-			{EntityID: 1152, Type: PickupHealthPotion, X: 1080, Y: 600},
-			{EntityID: 1153, Type: PickupAmmoCrate, X: 320, Y: 384},
-			{EntityID: 1154, Type: PickupAmmoCrate, X: 960, Y: 384},
-			{EntityID: 1155, Type: PickupAmmoCrate, X: 640, Y: 600},
 		},
 		Doors: nil,
 	},

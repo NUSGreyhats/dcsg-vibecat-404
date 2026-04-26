@@ -9,12 +9,12 @@ import (
 
 // RoomTemplate is the static definition of a room's contents, consumed by
 // LoadRoom to produce concrete RoomState + the protocol.RoomData shipped to
-// the client.
+// the client. Pickups are NOT part of the template — they're authored as
+// "Health" / "Ammo" point objects in the tilemap and parsed at startup.
 type RoomTemplate struct {
 	TilemapID string
 	Enemies   []EnemySpawnDef
 	Waves     []WaveDef
-	Pickups   []PickupSpawnDef
 	Doors     []DoorDef
 }
 
@@ -145,13 +145,9 @@ func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, now time.Time) p
 	r.InitialPop = len(ordered)
 	seedWaves(r, rng, tmpl.Waves)
 
-	// Tilemap-authored Health/Ammo objects win over the template's
-	// Pickups slice when present. This lets level designers move pickup
-	// placement out of code and into Tiled. See parseTilemapPickups.
-	pickups := tmpl.Pickups
-	if tmPickups := TilemapPickups(r.RoomIndex); len(tmPickups) > 0 {
-		pickups = tmPickups
-	}
+	// Pickups are authored exclusively in the tilemap (Health/Ammo
+	// point objects on the object layer). See parseTilemapPickups.
+	pickups := TilemapPickups(r.RoomIndex)
 	pickupOut := make([]protocol.PickupSpawn, 0, len(pickups))
 	for _, def := range pickups {
 		r.Pickups[def.EntityID] = &PickupState{
