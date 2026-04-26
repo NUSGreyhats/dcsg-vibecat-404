@@ -21,6 +21,13 @@ export default defineConfig({
     logLevel: 'warning',
     build: {
         rollupOptions: {
+            // Two HTML entries: index.html (player) and spectate.html
+            // (read-only viewer). Vite emits both with their own hashed
+            // bundles in dist/; Caddy serves them at / and /spectate/*.
+            input: {
+                index: 'index.html',
+                spectate: 'spectate.html',
+            },
             output: {
                 manualChunks: {
                     phaser: ['phaser']

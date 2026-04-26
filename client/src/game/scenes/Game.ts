@@ -25,7 +25,7 @@ import {
   WEAPON_FX,
 } from "../fx";
 import { maybeRecordPB } from "../prefs";
-import { WEAPON_STATS } from "../weapons";
+import { WEAPON_STATS, weaponFromServerId } from "../weapons";
 import { RunOutcome as RunOutcomeValue } from "../../net/packet";
 import { createControls, type Controls } from "./utils/Controls";
 import type {
@@ -33,6 +33,7 @@ import type {
   EntitySnapshot,
   ProjSnapshot,
   PlayerSnapshot,
+  PickupSpawn,
   SplitData,
   RunOutcome,
 } from "../../net/packet";
@@ -42,6 +43,7 @@ type StatePayload = {
   player: PlayerSnapshot;
   entities: EntitySnapshot[];
   projectiles: ProjSnapshot[];
+  pickups: PickupSpawn[];
 };
 
 /**
@@ -57,14 +59,13 @@ export class Game extends Phaser.Scene {
   backgroundObjs: Phaser.GameObjects.GameObject[] = [];
   controls!: Controls;
   inputSendAcc = 0;
+  private nextShootAt = 0;
   private requestedPickupIds = new Set<number>();
   private requestedDoorIds = new Set<number>();
   /** Read by fx.isHitstopped — entity ticks halt while non-zero. */
   hitstopUntil = 0;
   /** Last seen player HP, used to detect damage and play hurt fx. */
   private prevPlayerHp = -1;
-  /** Local cooldown gate for shoot fx so cooldown-clicks don't spam. */
-  private nextShootFxAt = 0;
   /** Positions where enemies took damage this tick — used to suppress
    *  redundant wall sparks at projectile despawn. */
   private hitPositionsThisFrame: { x: number; y: number }[] = [];
@@ -131,25 +132,27 @@ export class Game extends Phaser.Scene {
       this.inputSendAcc = 0;
     }
 
-    if (this.controls.shootPressed() && this.player) {
-      // Out of ammo: skip the visuals AND the network message — the
-      // server already rejects empty-mag SHOOT packets, but a flash +
-      // shake on a no-op press would mislead the player into thinking
-      // the shot landed.
-      const ammo = sync.state.player?.ammo ?? 0;
-      if (ammo > 0) {
-        const angle = this.controls.aimAngle(this.player.x, this.player.y);
-        sync.sendShoot(angle);
-        this.player.triggerShootAnim();
+    if (this.controls.shootHeld()) {
+      const sp = sync.state.player;
+      const now = this.time.now;
+      if (this.player && sp && now >= this.nextShootAt) {
+        // Out of ammo: skip the visuals AND the network message — the
+        // server already rejects empty-mag SHOOT packets, but a flash
+        // + shake on a no-op press would mislead the player into
+        // thinking the shot landed.
+        if ((sp.ammo ?? 0) > 0) {
+          const angle = this.controls.aimAngle(this.player.x, this.player.y);
+          sync.sendShoot(angle);
+          this.player.triggerShootAnim();
+          const id = weaponFromServerId(sp.weapon_id);
+          const baseCd = WEAPON_STATS[id].cooldownMs;
+          const stacks = sp.fire_rate_stacks ?? 0;
+          this.nextShootAt = now + baseCd / (1 + 0.1 * stacks);
 
-        // Muzzle flash + camera shake, throttled by the weapon cooldown so
-        // mashing the click during cooldown doesn't strobe the screen.
-        const now = this.time.now;
-        const weaponId = this.player.currentWeaponId;
-        const cooldownMs = WEAPON_STATS[weaponId].cooldownMs;
-        if (now >= this.nextShootFxAt) {
-          this.nextShootFxAt = now + cooldownMs;
-          const fx = WEAPON_FX[weaponId];
+          // Muzzle flash + camera shake fire on every shot. The
+          // nextShootAt gate above already throttles this — no
+          // separate fx cooldown needed.
+          const fx = WEAPON_FX[id];
           const barrelLen = 22;
           const bx = this.player.x + Math.cos(angle) * barrelLen;
           const by = this.player.y + Math.sin(angle) * barrelLen;
@@ -160,16 +163,21 @@ export class Game extends Phaser.Scene {
           cameraShake(this, fx.shakeMs, fx.shakeIntensity);
         }
       }
+    } else {
+      // Release resets the gate so the next click fires instantly.
+      this.nextShootAt = 0;
     }
 
     const slot = this.controls.weaponSwitchPressed();
     if (slot !== null) sync.sendSwitchWeapon(slot);
 
     if (this.player) {
-      const pickupId = this.nearestPickupId(this.player.x, this.player.y, 24);
-      if (pickupId !== null && !this.requestedPickupIds.has(pickupId)) {
-        this.requestedPickupIds.add(pickupId);
-        sync.sendInteract(pickupId);
+      const nearest = this.nearestPickup(this.player.x, this.player.y, 24);
+      if (nearest && !this.requestedPickupIds.has(nearest.id)) {
+        this.requestedPickupIds.add(nearest.id);
+        // Honest client: forward the pickup type as rendered. The server
+        // *trusts* this field (BUG-12) — exploits live in the wire layer.
+        sync.sendInteract(nearest.id, nearest.type);
       }
 
       const doorId = this.nearestUnlockedDoorId(
@@ -185,6 +193,11 @@ export class Game extends Phaser.Scene {
 
     if (this.controls.inventoryPressed()) {
       this.scene.launch("InventoryMenu");
+      this.scene.pause();
+    }
+
+    if (this.controls.shopPressed()) {
+      this.scene.launch("ShopMenu");
       this.scene.pause();
     }
 
@@ -253,8 +266,20 @@ export class Game extends Phaser.Scene {
       }
     }
 
-    // Drop enemies/pickups that the server marked dead.
+    // Spawn newly-revealed pickups (coin drops appear mid-room). Pickups
+    // that vanish from the snapshot are torn down via the deadEntities
+    // path below — same code that handles consumed health/ammo crates.
     const state = getSync().state;
+    if (payload.pickups) {
+      for (const snap of payload.pickups) {
+        if (state.deadEntities.has(snap.entity_id)) continue;
+        if (this.pickups.has(snap.entity_id)) continue;
+        const pickup = new Pickup(this, snap);
+        this.pickups.set(snap.entity_id, pickup);
+      }
+    }
+
+    // Drop enemies/pickups that the server marked dead.
     for (const id of state.deadEntities) {
       const e = this.enemies.get(id);
       if (e) {
@@ -390,12 +415,12 @@ export class Game extends Phaser.Scene {
     this.scene.start("WinScreen", { outcome });
   }
 
-  private nearestPickupId(
+  private nearestPickup(
     x: number,
     y: number,
     radius: number,
-  ): number | null {
-    let bestId: number | null = null;
+  ): { id: number; type: number } | null {
+    let best: { id: number; type: number } | null = null;
     let bestDist = radius * radius;
     for (const [id, pk] of this.pickups) {
       const dx = pk.x - x;
@@ -403,10 +428,10 @@ export class Game extends Phaser.Scene {
       const d2 = dx * dx + dy * dy;
       if (d2 <= bestDist) {
         bestDist = d2;
-        bestId = id;
+        best = { id, type: pk.pickupType };
       }
     }
-    return bestId;
+    return best;
   }
 
   private nearestUnlockedDoorId(

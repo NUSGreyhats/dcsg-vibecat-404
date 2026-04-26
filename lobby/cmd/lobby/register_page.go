@@ -4,7 +4,6 @@ import "net/http"
 
 // serveRegisterPage serves the minimal registration HTML per
 // docs/specs/foundations/03-identity-auth.md § Player-facing experience.
-// This lives on the game server until the separate lobby service exists.
 func serveRegisterPage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -119,7 +118,15 @@ const registerHTML = `<!doctype html>
 <body>
 <main>
   <h1>Register</h1>
-  <p class="lead">Create an account. After registering, return to the game and log in with your username and password.</p>
+  <p class="lead">
+    Create an account. After registering, return to the game and log in with your username and password.
+    <br><br>
+    <a href="/">→ Play</a>
+    &nbsp;·&nbsp;
+    <a href="/leaderboard">→ Leaderboard</a>
+    &nbsp;·&nbsp;
+    <a href="/source.tar.gz" download>→ Source</a>
+  </p>
 
   <form id="f" autocomplete="off" novalidate>
     <label for="display_name">Username</label>

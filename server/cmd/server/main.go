@@ -5,20 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/coder/websocket"
 
+	"github.com/greyhats/defcon-game/pkg/identity"
 	"github.com/greyhats/defcon-game/server/internal/auth"
 	"github.com/greyhats/defcon-game/server/internal/game"
-	"github.com/greyhats/defcon-game/server/internal/identity"
 	"github.com/greyhats/defcon-game/server/internal/leaderboard"
 	"github.com/greyhats/defcon-game/server/internal/protocol"
+	"github.com/greyhats/defcon-game/server/internal/spectator"
 )
 
 func main() {
@@ -28,6 +31,8 @@ func main() {
 	identityDBPath := envDefault("IDENTITY_DB", "identity.db")
 	allowlistPath := envDefault("ALLOWLIST_PATH", "/data/allowlist.json")
 	maxConcurrent := envInt("MAX_CONCURRENT", 64)
+	spectatorGlobal := envInt("SPECTATOR_GLOBAL", 200)
+	spectatorPerIP := envInt("SPECTATOR_PER_IP", 5)
 
 	db, err := leaderboard.OpenDB(dbPath)
 	if err != nil {
@@ -40,8 +45,6 @@ func main() {
 		log.Fatalf("open identity db: %v", err)
 	}
 	defer identityDB.Close()
-
-	identitySvc := identity.NewService(identityDB)
 
 	mode := auth.ModeFromEnv()
 	switch mode {
@@ -57,6 +60,20 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	lbSvc.Start(ctx)
+
+	// Live-games registry — engines push a Summary every tick; the
+	// /internal/live-games endpoint serves the aggregated snapshot to
+	// the lobby's spectator selector. See
+	// docs/specs/foundations/05-server-runtime.md#internal-endpoint.
+	liveReg := spectator.NewLiveRegistry(maxConcurrent)
+	liveReg.Start(ctx)
+
+	// Spectator engines registry + global+per-IP caps. The accept handler
+	// for /ws/spectate looks engines up by player_id from the URL and
+	// dispatches a register request. Per-game cap is enforced by each
+	// engine on the receiving side.
+	engineReg := spectator.NewEngines()
+	specCaps := spectator.NewCaps(spectatorGlobal, spectatorPerIP, time.Minute)
 
 	allowlist := auth.NewAllowlist(allowlistPath)
 
@@ -85,35 +102,40 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handleWS(ctx, w, r, sem, authCheck, lbSvc)
+		handleWS(ctx, w, r, sem, authCheck, lbSvc, liveReg, engineReg)
 	})
-	mux.HandleFunc("/internal/slot-status", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/ws/spectate", func(w http.ResponseWriter, r *http.Request) {
+		handleSpectateWS(ctx, w, r, engineReg, specCaps)
+	})
+	mux.HandleFunc("/internal/slot-status", func(w http.ResponseWriter, r *http.Request) {
+		if !gateInternal(w, r) {
+			return
+		}
 		used := len(sem)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"used":` + strconv.Itoa(used) + `,"max":` + strconv.Itoa(maxConcurrent) + `}`))
 	})
+	mux.HandleFunc("/internal/live-games", func(w http.ResponseWriter, r *http.Request) {
+		if !gateInternal(w, r) {
+			return
+		}
+		// Polled every 2 s by the lobby and cached in-process. Returns
+		// [] (not null) when no runs are live so the lobby's selector
+		// renders an explicit empty state.
+		entries := liveReg.Snapshot()
+		if entries == nil {
+			entries = []spectator.Summary{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(entries)
+	})
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
-	// Identity endpoints. Per docs/specs/foundations/03-identity-auth.md the
-	// lobby service is spec'd to host these — until that lands, the game
-	// server hosts them directly.
-	identitySvc.Register(mux)
-	mux.HandleFunc("/register", serveRegisterPage)
-	// Dev-only: the lobby service is spec'd to host /api/leaderboard, but
-	// it doesn't exist yet. Expose a read-through here so local testers
-	// can view results without finishing a run.
-	mux.HandleFunc("/api/leaderboard", func(w http.ResponseWriter, r *http.Request) {
-		limit := 10
-		if v := r.URL.Query().Get("limit"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
-				limit = n
-			}
-		}
-		entries := lbSvc.Top(limit)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"entries": entries})
-	})
+	// Identity HTTP endpoints, /register, /api/leaderboard, and /api/replay/:id
+	// all live on the lobby service. The game server still imports
+	// pkg/identity for WS-time Lookup in authCheck above and writes to
+	// game.db via the leaderboard goroutine started below.
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -135,7 +157,7 @@ func main() {
 	_ = srv.Shutdown(shutdownCtx)
 }
 
-func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem chan struct{}, authCheck func(string) (string, error), lb *leaderboard.Service) {
+func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem chan struct{}, authCheck func(string) (string, error), lb *leaderboard.Service, liveReg *spectator.LiveRegistry, engineReg *spectator.Engines) {
 	select {
 	case sem <- struct{}{}:
 	default:
@@ -159,6 +181,8 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 	outCh := make(chan protocol.S2CEnvelope, game.OutChBuf)
 
 	engine := game.NewEngine(inCh, outCh, lb.Submit, authCheck)
+	engine.Live = liveReg
+	engine.Engines = engineReg
 
 	writerDone := make(chan struct{})
 	go connReader(connCtx, conn, inCh, cancel)
@@ -186,8 +210,258 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 
 		if engine.PlayerID != "" {
 			lb.Unregister(engine.PlayerID)
+			liveReg.Remove(engine.PlayerID)
 		}
 	}()
+}
+
+// SpectatorPingInterval is the cadence the server-initiated keepalive
+// ping fires at on a spectator connection. The coder/websocket library
+// does not auto-ping; if we relied on inbound traffic to detect liveness
+// we'd close every spectator session after a few minutes of correctly
+// silent (read-only) behaviour.
+const SpectatorPingInterval = 30 * time.Second
+
+// SpectatorPingTimeout is the per-ping deadline. If the pong doesn't
+// come back inside this window we treat the connection as dead and
+// close it. Spec says ~60 s idle ceiling; 30 s + 10 s ≈ that with
+// retry headroom.
+const SpectatorPingTimeout = 10 * time.Second
+
+// SpectatorRegisterTimeout caps how long the accept handler waits on the
+// engine's register reply before giving up and returning 503. Shorter
+// than the engine's tick (50 ms) would race the drain; 1 s gives many
+// ticks of slack while still preventing zombie pending accepts.
+const SpectatorRegisterTimeout = 1 * time.Second
+
+// gateInternal enforces that /internal/* endpoints are only callable
+// by trusted private peers (loopback or docker-network private IPs).
+// Returns true if the request should proceed; otherwise writes a 403
+// or 405 response and returns false. Replies non-GET with 405 to keep
+// the surface area tight.
+func gateInternal(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if !isPrivatePeer(host) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+func handleSpectateWS(ctx context.Context, w http.ResponseWriter, r *http.Request, engineReg *spectator.Engines, caps *spectator.Caps) {
+	playerID := r.URL.Query().Get("player_id")
+	if playerID == "" {
+		http.Error(w, "player_id required", http.StatusBadRequest)
+		return
+	}
+
+	if !caps.AllowIP(clientIP(r), time.Now()) {
+		w.Header().Set("Retry-After", "60")
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+		return
+	}
+
+	if !caps.AcquireGlobal() {
+		w.Header().Set("Retry-After", "5")
+		http.Error(w, "spectator capacity reached", http.StatusServiceUnavailable)
+		return
+	}
+	// The global slot is released by the writer goroutine on exit. Until
+	// then, every early-return path explicitly releases inline. Carrying
+	// the slot via a deferred release on the handler frame would be
+	// wrong: the handler returns immediately after spawning goroutines,
+	// so the slot would be released for the entire spectator session
+	// (defeating the cap).
+
+	registerCh, ok := engineReg.Lookup(playerID)
+	if !ok {
+		caps.ReleaseGlobal()
+		http.Error(w, "no live run for player_id", http.StatusNotFound)
+		return
+	}
+
+	// bestEffortDeregister tells the engine to drop this Conn from its
+	// spectator slice on the next tick. Non-blocking so a saturated
+	// RegisterCh can't stall the handler; the engine cleans up on run
+	// end anyway.
+	conn := spectator.NewConn()
+	bestEffortDeregister := func() {
+		select {
+		case registerCh <- spectator.Req{Action: spectator.ActionDeregister, Conn: conn}:
+		default:
+		}
+	}
+
+	reply := make(chan bool, 1)
+	select {
+	case registerCh <- spectator.Req{Action: spectator.ActionRegister, Conn: conn, Reply: reply}:
+	case <-time.After(SpectatorRegisterTimeout):
+		caps.ReleaseGlobal()
+		http.Error(w, "engine busy", http.StatusServiceUnavailable)
+		return
+	case <-ctx.Done():
+		caps.ReleaseGlobal()
+		http.Error(w, "shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	// From this point the engine *might* drain the register and accept us;
+	// every early return must send a deregister so we don't leak a
+	// per-game slot on the engine.
+	var accepted bool
+	select {
+	case accepted = <-reply:
+	case <-time.After(SpectatorRegisterTimeout):
+		bestEffortDeregister()
+		caps.ReleaseGlobal()
+		http.Error(w, "engine busy", http.StatusServiceUnavailable)
+		return
+	case <-ctx.Done():
+		bestEffortDeregister()
+		caps.ReleaseGlobal()
+		http.Error(w, "shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	if !accepted {
+		caps.ReleaseGlobal()
+		w.Header().Set("Retry-After", "5")
+		http.Error(w, "spectator capacity reached", http.StatusServiceUnavailable)
+		return
+	}
+
+	wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		log.Printf("spectate accept: %v", err)
+		bestEffortDeregister()
+		caps.ReleaseGlobal()
+		return
+	}
+
+	// Ownership transfer point. From here on, the writer goroutine owns
+	// the global cap slot release and the engine deregister; the reader
+	// goroutine and the pinger goroutine both signal failure via cancel.
+	connCtx, cancel := context.WithCancel(ctx)
+
+	// Reader: spectator connections are read-only. Any frame at all closes
+	// the WS with code 1008 (policy violation) per
+	// docs/specs/foundations/02-protocol.md#read-only-enforcement.
+	// No per-read deadline — silence is the *normal* state. Liveness is
+	// detected by the pinger goroutine instead.
+	go func() {
+		defer cancel()
+		wsConn.SetReadLimit(1024)
+		for {
+			_, _, readErr := wsConn.Read(connCtx)
+			if readErr != nil {
+				return
+			}
+			env := protocol.NewS2C(protocol.S2CError, 0, protocol.ErrorData{
+				Code:    "SPECTATOR_READ_ONLY",
+				Message: "spectator connections are read-only",
+			})
+			if raw, mErr := json.Marshal(env); mErr == nil {
+				_ = wsConn.Write(connCtx, websocket.MessageText, raw)
+			}
+			_ = wsConn.Close(websocket.StatusPolicyViolation, "spectator_read_only")
+			return
+		}
+	}()
+
+	// Pinger: server-initiated keepalive. The coder/websocket library
+	// does not auto-ping; without this, a correctly-silent spectator
+	// session would never get checked for liveness and a half-open WS
+	// could outlive the actual TCP connection.
+	go func() {
+		defer cancel()
+		t := time.NewTicker(SpectatorPingInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-connCtx.Done():
+				return
+			case <-t.C:
+				pingCtx, pingCancel := context.WithTimeout(connCtx, SpectatorPingTimeout)
+				pingErr := wsConn.Ping(pingCtx)
+				pingCancel()
+				if pingErr != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	// Writer: drains conn.OutCh until the engine closes it. Owns the
+	// final cleanup — releases the global cap slot and best-effort
+	// deregisters with the engine on exit.
+	go func() {
+		defer cancel()
+		defer caps.ReleaseGlobal()
+		defer wsConn.Close(websocket.StatusNormalClosure, "bye")
+		defer bestEffortDeregister()
+		for {
+			select {
+			case <-connCtx.Done():
+				return
+			case env, ok := <-conn.OutCh:
+				if !ok {
+					return // engine closed our channel — clean shutdown
+				}
+				raw, err := json.Marshal(env)
+				if err != nil {
+					continue
+				}
+				if err := wsConn.Write(connCtx, websocket.MessageText, raw); err != nil {
+					return
+				}
+			}
+		}
+	}()
+}
+
+// clientIP returns the best-effort source IP for rate-limit bookkeeping.
+// Honours X-Forwarded-For only when the immediate peer is on a trusted
+// private network (loopback or RFC1918) — typical Caddy-in-front-of-app
+// case in our docker-compose setup. If the immediate peer is itself a
+// public address (e.g. someone bypassed the reverse proxy and hit the
+// game server directly), XFF is ignored so a malicious header can't
+// evade the per-IP rate limit by pretending to be a different IP each
+// hit. Falls back to the RemoteAddr host on any parsing failure.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if !isPrivatePeer(host) {
+		return host
+	}
+	if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
+		if i := strings.IndexByte(xf, ','); i > 0 {
+			return strings.TrimSpace(xf[:i])
+		}
+		return strings.TrimSpace(xf)
+	}
+	return host
+}
+
+// isPrivatePeer reports whether the given hostname/IP is a loopback or
+// RFC1918 (private) address — the set of peers we trust to set
+// X-Forwarded-For and to call /internal/* endpoints. Both the lobby
+// service (docker bridge network) and any reverse proxy (Caddy) fall in
+// this set; arbitrary internet peers do not.
+func isPrivatePeer(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 func connReader(ctx context.Context, conn *websocket.Conn, inCh chan<- []byte, cancel context.CancelFunc) {

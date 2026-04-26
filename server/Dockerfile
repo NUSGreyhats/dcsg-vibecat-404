@@ -1,9 +1,14 @@
 FROM golang:1.25-alpine AS build
 WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/server ./cmd/server
+
+# Build context is the repo root so we can pull in pkg/ alongside server/.
+# The replace directive in server/go.mod resolves pkg via ../pkg.
+# GOWORK=off keeps the build off the workspace file.
+ENV GOWORK=off
+COPY pkg ./pkg
+COPY server ./server
+
+RUN cd server && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/server ./cmd/server
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates && mkdir -p /data

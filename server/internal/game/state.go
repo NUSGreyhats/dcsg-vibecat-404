@@ -91,6 +91,21 @@ type PlayerState struct {
 	DamageMultUntil time.Time
 	DamageMult      float32
 	ShieldUntil     time.Time
+
+	// Shop traits — permanent stackable buffs purchased from features/shop.md.
+	// Reset on death / new run. Effective multipliers are derived at read
+	// time, never cached on this struct. The shop's `ammo` purchase is a
+	// one-shot refill (not stackable) so there is no AmmoStacks counter.
+	Coins          int32
+	SpeedStacks    uint8
+	FireRateStacks uint8
+	DamageStacks   uint8
+
+	// LastAimAngle is the angle of the player's most recent C2S_SHOOT,
+	// in radians. Surfaced on PlayerSnapshot so spectators (who don't
+	// have a local cursor) can render the gun pointing where the player
+	// is aiming. Stays at 0 until the first shot.
+	LastAimAngle float32
 }
 
 func NewPlayerState() *PlayerState {
@@ -126,7 +141,6 @@ type EnemyState struct {
 	Speed          float32
 	JitterX        float32
 	JitterY        float32
-	Armor          int16
 }
 
 type ProjectileState struct {
@@ -144,6 +158,9 @@ type PickupState struct {
 	Type     uint8
 	X, Y     float32
 	Consumed bool
+	// Despawn deadline. Zero value means "never expires" (room-templated
+	// pickups). Coins set this 30s after spawn — see features/shop.md.
+	ExpiresAt time.Time
 }
 
 type DoorState struct {
@@ -165,6 +182,62 @@ type RoomState struct {
 	KillLog        []KillRecord
 	// Allocation counter for projectile IDs within the room.
 	NextProjID uint32
+
+	// Allocation counter for runtime-spawned non-enemy entity IDs (coin
+	// drops). Lazily initialised to 1_000_000 — well above WaveEntityIDBase
+	// (100_000) + max idx*step, so it cannot collide with wave-spawned IDs.
+	nextEntityID uint32
+
+	// --- Harder-mobs state. See docs/specs/features/harder-mobs.md. ---
+
+	// InitialPop is the initial enemy count captured at room load. Used as
+	// the denominator for per-wave trigger thresholds.
+	InitialPop int
+
+	// PendingWaves holds one entry per declared wave whose threshold
+	// rounded to ≥1 living remaining. Skipped waves consume no RNG and
+	// produce no PendingWave entry.
+	PendingWaves []PendingWave
+
+	// NextEnemyID allocates IDs for wave-spawned mobs at fire time.
+	NextEnemyID uint32
+}
+
+// NextEntityID returns a fresh uint32 for runtime-spawned non-enemy
+// entities (coin drops). Counters are room-local; collisions across rooms
+// are fine because the client wipes its entity maps on every ROOM_LOAD.
+func (r *RoomState) NextEntityID() uint32 {
+	if r.nextEntityID == 0 {
+		r.nextEntityID = 1_000_000
+	}
+	r.nextEntityID++
+	return r.nextEntityID
+}
+
+// MobSeed holds the post-RNG, pre-instantiation data for a mob. All RNG is
+// consumed into this struct at room load so no RNG is needed at wave fire.
+type MobSeed struct {
+	SpawnX, SpawnY   float32 // wall-snapped
+	PatrolPath       []Vec2  // wall-snapped
+	JitterX, JitterY float32
+	FirstAttackDelay int // ms, added to the instantiation `now`
+}
+
+// PrecomputedMob pairs a seeded mob with its archetype, ready to be turned
+// into an EnemyState at wave fire without touching MobRNG.
+type PrecomputedMob struct {
+	Type uint8
+	Seed MobSeed
+}
+
+// PendingWave tracks one reinforcement wave through its arm/fire lifecycle.
+type PendingWave struct {
+	TriggerRemaining int              // arms when livingCount ≤ this
+	ArmDelayJitter   int              // ms, signed offset from WaveArmDelayMs
+	Mobs             []PrecomputedMob // pre-seeded; instantiated on fire
+	Armed            bool             // one-way latch
+	FireAt           time.Time        // set when Armed flips true
+	Fired            bool             // one-way latch
 }
 
 func NewRoomState(idx uint8) *RoomState {
@@ -175,5 +248,6 @@ func NewRoomState(idx uint8) *RoomState {
 		Projectiles: map[uint32]*ProjectileState{},
 		Doors:       map[uint32]*DoorState{},
 		NextProjID:  1,
+		NextEnemyID: WaveEntityIDBase + uint32(idx)*WaveEntityIDStep,
 	}
 }

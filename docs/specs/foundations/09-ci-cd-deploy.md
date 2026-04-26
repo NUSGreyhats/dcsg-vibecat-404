@@ -32,7 +32,7 @@ graph TD
         TEST_ENV[Deploy → test]
         BUNDLE[".tar.gz → GitHub Release"]
         PROD[Deploy → prod<br/>2-reviewer gate]
-        DOCS["Stripped source tarball<br/>→ lobby /data/stripped-source/"]
+        DOCS["Stripped source<br/>baked into lobby image<br/>at /app/stripped-source"]
     end
 
     PR --> LINT
@@ -66,24 +66,41 @@ This ensures:
 
 ## Source code publishing (served by lobby)
 
-**Only the game server code is published.** Lobby source is **never** published.
+The published tree contains exactly the code a player would need to study to find intentional bugs — game-server runtime + the player-facing client. Everything else (lobby, infra, docs, CI configs) is hidden, both because it's not part of the game and because it would leak the bug-hiding strategy.
+
+### What is published
+
+- `server/` — the game-server Go module. The whole runtime, including the file that intentionally races on `KillLog`.
+- `client/src/`, `client/index.html`, `client/spectate.html`, `client/package.json`, `client/style.css`, `client/public/` — the Phaser app source players already see in their browser.
+- `pkg/identity/` (stub) and `pkg/go.mod` — a no-auth stub baked into the strip binary at `tools/strip/stubs/`, copied verbatim into the tarball so `cd server && go build ./...` succeeds. The stub treats every `player_id` as registered, prints a `STUB IDENTITY` warning at startup, and is the only thing players see of the identity package.
+- `README.md` (top-level) — quickstart for running the server locally and the explicit list of what is stubbed/omitted. Also lives at `tools/strip/stubs/README.md`.
+
+### What is NOT published
+
+- The real `pkg/identity` — replaced by the stub above. Identity is shared infrastructure, not part of the puzzle: an exploit there (account hijack, leaderboard spoof, rate-limit bypass derived from reading the exact bcrypt-cost / dummy-hash / rate-limit logic) breaks the game **for every other player**. The HTTP API surface (`/api/register`, `/api/login`, `/api/verify`) is enough for any player who needs to script auth. New `pkg/*` subpackages default to private — add them to the strip allowlist (or to the stubs tree) explicitly if a future package becomes gameplay-relevant.
+- `lobby/` — would expose admin endpoints, queue logic, and the `/source/*` handler itself.
+- `tools/` — including `tools/strip/`; the stripper's logic is the bug-hiding strategy.
+- `docs/` — every spec file is a hint sheet; explicitly excluded.
+- `.github/` — workflows reveal the `-tags=norace` build choice.
+- Top-level / build files: `docker-compose.yml`, `*.Dockerfile`, `go.work`, `README.md`, `client/Caddyfile`, `client/vite/*`. Infra, never code.
+
+### Per-file transforms
 
 | Stripped ❌                          | Kept ✅                               |
 | ----------------------------------- | ------------------------------------ |
-| All comments (`//`, `/* */`)        | Raw `.go` files                      |
+| All comments (`//`, `/* */`)        | Raw `.go` / `.ts` / `.tsx` files     |
 | Doc strings                         | Package structure                    |
-| README, docs/, markdown             | Function signatures + implementation |
-| `// BUG:` / `// HACK:` annotations  | `go.mod` / `go.sum`                  |
-| `*_test.go`                         | —                                    |
-| `.github/`, Dockerfile, CI configs  | —                                    |
+| `// BUG:` / `// HACK:` annotations  | Function signatures + implementation |
+| `*_test.go`, `*.test.ts`            | `go.mod` / `go.sum`                  |
+| Markdown files                      | `package.json`, `style.css`, HTML    |
 | Build tags / race exclusion pragmas | —                                    |
 
 ### Pipeline
 
-1. CI runs a `go/ast`-based stripping tool → `gofmt` → emits `stripped-source.tar.gz` as a workflow artifact.
-2. On deploy, the tarball is extracted into the shared Docker volume at `/data/stripped-source/`.
-3. The lobby service mounts that path and serves it read-only at `http://:3000/source/` alongside the leaderboard webapp.
-4. Air-gapped prod: the tarball travels inside the `.tar.gz` GitHub Release bundle alongside the service images and is unpacked into `/data/stripped-source/` during on-LAN deploy.
+1. The strip tool (`tools/strip`) runs as a multi-stage build inside `lobby/Dockerfile` — a dedicated `strip` stage walks the allowlist, transforms each file, and writes the result into `/stripped`. The runtime stage `COPY --from=strip /stripped /app/stripped-source`. A broken strip fails the image build, so deploys can't silently ship an empty source tree.
+2. On deploy, `docker compose up -d --build` rebuilds the lobby image and the freshly stripped source ships with it. No volume passing, no separate artifact.
+3. Lobby serves the tarball as a single download at `http://:3000/source.tar.gz`. The `→ Source` link sits in the nav bar of `/register`, `/leaderboard`, `/spectate`, and `/admin/`, so it's discoverable without a dedicated page. Players untar and browse with their editor — no per-file HTTP traversal, no SPA collisions when paths land on `client/index.html`. `SOURCE_TARBALL` defaults to `/app/source.tar.gz` and can be overridden for ad-hoc testing.
+4. Air-gapped prod: the lobby image goes inside the `.tar.gz` Release bundle alongside the rest of the stack — stripped source is part of the image, no extra step.
 
 ### Why lobby, not GitHub Pages
 
@@ -91,8 +108,9 @@ One public webapp for players (queue, leaderboard, source browser) — no separa
 
 ### Do-not-leak rules
 
-- Only `stripped-source.tar.gz` enters `/data/stripped-source/`. Never mount the raw `game-server/` repo into the volume.
-- Lobby's source handler is static file serving only — no directory traversal outside `/data/stripped-source/`.
+- Only the strip stage in `lobby/Dockerfile` writes into `/app/stripped-source` (and packages it to `/app/source.tar.gz`). Never mount the raw repo or any host path into that location at runtime.
+- The strip tool's allowlist (the "What is published" section above) is the canonical source of truth — paths outside it never enter the baked tree, even if they happen to land in `/app/stripped-source/` by mistake.
+- Lobby's source handler streams a single pre-built `source.tar.gz` via `http.ServeFile` — no directory FileServer, no per-file traversal, no chance of serving anything outside the baked archive.
 - Lobby must not serve its **own** source or any file from outside the stripped tree.
 
 **Note on build tag stripping:** the stripping tool also removes the `//go:build !norace` line from the published source — otherwise it would be a direct hint about the kill-log file. Stripped source must compile on its own but with the race intact.

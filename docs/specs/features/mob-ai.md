@@ -25,13 +25,15 @@ EnemyState {
 
 Enemy archetypes (per `Type`):
 
-| Type | Name     | HP | Speed | Aggro range | Attack cooldown | Notes                                    |
-| ---- | -------- | -- | ----- | ----------- | --------------- | ---------------------------------------- |
-| 1    | Grunt    | 3  | 80    | 200         | 800 ms          | Baseline zombie; patrols then aggros.    |
-| 2    | Runner   | 2  | 140   | 260         | 600 ms          | Fast; short aggro window useful for planning. |
-| 3    | Tank     | 12 | 50    | 160         | 1200 ms         | Slow; high HP; armor enables BUG-08.     |
-| 4    | Kamikaze | 1  | 120   | 220         | N/A (explodes)  | One-shot kills self on contact; damages player. |
-| 5    | Boss     | 120 | 60   | 360         | 900 ms          | Room 11 only; armor + debuff ingress for BUG-08. |
+| Type | Name     | HP | Speed | Melee dmg | Aggro range | Attack cooldown | Notes                                    |
+| ---- | -------- | -- | ----- | --------- | ----------- | --------------- | ---------------------------------------- |
+| 1    | Grunt    | 3  | 95    | 5         | 200         | 800 ms          | Baseline zombie; patrols then aggros.    |
+| 2    | Runner   | 2  | 165   | 4         | 260         | 600 ms          | Fast; short aggro window useful for planning. |
+| 3    | Tank     | 12 | 60    | 8         | 160         | 1200 ms         | Slow; high HP.                           |
+| 4    | Kamikaze | 1  | 145   | 15        | 220         | N/A (explodes)  | One-shot kills self on contact; damages player. |
+| 5    | Boss     | 120 | 70   | 20        | 360         | 900 ms          | Room 11 only.                            |
+
+HP and Speed are multiplied by a per-room tier factor at `InstantiateEnemy` time — see [harder-mobs.md § Per-room scaling](./harder-mobs.md#per-room-scaling). The numbers above are the **room 1–5 baseline**. Melee damage, AggroRange, and attack cooldown are **not** scaled. The active shield powerup halves incoming melee damage (integer divide, floor 1).
 
 Exact numbers TBD — see open questions in [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md). The table is the shape, not the final balance.
 
@@ -53,7 +55,7 @@ This consumption order is invariant — see [../foundations/07-determinism-seedi
 
 ## AI tick
 
-Per game tick (20 Hz), for each enemy:
+Per game tick (20 Hz), once the [flow field](#aggro-chase-flow-field) for the room has been (re)built for this tick, for each enemy:
 
 ```
 switch AIState {
@@ -65,8 +67,8 @@ case Patrol:
     if reached: PatrolIndex = (PatrolIndex + 1) % len(PatrolPath)
     if distance(self, player) < AggroRange: AIState = Aggro
 case Aggro:
-    chase_vec = (player - self) + jitter
-    move along chase_vec at Speed
+    aim_tile = flowField.NextStep(self.tile, jitterBias)
+    move toward center(aim_tile) at Speed   // pixel movement, axis-separated wall slide retained
     if time.Now() >= AttackCooldown && in_melee:
         deal damage; AttackCooldown = time.Now() + archetype.CooldownMs
 case Dead:
@@ -74,7 +76,69 @@ case Dead:
 }
 ```
 
-**Note:** per-tick AI uses `jitter` values that were pre-computed at spawn time — no `MobRNG` call happens per tick. This is what lets the replay engine reproduce runs from `(seed, InputLog)`.
+**Note:** per-tick AI consumes no `MobRNG`. Pre-computed per-mob fields (`JitterX`, `JitterY`, `FirstAttackDelay`, `PatrolPath`) and the per-tick flow field are the only inputs. This is what lets the replay engine reproduce runs from `(seed, InputLog)`.
+
+## Aggro chase: flow field
+
+Aggro chase uses a tile-grid breadth-first search rooted at the player's current tile, recomputed once per tick. The result is a `distance[row][col]` array; mobs walk the gradient toward the player. This replaces an earlier "greedy direct-vector with axis-separated slide" formulation that could park mobs against concave wall geometry (see [issue #19](https://github.com/NUSGreyhats/DEFCON-Game-Jon/issues/19)).
+
+### Per-tick computation
+
+```
+flowField := BFSFromTile(roomIndex, playerTileRow, playerTileCol)
+    // 40×24 grid, 8-neighbourhood with unit-cost diagonals (Chebyshev metric),
+    // walls (cellSolid + cellWater) impassable. Diagonal steps are forbidden
+    // when either axis-aligned tile bracketing the corner is a wall, so mobs
+    // never visually clip through a wall corner.
+    // Distance in tile steps. Unreachable tiles = sentinel (uint16 max).
+    // ~960 cell ops per tick — trivial cost.
+```
+
+The BFS runs once per room per tick, **before** any mob update for that tick reads it. It is owned by the per-tick game loop, not by individual mobs.
+
+### Per-mob step
+
+A mob in Aggro state computes its next aim point by:
+
+1. Take its own tile `(r, c)`.
+2. Optionally bias the *source* of the BFS by the mob's pre-computed jitter — see [Jitter handling](#jitter-handling) below.
+3. Among the 8 neighbours (cardinal `(r±1, c)`, `(r, c±1)` and diagonal `(r±1, c±1)`), pick the one with the **lowest** `distance` value. Ties broken by a fixed clockwise enumeration order from N: **N, NE, E, SE, S, SW, W, NW**. Diagonal candidates are skipped when either axis-aligned tile bracketing the corner is a wall — same corner-cut rule the BFS applies.
+4. Aim point = pixel-space center of the chosen neighbour tile.
+5. Movement uses the existing pixel-precision `moveTowardWithWalls` with that aim — the axis-separated wall slide is retained for sub-tile motion smoothness, but it is no longer the primary obstacle-avoidance mechanism.
+
+If all 8 neighbours have distance ≥ the mob's own (mob is at a local minimum, e.g. on the player's tile or in an unreachable pocket), the mob holds position.
+
+### Jitter handling
+
+Aggro jitter (`JitterX`, `JitterY`, both `[0, 1)` floats from spawn-time `MobRNG.Float32()`) historically perturbed the chase aim point by ±10 px. With a tile-resolution flow field the ±10 px perturbation is below tile size (32 px) and would be quantised away, collapsing one dimension of the [BUG-01](#bug-01-mob-seed-optimization) seed-search surface.
+
+To preserve seed-search depth without per-tick RNG, jitter is reinterpreted as a **deterministic tile-bias on the BFS source**:
+
+```
+biasedPlayerTile := playerTile
+if e.JitterX < 0.25: biasedPlayerTile.col -= 1
+else if e.JitterX > 0.75: biasedPlayerTile.col += 1
+if e.JitterY < 0.25: biasedPlayerTile.row -= 1
+else if e.JitterY > 0.75: biasedPlayerTile.row += 1
+// snap to nearest non-wall tile if biased target is impassable.
+```
+
+Each mob with a non-zero bias effectively reads a *separate* flow field rooted one tile off from the player. Implementation may either run multiple BFSes (still cheap — at most 9 distinct sources per tick) or compose distances from a single field plus the bias offset. The choice is internal; the spec only mandates the deterministic mapping above.
+
+Mobs whose jitter falls in `[0.25, 0.75]` on both axes use the unbiased flow field — the common case.
+
+### Determinism invariants
+
+- Neighbour enumeration order in the BFS queue and in the per-mob gradient pick is fixed (clockwise from N): **N, NE, E, SE, S, SW, W, NW**. Diagonal steps are gated on corner-cut prevention — both axis-aligned tiles bracketing the corner must be non-wall.
+- The BFS is a pure function of `(roomIndex, playerTile)` — wall grid is static per room, so the field for a given `(room, tile)` is byte-identical across runs.
+- The per-mob jitter bias is pre-computed at spawn time from `MobRNG`; the tick handler never touches `MobRNG`.
+- The BFS must run before mob updates *and* before any code that depends on mob position (death pass, projectile resolution) within the same tick.
+
+These invariants combine to keep `(seed, InputLog)` reproducing the run byte-for-byte.
+
+### Wall geometry
+
+Flow field handles arbitrary wall topology — multi-tile slabs, U-shapes, L-shapes, alcoves, room dividers — correctly. The only failure case is a wall configuration that fully separates the player's reachable region from a mob's reachable region (no path exists at all); in that case the mob holds position, which is the correct behaviour. There is **no authoring constraint** on wall shape under this algorithm.
 
 ## Data flow
 
@@ -86,14 +150,15 @@ case Dead:
 
 ## Implementation notes
 
-- Package: `internal/game/mobai` (target).
+- Package: `internal/game/mobai` (target). Flow-field code lives alongside in a sibling file (`mobai_flowfield.go`) — the wall grid it consumes is already in `walls.go`.
 - Enemy archetype table lives in a single Go file so adding a new archetype is a one-row change.
 - Patrol path waypoint clamp: `wX = clamp(wX, minX, maxX)`, same for Y. Clamp after RNG consumption — never before — otherwise the consumption order silently depends on the clamp.
-- Do not call `MobRNG` from any tick handler. All per-tick randomness must come from pre-computed `EnemyState` fields.
+- Do not call `MobRNG` from any tick handler. All per-tick randomness must come from pre-computed `EnemyState` fields and the deterministic per-tick flow field.
+- The flow field is computed once per room per tick in the loop, before any mob update. It is owned by the loop, not by individual mobs. See [Aggro chase: flow field](#aggro-chase-flow-field).
 
 ## Implementation status
 
-Greenfield. Current server does not have mob AI or RNG-driven spawns — rooms are static Tiled JSON with no server-side enemies. Full pipeline is future work.
+Mob AI and RNG-driven spawns are implemented (waves, pack aggro, per-room scaling all live). Aggro chase uses the flow-field gradient described above (`server/internal/game/flowfield.go` + the `AIAggro` branch of `UpdateEnemy` in `mobai.go`), shipped in [PR #32](https://github.com/NUSGreyhats/DEFCON-Game-Jon/pull/32) for [issue #19](https://github.com/NUSGreyhats/DEFCON-Game-Jon/issues/19) (mobs parking against concave wall geometry). The pixel-precision `moveTowardWithWalls` is retained for sub-tile motion + axis-separated wall slide; its step is clamped to the remaining distance so a mob whose aim is closer than one tick's step settles on the aim instead of overshooting it ([issue #34](https://github.com/NUSGreyhats/DEFCON-Game-Jon/issues/34)).
 
 ## Intentional bugs in this area
 
@@ -108,7 +173,7 @@ Greenfield. Current server does not have mob AI or RNG-driven spawns — rooms a
 - Which enemies to kill in what order given their specific positions.
 - Optimal movement path through each room's unique spawn layout.
 - Which patrol intercept windows to hit (enemies walking toward you vs. away).
-- Attack timing alignment — when do favorable aggro jitter windows open.
+- Attack timing alignment — when do favorable aggro-chase tile-bias windows open (jitter biases each mob's flow-field source by 0 or ±1 tile per axis; see [Jitter handling](#jitter-handling)).
 - Multi-room planning — early rooms' RNG consumption affects later rooms' patterns.
 
 A brute-force seed search might evaluate millions of candidates, but **scoring each seed requires simulating the full routing problem** — it's not just "find good clusters," it's "find the seed whose choreography admits the fastest possible multi-room route." This rewards both **tooling sophistication** (better solvers, smarter heuristics) and **game knowledge** (understanding room geometry, weapon DPS windows, door positions).
@@ -145,3 +210,4 @@ See [../bugs.md](../bugs.md#synergy-map).
 - [../foundations/07-determinism-seeding.md](../foundations/07-determinism-seeding.md) — RNG consumption invariant.
 - [../foundations/05-server-runtime.md](../foundations/05-server-runtime.md) — BUG-06 settle race, BUG-11 kill log.
 - [combat-weapons.md](combat-weapons.md) — BUG-07 damage batch.
+- [harder-mobs.md](harder-mobs.md) — reinforcement waves and pack aggro; extends this spec's spawn pipeline and BUG-01 seed-search surface.

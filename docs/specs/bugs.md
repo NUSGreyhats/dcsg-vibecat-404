@@ -31,6 +31,7 @@ The enabling pieces were removed in two passes:
 | BUG-09 | JSON Case-Insensitive Field Matching | Go parser footgun (Trail of Bits)  | Medium     | Unlock hidden items | Disabled (may return) | [foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling](foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling) (+ [features/inventory-items.md#bug-09-json-smuggling-dispatch-side-detail](features/inventory-items.md#bug-09-json-smuggling-dispatch-side-detail)) |
 | BUG-10 | Rune vs Byte Item Name Bypass        | Go rune/byte confusion (100go #36) | Medium     | ~3–5 s/room         | Disabled (may return) | [features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass](features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass) |
 | BUG-11 | Kill Log Race Condition              | Slice append data race (100go #69) | Hard       | ~5–8 s total        | Active            | [foundations/05-server-runtime.md#bug-11-kill-log-append-race](foundations/05-server-runtime.md#bug-11-kill-log-append-race) |
+| BUG-12 | Pickup Type Confusion                | Trust-the-client dispatch          | Easy       | ~10–20 s/run        | Active            | [features/shop.md#bug-12-pickup-type-confusion](features/shop.md#bug-12-pickup-type-confusion) |
 
 ## Stacking model
 
@@ -67,6 +68,8 @@ graph LR
     B01 -->|"enemy clustering<br/>enables"| B07["BUG-07<br/>Damage Burst"]
     B01 -->|"simultaneous kills<br/>enable"| B11["BUG-11<br/>Kill Log Race"]
     B07 -->|"multi-kill<br/>triggers"| B11
+    B05["BUG-05<br/>Interact Range"] -->|"any pickup → coin<br/>without walking to it"| B12["BUG-12<br/>Pickup Type Confusion"]
+    B12 -->|"funds damage/fire-rate stacks"| B07
     B09["BUG-09<br/>JSON Smuggling"] -->|"instakill enables<br/>faster setup for"| B08["BUG-08<br/>HP Overflow"]
     B04["BUG-04<br/>Swap Cancel"] -->|"faster DPS for"| B08
     B02["BUG-02<br/>Drift Stretch"] -->|"multiplier on<br/>all other savings"| B01 & B03["BUG-03"] & B06
@@ -74,6 +77,7 @@ graph LR
     style B01 fill:#e74c3c,color:#fff
     style B11 fill:#9b59b6,color:#fff
     style B09 fill:#3498db,color:#fff
+    style B12 fill:#f39c12,color:#fff
 ```
 
 ## Discovery difficulty tiers
@@ -81,7 +85,7 @@ graph LR
 | Tier                                       | Bugs                           | Discovery Path                                                          |
 | ------------------------------------------ | ------------------------------ | ----------------------------------------------------------------------- |
 | **Surface** (found by reading code)        | BUG-03, BUG-05                 | Missing checks obvious in stripped source                               |
-| **Protocol** (found by packet analysis)    | BUG-04, BUG-07                 | Requires understanding tick batching                                    |
+| **Protocol** (found by packet analysis)    | BUG-04, BUG-07, BUG-12         | Requires understanding tick batching / packet payload trust             |
 | **Language** (found by Go expertise)       | BUG-08, BUG-09, BUG-10, BUG-11 | Requires deep knowledge of Go's type system, parsers, concurrency model |
 | **Systems** (found by full-stack analysis) | BUG-01, BUG-02, BUG-06         | Requires understanding server architecture + building external tools    |
 

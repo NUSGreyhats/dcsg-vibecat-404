@@ -5,8 +5,11 @@ go 1.25.0
 require (
 	github.com/coder/websocket v1.8.14
 	github.com/google/uuid v1.6.0
+	github.com/greyhats/defcon-game/pkg v0.0.0
 	modernc.org/sqlite v1.49.1
 )
+
+replace github.com/greyhats/defcon-game/pkg => ../pkg
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

@@ -104,8 +104,15 @@ export class GameStateSync {
     this.send(C2SType.SWITCH_WEAPON, { weapon_id: weaponId });
   }
 
-  sendInteract(targetId: number): void {
-    this.send(C2SType.INTERACT, { target_id: targetId });
+  sendInteract(targetId: number, claimedType: number): void {
+    this.send(C2SType.INTERACT, {
+      target_id: targetId,
+      claimed_type: claimedType,
+    });
+  }
+
+  sendShopPurchase(itemId: number): void {
+    this.send(C2SType.SHOP_PURCHASE, { item_id: itemId });
   }
 
   sendEnterDoor(doorId: number): void {

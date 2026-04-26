@@ -22,7 +22,7 @@ export class Door extends Phaser.GameObjects.Container {
   readonly doorId: number;
   readonly targetRoom: number;
   unlocked: boolean;
-  private readonly body: Phaser.GameObjects.Graphics;
+  private readonly gfx: Phaser.GameObjects.Graphics;
 
   constructor(scene: Phaser.Scene, def: DoorDef) {
     super(scene, def.x, def.y);
@@ -30,8 +30,8 @@ export class Door extends Phaser.GameObjects.Container {
     this.targetRoom = def.target_room;
     this.unlocked = !def.locked;
 
-    this.body = scene.add.graphics();
-    this.add(this.body);
+    this.gfx = scene.add.graphics();
+    this.add(this.gfx);
 
     this.repaint();
 
@@ -64,7 +64,7 @@ export class Door extends Phaser.GameObjects.Container {
     const left = -DOOR_WIDTH / 2;
     const top = -DOOR_HEIGHT / 2;
 
-    this.body.clear();
+    this.gfx.clear();
 
     this.drawFrame(left, top);
     if (open) {
@@ -75,32 +75,32 @@ export class Door extends Phaser.GameObjects.Container {
   }
 
   private drawFrame(left: number, top: number): void {
-    this.body.fillStyle(OPENING, 0.75);
-    this.body.fillRect(left + 2, top + 3, DOOR_WIDTH - 4, DOOR_HEIGHT - 3);
+    this.gfx.fillStyle(OPENING, 0.75);
+    this.gfx.fillRect(left + 2, top + 3, DOOR_WIDTH - 4, DOOR_HEIGHT - 3);
 
-    this.body.fillStyle(WOOD_SHADOW, 0.8);
-    this.body.fillRect(left - 4, top + 4, 6, DOOR_HEIGHT - 1);
-    this.body.fillRect(left + DOOR_WIDTH - 2, top + 4, 6, DOOR_HEIGHT - 1);
-    this.body.fillRect(left - 4, top - 2, DOOR_WIDTH + 8, 8);
+    this.gfx.fillStyle(WOOD_SHADOW, 0.8);
+    this.gfx.fillRect(left - 4, top + 4, 6, DOOR_HEIGHT - 1);
+    this.gfx.fillRect(left + DOOR_WIDTH - 2, top + 4, 6, DOOR_HEIGHT - 1);
+    this.gfx.fillRect(left - 4, top - 2, DOOR_WIDTH + 8, 8);
 
-    this.body.fillStyle(WOOD_DARK, 1);
-    this.body.fillRect(left - 5, top + 1, 7, DOOR_HEIGHT + 1);
-    this.body.fillRect(left + DOOR_WIDTH - 2, top + 1, 7, DOOR_HEIGHT + 1);
-    this.body.fillRect(left - 5, top - 4, DOOR_WIDTH + 10, 8);
+    this.gfx.fillStyle(WOOD_DARK, 1);
+    this.gfx.fillRect(left - 5, top + 1, 7, DOOR_HEIGHT + 1);
+    this.gfx.fillRect(left + DOOR_WIDTH - 2, top + 1, 7, DOOR_HEIGHT + 1);
+    this.gfx.fillRect(left - 5, top - 4, DOOR_WIDTH + 10, 8);
 
-    this.body.lineStyle(2, WOOD_SHADOW, 0.95);
-    this.body.strokeRect(left - 5, top + 1, 7, DOOR_HEIGHT + 1);
-    this.body.strokeRect(left + DOOR_WIDTH - 2, top + 1, 7, DOOR_HEIGHT + 1);
-    this.body.strokeRect(left - 5, top - 4, DOOR_WIDTH + 10, 8);
+    this.gfx.lineStyle(2, WOOD_SHADOW, 0.95);
+    this.gfx.strokeRect(left - 5, top + 1, 7, DOOR_HEIGHT + 1);
+    this.gfx.strokeRect(left + DOOR_WIDTH - 2, top + 1, 7, DOOR_HEIGHT + 1);
+    this.gfx.strokeRect(left - 5, top - 4, DOOR_WIDTH + 10, 8);
 
-    this.body.fillStyle(WOOD_MID, 1);
-    this.body.fillRect(left - 3, top + 4, 3, DOOR_HEIGHT - 3);
-    this.body.fillRect(left + DOOR_WIDTH, top + 4, 3, DOOR_HEIGHT - 3);
-    this.body.fillRect(left - 3, top - 2, DOOR_WIDTH + 6, 3);
+    this.gfx.fillStyle(WOOD_MID, 1);
+    this.gfx.fillRect(left - 3, top + 4, 3, DOOR_HEIGHT - 3);
+    this.gfx.fillRect(left + DOOR_WIDTH, top + 4, 3, DOOR_HEIGHT - 3);
+    this.gfx.fillRect(left - 3, top - 2, DOOR_WIDTH + 6, 3);
 
-    this.body.lineStyle(1, WOOD_LIGHT, 0.45);
-    this.body.lineBetween(left - 2, top + 4, left - 2, top + DOOR_HEIGHT - 2);
-    this.body.lineBetween(
+    this.gfx.lineStyle(1, WOOD_LIGHT, 0.45);
+    this.gfx.lineBetween(left - 2, top + 4, left - 2, top + DOOR_HEIGHT - 2);
+    this.gfx.lineBetween(
       left + DOOR_WIDTH + 2,
       top + 4,
       left + DOOR_WIDTH + 2,
@@ -112,19 +112,19 @@ export class Door extends Phaser.GameObjects.Container {
     this.drawWoodPanel(left + 3, top + 6, 17, DOOR_HEIGHT - 8, false);
     this.drawWoodPanel(left + 20, top + 6, 17, DOOR_HEIGHT - 8, false);
 
-    this.body.lineStyle(2, WOOD_SHADOW, 0.95);
-    this.body.lineBetween(0, top + 8, 0, top + DOOR_HEIGHT - 3);
+    this.gfx.lineStyle(2, WOOD_SHADOW, 0.95);
+    this.gfx.lineBetween(0, top + 8, 0, top + DOOR_HEIGHT - 3);
 
-    this.body.fillStyle(IRON_DARK, 0.95);
-    this.body.fillRect(left + 4, -6, DOOR_WIDTH - 8, 7);
-    this.body.fillRect(left + 4, top + DOOR_HEIGHT - 16, DOOR_WIDTH - 8, 7);
-    this.body.fillStyle(IRON_LIGHT, 0.75);
-    this.body.fillRect(left + 5, -5, DOOR_WIDTH - 10, 1);
-    this.body.fillRect(left + 5, top + DOOR_HEIGHT - 15, DOOR_WIDTH - 10, 1);
+    this.gfx.fillStyle(IRON_DARK, 0.95);
+    this.gfx.fillRect(left + 4, -6, DOOR_WIDTH - 8, 7);
+    this.gfx.fillRect(left + 4, top + DOOR_HEIGHT - 16, DOOR_WIDTH - 8, 7);
+    this.gfx.fillStyle(IRON_LIGHT, 0.75);
+    this.gfx.fillRect(left + 5, -5, DOOR_WIDTH - 10, 1);
+    this.gfx.fillRect(left + 5, top + DOOR_HEIGHT - 15, DOOR_WIDTH - 10, 1);
 
-    this.body.lineStyle(2, IRON_DARK, 0.95);
-    this.body.lineBetween(left + 6, top + 9, left + 18, top + 26);
-    this.body.lineBetween(left + 34, top + 9, left + 22, top + 26);
+    this.gfx.lineStyle(2, IRON_DARK, 0.95);
+    this.gfx.lineBetween(left + 6, top + 9, left + 18, top + 26);
+    this.gfx.lineBetween(left + 34, top + 9, left + 22, top + 26);
 
     this.drawStud(left + 8, -3);
     this.drawStud(left + DOOR_WIDTH - 8, -3);
@@ -136,30 +136,30 @@ export class Door extends Phaser.GameObjects.Container {
     this.drawWoodPanel(left - 9, top + 9, 14, DOOR_HEIGHT - 14, true);
     this.drawWoodPanel(left + DOOR_WIDTH - 5, top + 9, 14, DOOR_HEIGHT - 14, true);
 
-    this.body.fillStyle(OPENING, 0.95);
-    this.body.fillRect(left + 9, top + 8, DOOR_WIDTH - 18, DOOR_HEIGHT - 10);
-    this.body.lineStyle(1, WOOD_LIGHT, 0.35);
-    this.body.lineBetween(left + 9, top + 8, left + 9, top + DOOR_HEIGHT - 4);
-    this.body.lineBetween(
+    this.gfx.fillStyle(OPENING, 0.95);
+    this.gfx.fillRect(left + 9, top + 8, DOOR_WIDTH - 18, DOOR_HEIGHT - 10);
+    this.gfx.lineStyle(1, WOOD_LIGHT, 0.35);
+    this.gfx.lineBetween(left + 9, top + 8, left + 9, top + DOOR_HEIGHT - 4);
+    this.gfx.lineBetween(
       left + DOOR_WIDTH - 9,
       top + 8,
       left + DOOR_WIDTH - 9,
       top + DOOR_HEIGHT - 4,
     );
 
-    this.body.fillStyle(IRON_DARK, 0.95);
-    this.body.fillRect(left - 7, -4, 13, 7);
-    this.body.fillRect(left + DOOR_WIDTH - 6, -4, 13, 7);
-    this.body.fillRect(left - 7, top + DOOR_HEIGHT - 15, 13, 6);
-    this.body.fillRect(left + DOOR_WIDTH - 6, top + DOOR_HEIGHT - 15, 13, 6);
+    this.gfx.fillStyle(IRON_DARK, 0.95);
+    this.gfx.fillRect(left - 7, -4, 13, 7);
+    this.gfx.fillRect(left + DOOR_WIDTH - 6, -4, 13, 7);
+    this.gfx.fillRect(left - 7, top + DOOR_HEIGHT - 15, 13, 6);
+    this.gfx.fillRect(left + DOOR_WIDTH - 6, top + DOOR_HEIGHT - 15, 13, 6);
 
-    this.body.lineStyle(2, WOOD_LIGHT, 0.8);
-    this.body.lineBetween(left + 11, top + 9, left + 4, top + 21);
-    this.body.lineBetween(left + DOOR_WIDTH - 11, top + 9, left + DOOR_WIDTH - 4, top + 21);
+    this.gfx.lineStyle(2, WOOD_LIGHT, 0.8);
+    this.gfx.lineBetween(left + 11, top + 9, left + 4, top + 21);
+    this.gfx.lineBetween(left + DOOR_WIDTH - 11, top + 9, left + DOOR_WIDTH - 4, top + 21);
 
-    this.body.lineStyle(2, WOOD_LIGHT, 0.5);
-    this.body.lineBetween(left + 11, top + DOOR_HEIGHT - 9, left + 4, top + DOOR_HEIGHT - 21);
-    this.body.lineBetween(
+    this.gfx.lineStyle(2, WOOD_LIGHT, 0.5);
+    this.gfx.lineBetween(left + 11, top + DOOR_HEIGHT - 9, left + 4, top + DOOR_HEIGHT - 21);
+    this.gfx.lineBetween(
       left + DOOR_WIDTH - 11,
       top + DOOR_HEIGHT - 9,
       left + DOOR_WIDTH - 4,
@@ -182,30 +182,30 @@ export class Door extends Phaser.GameObjects.Container {
     const plankCount = narrow ? 2 : 3;
     const plankWidth = width / plankCount;
 
-    this.body.fillStyle(WOOD_MID, 1);
-    this.body.fillRect(x, y, width, height);
-    this.body.lineStyle(2, WOOD_SHADOW, 0.9);
-    this.body.strokeRect(x, y, width, height);
+    this.gfx.fillStyle(WOOD_MID, 1);
+    this.gfx.fillRect(x, y, width, height);
+    this.gfx.lineStyle(2, WOOD_SHADOW, 0.9);
+    this.gfx.strokeRect(x, y, width, height);
 
     for (let i = 1; i < plankCount; i++) {
       const seamX = x + Math.floor(plankWidth * i);
-      this.body.lineStyle(1, WOOD_SHADOW, 0.75);
-      this.body.lineBetween(seamX, y + 2, seamX, y + height - 2);
+      this.gfx.lineStyle(1, WOOD_SHADOW, 0.75);
+      this.gfx.lineBetween(seamX, y + 2, seamX, y + height - 2);
     }
 
-    this.body.lineStyle(1, WOOD_LIGHT, 0.45);
-    this.body.lineBetween(x + 3, y + 3, x + 3, y + height - 4);
-    this.body.lineBetween(x + width - 4, y + 4, x + width - 4, y + height - 3);
+    this.gfx.lineStyle(1, WOOD_LIGHT, 0.45);
+    this.gfx.lineBetween(x + 3, y + 3, x + 3, y + height - 4);
+    this.gfx.lineBetween(x + width - 4, y + 4, x + width - 4, y + height - 3);
 
-    this.body.lineStyle(1, WOOD_GRAIN, 0.5);
-    this.body.lineBetween(x + 5, y + 10, x + width - 5, y + 13);
-    this.body.lineBetween(x + 4, y + height - 16, x + width - 6, y + height - 19);
+    this.gfx.lineStyle(1, WOOD_GRAIN, 0.5);
+    this.gfx.lineBetween(x + 5, y + 10, x + width - 5, y + 13);
+    this.gfx.lineBetween(x + 4, y + height - 16, x + width - 6, y + height - 19);
   }
 
   private drawStud(x: number, y: number): void {
-    this.body.fillStyle(IRON_LIGHT, 1);
-    this.body.fillCircle(x, y, 2);
-    this.body.lineStyle(1, IRON_DARK, 0.9);
-    this.body.strokeCircle(x, y, 2);
+    this.gfx.fillStyle(IRON_LIGHT, 1);
+    this.gfx.fillCircle(x, y, 2);
+    this.gfx.lineStyle(1, IRON_DARK, 0.9);
+    this.gfx.strokeCircle(x, y, 2);
   }
 }

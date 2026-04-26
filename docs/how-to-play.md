@@ -35,9 +35,9 @@ Each weapon has its own cooldown between shots, and there's a brief cooldown whe
 | -------- | --------------------------------------------------- |
 | Grunt    | Baseline zombie. Patrols until you're close.        |
 | Runner   | Fast and frail. Closes the gap quickly.             |
-| Tank     | Slow, tough, armored.                               |
+| Tank     | Slow and tough.                                     |
 | Kamikaze | Rushes you and explodes on contact. Keep your distance. |
-| Boss     | Room 11 only. Armored. Finish it to finish the run. |
+| Boss     | Room 11 only. Finish it to finish the run.          |
 
 Enemies only chase you once you're inside their aggro range — you can sometimes walk past them or pick off patrols before they react.
 

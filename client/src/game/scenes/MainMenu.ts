@@ -18,7 +18,6 @@ import {
   FONT_SIZE_CAPTION,
   FONT_SIZE_SMALL,
   MID_BLUE,
-  MIDNIGHT,
   SUCCESS,
   TEXT_MUTED,
   TEXT_PRIMARY,
@@ -46,16 +45,16 @@ const SPONSORS: ReadonlyArray<SponsorSpec> = [
     imageSrc: "assets/htx_logo.png",
   },
   {
-    label: "OtterSec",
-    placeholder: "◉",
-    url: "https://osec.io/",
-    imageSrc: "assets/ottersec_logo.png",
-  },
-  {
     label: "Niklaus",
     placeholder: "N",
     url: "",
     imageSrc: "assets/niklas_logo.png",
+  },
+  {
+    label: "OtterSec",
+    placeholder: "◉",
+    url: "https://osec.io/",
+    imageSrc: "assets/ottersec_logo.png",
   },
 ];
 
@@ -270,12 +269,12 @@ export class MainMenu extends Phaser.Scene {
     h: number,
     sponsor: SponsorSpec,
   ): void {
-    // White card fill. Phaser-rendered raster logos look blocky when
-    // downscaled heavily (no mipmaps on NPOT textures), so the logo itself
-    // is an HTML <img> overlaid on the canvas — browsers do high-quality
-    // resampling natively. Mirrors the approach used for the login inputs.
+    // Transparent card — only the MID_BLUE stroke defines each slot;
+    // the parent DEEP_NAVY panel shows through. Logos are HTML <img>
+    // overlays for high-quality browser downscaling that Phaser's NPOT
+    // textures don't provide.
     this.add
-      .rectangle(x, y, w, h, 0xffffff, 1)
+      .rectangle(x, y, w, h, 0, 0)
       .setStrokeStyle(1, MID_BLUE)
       .setOrigin(0, 0);
 
@@ -286,7 +285,7 @@ export class MainMenu extends Phaser.Scene {
         .text(x + w / 2, y + h / 2, sponsor.placeholder, {
           fontFamily: FONT_FAMILY,
           fontSize: "24px",
-          color: hex(MIDNIGHT),
+          color: hex(TEXT_PRIMARY),
         })
         .setOrigin(0.5);
     }
