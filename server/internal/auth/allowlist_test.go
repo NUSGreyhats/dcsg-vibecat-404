@@ -54,7 +54,7 @@ func TestRefreshOnMissPicksUpFreshAdmit(t *testing.T) {
 	writeAllowlist(t, path, "old-admit")
 
 	a := NewAllowlist(path)
-	a.ttl = time.Hour // force the cache to be stale relative to wall-clock
+	a.ttl = time.Hour // keep the cache warm so the file rewrite won't be picked up via normal TTL expiry
 
 	// Warm the cache.
 	if !a.Has("old-admit") {

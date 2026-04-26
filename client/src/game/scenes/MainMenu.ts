@@ -562,12 +562,13 @@ export class MainMenu extends Phaser.Scene {
 
       // Queue gate (Phase 5). When the lobby has QUEUE_ENABLED=true the
       // game server enforces AUTH_MODE=token, so we must be admitted
-      // before the WS auth will pass. waitForQueueAdmission returns
-      // immediately when the queue is disabled (503) or we've already
-      // been admitted; otherwise it polls and updates statusText until
-      // we reach the front of the line.
+      // before the WS auth will pass. waitForQueueAdmission resolves
+      // with `true` when the player went through the queue (waited
+      // and was admitted, or admitted on first try) and `false` when
+      // the queue is disabled in this deployment.
+      let viaQueue: boolean;
       try {
-        await this.waitForQueueAdmission(body.player_id, password);
+        viaQueue = await this.waitForQueueAdmission(body.player_id, password);
       } catch (err) {
         console.error("[MainMenu] queue: failed", err);
         this.statusText?.setText(
@@ -576,6 +577,22 @@ export class MainMenu extends Phaser.Scene {
         this.statusText?.setColor(hex(ERROR));
         this.submitting = false;
         return;
+      }
+
+      // Speedrun fairness: when the player went through the queue,
+      // make them explicitly start the run. Auto-starting after a
+      // multi-minute wait would mean the timer began the instant
+      // the queue popped them, which is unfair if they walked away
+      // from the keyboard. Skipped when the queue is off (dev), since
+      // the player just clicked Log In moments ago.
+      if (viaQueue) {
+        const ready = await this.showReadyPrompt();
+        if (!ready) {
+          this.statusText?.setText("Forfeit — didn't start in time. Log in again to re-queue.");
+          this.statusText?.setColor(hex(ERROR));
+          this.submitting = false;
+          return;
+        }
       }
 
       this.statusText?.setText("Authenticating...");
@@ -594,8 +611,12 @@ export class MainMenu extends Phaser.Scene {
 
   /**
    * Polls /api/queue/status until the player has been admitted, or
-   * resolves immediately if the queue is disabled (503) or the join
-   * response says admitted=true.
+   * resolves immediately if the queue is disabled (503).
+   *
+   * Resolves to `true` when the player went through the queue (waited
+   * and was admitted, or admitted on first try); resolves to `false`
+   * when the queue is disabled in this deployment so the caller can
+   * skip the ready-prompt step.
    *
    * On position > 0 the method updates statusText to show line
    * position + estimated wait. Aborts only on a hard error (network
@@ -605,7 +626,7 @@ export class MainMenu extends Phaser.Scene {
   private async waitForQueueAdmission(
     playerId: string,
     password: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     let res: Response;
     try {
       res = await fetch("/api/queue/join", {
@@ -618,7 +639,7 @@ export class MainMenu extends Phaser.Scene {
     }
     if (res.status === 503) {
       // Queue feature off — proceed straight to WS auth.
-      return;
+      return false;
     }
     if (res.status === 409) {
       // Already in queue from a previous tab/session. Treat as queued
@@ -635,7 +656,7 @@ export class MainMenu extends Phaser.Scene {
         est_wait_ms: number;
         admitted: boolean;
       };
-      if (body.admitted) return;
+      if (body.admitted) return true;
       this.renderQueueStatus(body.position, body.est_wait_ms);
     }
 
@@ -663,8 +684,9 @@ export class MainMenu extends Phaser.Scene {
       if (!statusRes.ok) {
         // 503 mid-poll: queue disabled while we were waiting (admin
         // intervention?). Just proceed to auth — game server will
-        // accept us if AUTH_MODE relaxed.
-        if (statusRes.status === 503) return;
+        // accept us if AUTH_MODE relaxed. Treat as "not via queue"
+        // so the ready-prompt is skipped.
+        if (statusRes.status === 503) return false;
         continue;
       }
       const status = (await statusRes.json()) as {
@@ -672,17 +694,134 @@ export class MainMenu extends Phaser.Scene {
         est_wait_ms: number;
         admitted: boolean;
       };
-      if (status.admitted) return;
+      if (status.admitted) return true;
       this.renderQueueStatus(status.position, status.est_wait_ms);
     }
   }
 
   private renderQueueStatus(position: number, estWaitMs: number): void {
     const minutes = Math.max(0, Math.round(estWaitMs / 60_000));
-    const ord = position === 1 ? "1st" : position === 2 ? "2nd" : position === 3 ? "3rd" : `${position}th`;
     const wait = minutes <= 1 ? "<1 min" : `~${minutes} min`;
-    this.statusText?.setText(`In queue: ${ord} in line · ${wait} wait`);
+    this.statusText?.setText(
+      `In queue: ${this.formatOrdinal(position)} in line · ${wait} wait`,
+    );
     this.statusText?.setColor(hex(WARNING));
+  }
+
+  /**
+   * formatOrdinal turns a positive integer into its English ordinal
+   * (1 → "1st", 22 → "22nd", 113 → "113th"). The 11/12/13 exceptions
+   * are special-cased; everything else looks at the last digit.
+   */
+  private formatOrdinal(n: number): string {
+    const mod100 = n % 100;
+    if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+    switch (n % 10) {
+      case 1:
+        return `${n}st`;
+      case 2:
+        return `${n}nd`;
+      case 3:
+        return `${n}rd`;
+      default:
+        return `${n}th`;
+    }
+  }
+
+  /**
+   * showReadyPrompt mounts a fullscreen overlay with a START button
+   * and a 50 s countdown after a queue admission, so the speedrun
+   * timer never starts without an explicit player action. Resolves
+   * with `true` on click / Enter / Space, `false` on countdown
+   * expiry. The 50 s window leaves ~10 s of margin against the
+   * lobby's 60 s StartGrace AFK eviction.
+   */
+  private async showReadyPrompt(): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const overlay = document.createElement("div");
+      Object.assign(overlay.style, {
+        position: "fixed",
+        inset: "0",
+        background: "rgba(13, 18, 34, 0.92)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: "9999",
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        color: "#f5f0e6",
+      });
+
+      const title = document.createElement("div");
+      title.textContent = "YOU'RE UP";
+      Object.assign(title.style, {
+        fontSize: "64px",
+        letterSpacing: "8px",
+        color: "#ffdd33",
+        marginBottom: "16px",
+      });
+
+      const sub = document.createElement("div");
+      sub.textContent = "Click START or press SPACE / ENTER when ready.";
+      Object.assign(sub.style, {
+        fontSize: "16px",
+        color: "#8a8679",
+        marginBottom: "32px",
+      });
+
+      const btn = document.createElement("button");
+      btn.textContent = "START";
+      Object.assign(btn.style, {
+        fontSize: "24px",
+        padding: "16px 48px",
+        background: "transparent",
+        color: "#ffdd33",
+        border: "2px solid #ffdd33",
+        cursor: "pointer",
+        fontFamily: "inherit",
+        letterSpacing: "8px",
+        fontWeight: "bold",
+      });
+
+      const countdown = document.createElement("div");
+      Object.assign(countdown.style, {
+        marginTop: "32px",
+        color: "#8a8679",
+        fontSize: "13px",
+      });
+
+      overlay.append(title, sub, btn, countdown);
+      document.body.appendChild(overlay);
+
+      // Client gives 50 s; lobby's StartGrace is 60 s. The 10 s
+      // margin covers polling lag (the player may not learn they're
+      // admitted until up to 2 s after the lobby tick) plus the
+      // few-hundred-ms WS auth + start_run round trip that gets
+      // them into /internal/live-games and stops the AFK timer.
+      const graceMs = 50_000;
+      const startedAt = Date.now();
+      let interval: number | undefined;
+      const cleanup = (val: boolean) => {
+        if (interval !== undefined) window.clearInterval(interval);
+        window.removeEventListener("keydown", onKey);
+        overlay.remove();
+        resolve(val);
+      };
+      const onKey = (ev: KeyboardEvent) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          cleanup(true);
+        }
+      };
+      window.addEventListener("keydown", onKey);
+      btn.addEventListener("click", () => cleanup(true));
+      interval = window.setInterval(() => {
+        const remaining = Math.max(0, graceMs - (Date.now() - startedAt));
+        countdown.textContent = `Auto-forfeit in ${Math.ceil(remaining / 1000)}s`;
+        if (remaining <= 0) cleanup(false);
+      }, 250);
+      btn.focus();
+    });
   }
 
   private onAuthOk(_displayName: string): void {

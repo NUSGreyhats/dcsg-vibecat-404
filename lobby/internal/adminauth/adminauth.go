@@ -3,10 +3,11 @@
 // § Admin auth (Telegram OTP).
 //
 // Flow at a glance:
-//  1. POST /admin/login → server creates a session_id (32 bytes hex)
-//     + 6-digit OTP, persists (session_id, sha256(session_id||otp),
-//     expires_at, 0 attempts) to pending_admin_logins, sets
-//     admin_login cookie, sends OTP to Telegram chat.
+//  1. POST /admin/login → server creates a session_id (16 random bytes
+//     encoded as 32 hex characters) + 6-digit OTP, persists
+//     (session_id, sha256(session_id||otp), expires_at, 0 attempts) to
+//     pending_admin_logins, sets admin_login cookie, sends OTP to
+//     Telegram chat.
 //  2. POST /admin/verify (cookie carries session_id, body carries
 //     otp) → row consumed, admin_session HMAC cookie set, redirect
 //     to /admin/.
@@ -19,6 +20,7 @@
 package adminauth
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -32,6 +34,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -98,6 +101,17 @@ const (
 // ErrDisabled is returned by hot-path methods when the gate is
 // configured off (no bot token / chat). Callers should answer 503.
 var ErrDisabled = errors.New("adminauth: disabled")
+
+// ErrAuthFailed wraps every "this OTP attempt is bad" outcome from
+// verifyOTP — wrong code, expired, locked out, no pending row. It
+// lets HandleVerify distinguish these (→ 401 with a clean message
+// stripped of the sentinel prefix) from DB / commit errors (→ 500),
+// so an infrastructure failure can't be confused with a credential
+// rejection.
+var ErrAuthFailed = errors.New("auth failed")
+
+// authFailed wraps a clean message into an ErrAuthFailed error.
+func authFailed(msg string) error { return fmt.Errorf("%w: %s", ErrAuthFailed, msg) }
 
 // New constructs a Service. Returns an error only on programmer
 // mistakes (empty session secret with non-empty bot token, etc.); a
@@ -214,13 +228,19 @@ func (s *Service) issueOTP(ctx context.Context) (sessionID, otp string, err erro
 // successful match the row is deleted (one-shot). On too many
 // attempts or expiry the row is also deleted so retry forces a new
 // /admin/login.
+//
+// Returns ErrAuthFailed-wrapped errors for credential rejections;
+// any other error is a DB / commit failure and the caller should
+// surface 500. We never send a 401 on commit failure because that
+// would let the user retry the same OTP (the row hasn't been
+// consumed) under the impression they got the code wrong.
 func (s *Service) verifyOTP(ctx context.Context, sessionID, otp string) error {
 	if sessionID == "" || otp == "" {
-		return errors.New("missing session or otp")
+		return authFailed("missing session or otp")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("begin: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -235,20 +255,28 @@ func (s *Service) verifyOTP(ctx context.Context, sessionID, otp string) error {
 	).Scan(&hash, &expires, &attempts)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("no pending login")
+			return authFailed("no pending login")
 		}
 		return fmt.Errorf("lookup: %w", err)
 	}
 	now := s.now()
 	if now.Unix() >= expires {
-		_, _ = tx.ExecContext(ctx, `DELETE FROM pending_admin_logins WHERE session_id = ?`, sessionID)
-		_ = tx.Commit()
-		return errors.New("otp expired")
+		if _, err := tx.ExecContext(ctx, `DELETE FROM pending_admin_logins WHERE session_id = ?`, sessionID); err != nil {
+			return fmt.Errorf("expire delete: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("expire commit: %w", err)
+		}
+		return authFailed("otp expired")
 	}
 	if attempts >= otpMaxAttempts {
-		_, _ = tx.ExecContext(ctx, `DELETE FROM pending_admin_logins WHERE session_id = ?`, sessionID)
-		_ = tx.Commit()
-		return errors.New("too many attempts")
+		if _, err := tx.ExecContext(ctx, `DELETE FROM pending_admin_logins WHERE session_id = ?`, sessionID); err != nil {
+			return fmt.Errorf("lockout delete: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("lockout commit: %w", err)
+		}
+		return authFailed("too many attempts")
 	}
 	got := otpHash(sessionID, otp)
 	if subtle.ConstantTimeCompare(hash, got) != 1 {
@@ -258,14 +286,17 @@ func (s *Service) verifyOTP(ctx context.Context, sessionID, otp string) error {
 			return fmt.Errorf("bump attempts: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
-			return err
+			return fmt.Errorf("bump commit: %w", err)
 		}
-		return errors.New("invalid otp")
+		return authFailed("invalid otp")
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM pending_admin_logins WHERE session_id = ?`, sessionID); err != nil {
 		return fmt.Errorf("consume: %w", err)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("consume commit: %w", err)
+	}
+	return nil
 }
 
 func otpHash(sessionID, otp string) []byte {
@@ -290,7 +321,7 @@ func (s *Service) sendTelegram(ctx context.Context, text string) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -413,11 +444,13 @@ func (s *Service) HandleVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	otp := strings.TrimSpace(r.FormValue("otp"))
 	if otp == "" {
-		// Fall back to JSON body for fetch() callers.
+		// Fall back to JSON body for fetch() callers. 1 KiB cap is
+		// well above any real {"otp":"123456"} payload (~16 bytes)
+		// and stops a long body from chewing memory.
 		var body struct {
 			OTP string `json:"otp"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body)
 		otp = strings.TrimSpace(body.OTP)
 	}
 	if otp == "" {
@@ -425,7 +458,15 @@ func (s *Service) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.verifyOTP(r.Context(), c.Value, otp); err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		if errors.Is(err, ErrAuthFailed) {
+			// Strip the "auth failed: " prefix so the caller sees a
+			// clean message in the body.
+			msg := strings.TrimPrefix(err.Error(), ErrAuthFailed.Error()+": ")
+			http.Error(w, msg, http.StatusUnauthorized)
+			return
+		}
+		log.Printf("adminauth: verify: %v", err)
+		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
 	exp := s.now().Add(SessionTTL)
@@ -479,8 +520,9 @@ func randomHex(n int) (string, error) {
 
 // randomDigits returns n cryptographically-random decimal digits as a
 // string. Each digit is sampled uniformly from 0..9 by rejection of
-// the upper bias band of a uint8 (240..255), which keeps the
-// distribution unbiased without leaking via length.
+// the upper bias band of a uint8 (250..255 — 250 is the largest
+// multiple of 10 ≤ 256, so anything ≥ 250 is rejected to keep the
+// distribution unbiased without leaking via length).
 func randomDigits(n int) (string, error) {
 	out := make([]byte, n)
 	buf := make([]byte, 1)
@@ -488,7 +530,7 @@ func randomDigits(n int) (string, error) {
 		if _, err := rand.Read(buf); err != nil {
 			return "", err
 		}
-		if buf[0] >= 250 { // 250..255 — reject; 250/256 = ~2.3% rate
+		if buf[0] >= 250 { // 250..255 — reject; 6/256 = ~2.3% rate
 			continue
 		}
 		out[i] = '0' + (buf[0] % 10)
@@ -497,7 +539,20 @@ func randomDigits(n int) (string, error) {
 	return string(out), nil
 }
 
+// clientIP returns the originating client IP, honouring X-Forwarded-For
+// only when the immediate peer is private (loopback or RFC1918) — i.e.
+// a trusted reverse proxy. From the public internet, XFF is attacker-
+// controlled and would let a single client trivially bypass the
+// per-IP rate limit by rotating the header. Mirrors the gating used in
+// server/cmd/server/main.go:isPrivatePeer.
 func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if !isPrivatePeer(host) {
+		return host
+	}
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		// First entry is the originating client per RFC 7239.
 		if comma := strings.IndexByte(xff, ','); comma >= 0 {
@@ -505,11 +560,17 @@ func clientIP(r *http.Request) string {
 		}
 		return strings.TrimSpace(xff)
 	}
-	host := r.RemoteAddr
-	if colon := strings.LastIndexByte(host, ':'); colon >= 0 {
-		host = host[:colon]
-	}
 	return host
+}
+
+// isPrivatePeer reports whether host is a loopback or RFC1918 address.
+// Anything else is "public" and we don't trust its X-Forwarded-For.
+func isPrivatePeer(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 // ----- rate limiter ------------------------------------------------------

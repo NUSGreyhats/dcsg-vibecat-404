@@ -39,12 +39,12 @@ The admin panel is gated by a one-time-code flow that delivers the code through 
 | ------------------------- | ------------------------------------------------------------------------ |
 | `TELEGRAM_BOT_TOKEN`      | Bot token from `@BotFather`. Empty → admin disabled (503).               |
 | `TELEGRAM_ADMIN_CHAT_ID`  | Numeric chat ID where OTPs are sent. Group or single user.               |
-| `ADMIN_SESSION_SECRET`    | HMAC key for session cookies. ≥ 32 bytes, hex- or base64-encoded.        |
+| `ADMIN_SESSION_SECRET`    | HMAC key for session cookies. Used as raw bytes (no decoding); minimum length 16 bytes. Treat the env value as the literal key — pass random ASCII or a base64/hex string and it'll be HMAC'd as-is. |
 
 **Login flow:**
 
 1. `GET /admin/login` — public. Renders an HTML page with a "Send code to Telegram" button and (when the `admin_login` cookie is present) an OTP input field.
-2. `POST /admin/login` — generates a 6-digit code and a 32-byte `session_id`, stores `(session_id, sha256(session_id || otp), expires_at)` in `pending_admin_logins`, sets the `admin_login=<session_id>` cookie (HttpOnly, Secure, SameSite=Lax, 5-min Max-Age), and posts the code to the configured chat via `https://api.telegram.org/bot<token>/sendMessage`. Rate-limited 5/hour per IP.
+2. `POST /admin/login` — generates a 6-digit code and a `session_id` (16 random bytes encoded as 32 hex characters), stores `(session_id, sha256(session_id || otp), expires_at)` in `pending_admin_logins`, sets the `admin_login=<session_id>` cookie (HttpOnly, Secure, SameSite=Lax, 5-min Max-Age), and posts the code to the configured chat via `https://api.telegram.org/bot<token>/sendMessage`. Rate-limited to 5 requests per 15 minutes per source IP (X-Forwarded-For is honoured only when the immediate peer is private/loopback so an internet client can't spoof the header to bypass the cap).
 3. `POST /admin/verify` — reads the OTP from the form body and the `session_id` from the cookie, looks up the row, increments `attempts` (rejecting after 5), verifies the hashed OTP, and on success deletes the row and sets a fresh `admin_session=<exp>.<hmac>` cookie (HttpOnly, Secure, SameSite=Lax, 24 h Max-Age) before redirecting to `/admin/`.
 4. `GET /admin/logout` — clears `admin_session`.
 5. All other `/admin/*` requests pass through middleware that verifies the `admin_session` cookie's HMAC + expiry; failures redirect to `/admin/login`.
@@ -162,7 +162,7 @@ Spectators receive a near-identical packet stream to the player — enough to re
 
 - Package layout (target): `cmd/admin/`, `internal/queue/`, `internal/identity/`, `internal/admin/`, `web/`.
 - Queue storage: SQLite `lobby.db`, single `queue_entries` table: `(player_id, joined_at, position)`.
-- Notification to waiting clients: short polling. Clients hit `GET /api/queue/status/:player_id` every 2 s while waiting; when the response includes `admitted: true` the client opens the WS. Cadence matches the advancer tick so one extra poll is the worst-case latency between admission and connect.
+- Notification to waiting clients: short polling. Clients hit `GET /api/queue/status/:player_id` every 2 s while waiting; when the response includes `admitted: true` the client renders an explicit "YOU'RE UP — press START" overlay rather than auto-opening the WS. The speedrun timer must not start without an intentional player action: an admitted player who walked away from the keyboard would otherwise lose the run instantly. The overlay's 50 s client-side countdown leaves ~10 s of margin before the lobby's 60 s `StartGrace` AFK eviction; an unclicked overlay times out, the player isn't authed, and the next advancer tick reclaims the slot. Cadence matches the advancer tick so one extra poll is the worst-case latency between admission and the prompt.
 - `/internal/slot-status` and `/internal/live-games` are game-server endpoints the lobby polls; neither is exposed on the public interface (bind to loopback or require shared secret).
 - The live-games cache (2 s TTL) lives in the lobby process, not on disk. If the game server is down, `/api/live` returns `[]` rather than erroring.
 
