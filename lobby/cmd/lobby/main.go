@@ -2,8 +2,10 @@
 //
 // Phase 1 (#21) hosts identity HTTP serving. Phase 2 (#22) adds the public
 // leaderboard webapp + replay download. Phase 3 (#23) adds the spectator
-// selector and (later) the spectator viewer page. Later phases add source
-// serving, admin panel, and the FIFO queue.
+// selector and viewer page. Phase 4 (#24) adds source serving, the
+// admin panel, and moves replay download behind admin auth so input
+// logs aren't publicly mineable for the intentional bugs. Phase 5
+// adds the FIFO queue.
 //
 // Spec: docs/specs/foundations/04-lobby.md.
 package main
@@ -105,34 +107,6 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"entries": entries})
 	})
-	mux.HandleFunc("/api/replay/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		id := strings.TrimPrefix(r.URL.Path, "/api/replay/")
-		if id == "" || strings.Contains(id, "/") {
-			http.Error(w, "invalid replay id", http.StatusBadRequest)
-			return
-		}
-		replay, err := leaderboard.GetReplay(gameDB, id)
-		if err != nil {
-			if errors.Is(err, leaderboard.ErrNotFound) {
-				http.Error(w, "not found", http.StatusNotFound)
-				return
-			}
-			if errors.Is(err, leaderboard.ErrChecksumMismatch) {
-				log.Printf("leaderboard: replay %s: checksum mismatch", id)
-				http.Error(w, "replay integrity check failed", http.StatusInternalServerError)
-				return
-			}
-			log.Printf("leaderboard: replay %s: %v", id, err)
-			http.Error(w, "replay unavailable", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(replay)
-	})
 	mux.HandleFunc("/spectate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -177,6 +151,29 @@ func main() {
 			adminFlagHandler(w, r, gameDB, true)
 		case r.Method == http.MethodPost && r.URL.Path == "/admin/leaderboard/unflag":
 			adminFlagHandler(w, r, gameDB, false)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/admin/replay/"):
+			id := strings.TrimPrefix(r.URL.Path, "/admin/replay/")
+			if id == "" || strings.Contains(id, "/") {
+				http.Error(w, "invalid replay id", http.StatusBadRequest)
+				return
+			}
+			replay, err := leaderboard.GetReplay(gameDB, id)
+			if err != nil {
+				if errors.Is(err, leaderboard.ErrNotFound) {
+					http.Error(w, "not found", http.StatusNotFound)
+					return
+				}
+				if errors.Is(err, leaderboard.ErrChecksumMismatch) {
+					log.Printf("leaderboard: replay %s: checksum mismatch", id)
+					http.Error(w, "replay integrity check failed", http.StatusInternalServerError)
+					return
+				}
+				log.Printf("leaderboard: replay %s: %v", id, err)
+				http.Error(w, "replay unavailable", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(replay)
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/admin/leaderboard/"):
 			id := strings.TrimPrefix(r.URL.Path, "/admin/leaderboard/")
 			if id == "" || strings.Contains(id, "/") {

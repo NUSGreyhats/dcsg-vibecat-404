@@ -14,10 +14,12 @@
     }
 
     # Lobby owns identity endpoints (#21), the /register page, the public
-    # leaderboard webapp (#22), replay download, and the spectator
-    # selector page + live-games feed (#23). The /spectate/:player_id
-    # viewer page lands in Phase 3b alongside the spectator client bundle.
-    @lobby_api path /api/register /api/login /api/verify /api/health /api/leaderboard /api/replay/* /api/live
+    # leaderboard webapp (#22), and the spectator selector page +
+    # live-games feed (#23). Replay download moved under /admin/replay/
+    # (Phase 4) so only moderators can pull input logs. The
+    # /spectate/:player_id viewer page lands in Phase 3b alongside the
+    # spectator client bundle.
+    @lobby_api path /api/register /api/login /api/verify /api/health /api/leaderboard /api/live
     handle @lobby_api {
         reverse_proxy lobby:3001
     }

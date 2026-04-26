@@ -13,7 +13,6 @@ Separate service (Repo B) that manages FIFO turn-taking in production, serves th
 | `/api/queue/status/:player_id` | GET    | Current position                                        |
 | `/api/queue/:player_id`        | DELETE | `{ password }` — leave queue                            |
 | `/api/leaderboard`             | GET    | Rankings from `game.db`                                 |
-| `/api/replay/:replay_id`       | GET    | Replay data from `game.db`                              |
 | `/api/live`                    | GET    | JSON list of currently-playing games. See [Live spectating](#live-spectating). |
 | `/spectate`                    | GET    | HTML selector page: lists live games, links into viewer. |
 | `/spectate/:player_id`         | GET    | HTML viewer page that hosts the client in spectator mode. |
@@ -26,6 +25,7 @@ See [03-identity-auth.md](./03-identity-auth.md) for the registration / verifica
 
 - `/admin/queue` — reorder, kick, advance, pause.
 - `/admin/leaderboard` — flag, remove entries.
+- `/admin/replay/:replay_id` — download replay JSON (input log + seed). Moderators-only; not exposed publicly so input logs can't be data-mined for the intentional bugs.
 - `/admin/winners` — decrypt + export contact info.
 - `/admin/slot` — force-free slot, adjust `MAX_CONCURRENT`.
 

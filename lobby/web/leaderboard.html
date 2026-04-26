@@ -67,11 +67,7 @@
   }
   td.rank { color: var(--accent); width: 48px; }
   td.time { font-variant-numeric: tabular-nums; }
-  td.replay a {
-    color: var(--mid-blue);
-    text-decoration: none;
-  }
-  td.replay a:hover { color: var(--accent); }
+  td.attempted { color: var(--muted); font-variant-numeric: tabular-nums; }
   .empty {
     padding: 24px 8px;
     color: var(--muted);
@@ -103,8 +99,7 @@
         <th>#</th>
         <th>Name</th>
         <th>Time</th>
-        <th>Seed</th>
-        <th>Replay</th>
+        <th>Attempted</th>
       </tr>
     </thead>
     <tbody id="rows"></tbody>
@@ -126,6 +121,17 @@
     return m + ':' + String(s).padStart(2, '0') + '.' + String(cs).padStart(2, '0');
   }
 
+  // Seed is the run's start time in unix milliseconds (set by the
+  // game server when the run begins). Render it as the attempt
+  // timestamp so it's meaningful to a human reader.
+  function fmtAttempted(seed) {
+    const n = Number(seed);
+    if (!Number.isFinite(n) || n <= 0) return '—';
+    const d = new Date(n);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString();
+  }
+
   async function load() {
     try {
       const res = await fetch('/api/leaderboard?limit=50');
@@ -143,9 +149,7 @@
             '<td class="rank">' + e.rank + '</td>' +
             '<td>' + escape(e.display_name) + '</td>' +
             '<td class="time">' + fmtMs(e.total_ms) + '</td>' +
-            '<td>' + e.seed + '</td>' +
-            '<td class="replay"><a href="/api/replay/' + encodeURIComponent(e.replay_id) + '" download>' +
-              shortId(e.replay_id) + '</a></td>'
+            '<td class="attempted">' + escape(fmtAttempted(e.seed)) + '</td>'
           );
           rowsEl.appendChild(tr);
         }
@@ -162,10 +166,6 @@
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     })[c]);
   }
-  function shortId(id) {
-    return String(id).slice(0, 8);
-  }
-
   load();
   setInterval(load, 5000);
 </script>
