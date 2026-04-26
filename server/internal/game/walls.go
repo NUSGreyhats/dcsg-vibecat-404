@@ -132,10 +132,14 @@ type playerSpawn struct {
 var playerSpawns [12]playerSpawn
 
 // tilemapPickups holds Health/Ammo pickups authored as object-layer
-// markers in the room's Tiled JSON. Keyed by room index (1..11). Empty
-// slice = no tilemap-authored pickups; LoadRoom falls back to the
-// RoomTemplate.Pickups slice in that case.
+// markers in the room's Tiled JSON. Keyed by room index (1..11).
 var tilemapPickups [12][]PickupSpawnDef
+
+// tilemapEnemies holds initial enemy spawns authored as object-layer
+// markers in the room's Tiled JSON. Keyed by room index (1..11). The
+// slice is sorted ascending by EntityID before LoadRoom consumes it,
+// so RNG consumption order stays deterministic across replays.
+var tilemapEnemies [12][]EnemySpawnDef
 
 // init parses the embedded tilemaps at process start. A failure on
 // any room is fatal — the binary shouldn't boot with missing
@@ -157,6 +161,7 @@ func init() {
 		wallGrids[i] = parseWallGrid(uint8(i), &m)
 		playerSpawns[i] = parsePlayerSpawn(&m)
 		tilemapPickups[i] = parseTilemapPickups(uint8(i), &m)
+		tilemapEnemies[i] = parseTilemapEnemies(uint8(i), &m)
 	}
 }
 
@@ -224,13 +229,76 @@ func parseTilemapPickups(roomIndex uint8, m *tiledMap) []PickupSpawnDef {
 }
 
 // TilemapPickups returns the Health/Ammo pickups authored in the room's
-// Tiled JSON, or nil if the room has none (or no tilemap). Callers should
-// fall back to RoomTemplate.Pickups when this returns nil.
+// Tiled JSON, or nil if the room has none (or no tilemap).
 func TilemapPickups(roomIndex uint8) []PickupSpawnDef {
 	if int(roomIndex) >= len(tilemapPickups) {
 		return nil
 	}
 	return tilemapPickups[roomIndex]
+}
+
+// archetypeFromMarker maps a Tiled object's name/type to its enemy
+// archetype ID. Returns (0, false) when the marker isn't an enemy.
+// Both fields are checked so authors can use Tiled's `type` dropdown
+// or just rename the object — same lenient pattern as PlayerSpawn.
+func archetypeFromMarker(name, typ string) (uint8, bool) {
+	for _, s := range [2]string{typ, name} {
+		switch s {
+		case "Grunt":
+			return EnemyGrunt, true
+		case "Runner":
+			return EnemyRunner, true
+		case "Tank":
+			return EnemyTank, true
+		case "Kamikaze":
+			return EnemyKamikaze, true
+		case "Boss":
+			return EnemyBoss, true
+		}
+	}
+	return 0, false
+}
+
+// parseTilemapEnemies walks every objectgroup layer for point objects
+// whose `type` (or `name`) matches an enemy archetype and returns them
+// as EnemySpawnDef values. The position is the *base* spawn — RNG
+// jitter (±50 px) and wall snapping happen later in SpawnEnemy.
+//
+// EntityIDs are slot-based (`roomIndex*100 + slot`) starting at 1 so
+// they sit below the pickup band (50..89) and door band (91..99). The
+// slice is sorted ascending by EntityID by the caller — Tiled's object
+// iteration order determines slot, so re-ordering objects in Tiled
+// changes RNG consumption (and therefore replays of older runs).
+func parseTilemapEnemies(roomIndex uint8, m *tiledMap) []EnemySpawnDef {
+	var out []EnemySpawnDef
+	for _, L := range m.Layers {
+		if L.Type != "objectgroup" {
+			continue
+		}
+		for _, o := range L.Objects {
+			t, ok := archetypeFromMarker(o.Name, o.Type)
+			if !ok {
+				continue
+			}
+			id := uint32(roomIndex)*100 + uint32(len(out)+1)
+			out = append(out, EnemySpawnDef{
+				EntityID: id,
+				Type:     t,
+				X:        o.X,
+				Y:        o.Y,
+			})
+		}
+	}
+	return out
+}
+
+// TilemapEnemies returns the enemy spawns authored in the room's Tiled
+// JSON, or nil if the room has none.
+func TilemapEnemies(roomIndex uint8) []EnemySpawnDef {
+	if int(roomIndex) >= len(tilemapEnemies) {
+		return nil
+	}
+	return tilemapEnemies[roomIndex]
 }
 
 func parseWallGrid(roomIndex uint8, m *tiledMap) *wallGrid {

@@ -9,11 +9,13 @@ import (
 
 // RoomTemplate is the static definition of a room's contents, consumed by
 // LoadRoom to produce concrete RoomState + the protocol.RoomData shipped to
-// the client. Pickups are NOT part of the template — they're authored as
-// "Health" / "Ammo" point objects in the tilemap and parsed at startup.
+// the client. Initial enemies and pickups are NOT part of the template —
+// they're authored as object-layer markers in the tilemap (see
+// parseTilemapEnemies / parseTilemapPickups). Waves and doors stay in code
+// because they carry behaviour (trigger thresholds, target rooms) that
+// doesn't map cleanly to a Tiled object.
 type RoomTemplate struct {
 	TilemapID string
-	Enemies   []EnemySpawnDef
 	Waves     []WaveDef
 	Doors     []DoorDef
 }
@@ -123,10 +125,13 @@ func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, now time.Time) p
 	r.PendingWaves = r.PendingWaves[:0]
 	r.NextEnemyID = WaveEntityIDBase + uint32(r.RoomIndex)*WaveEntityIDStep
 
-	// Spawn enemies in ascending EntityID order to preserve the RNG
-	// consumption invariant.
-	ordered := make([]EnemySpawnDef, len(tmpl.Enemies))
-	copy(ordered, tmpl.Enemies)
+	// Initial enemies come from the tilemap's object layer (Grunt /
+	// Runner / Tank / Kamikaze / Boss point objects). Sort ascending by
+	// EntityID before SpawnEnemy so RNG consumption stays deterministic
+	// across replays.
+	src := TilemapEnemies(r.RoomIndex)
+	ordered := make([]EnemySpawnDef, len(src))
+	copy(ordered, src)
 	sortEnemySpawnsByID(ordered)
 
 	enemyOut := make([]protocol.EnemySpawn, 0, len(ordered))
