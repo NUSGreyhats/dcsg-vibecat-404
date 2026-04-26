@@ -127,8 +127,9 @@ type AuthOkData struct {
 }
 
 type RunStartedData struct {
-	Seed int64    `json:"seed"`
-	Room RoomData `json:"room"`
+	Seed        int64    `json:"seed"`
+	Room        RoomData `json:"room"`
+	DisplayName string   `json:"display_name,omitempty"`
 }
 
 type StateData struct {
