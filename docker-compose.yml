@@ -36,7 +36,7 @@ services:
       GAME_DB: "/data/game.db"
       # Admin panel credentials (Phase 4 #24). Empty values disable
       # the panel — set both in the deployment's secret store. The
-      # hash is bcrypt; see scripts/genhash.go (or `htpasswd -bnBC 10`).
+      # hash is bcrypt; generate one with `htpasswd -bnBC 10 USER PASSWORD`.
       ADMIN_USER: "${ADMIN_USER:-}"
       ADMIN_PASS_HASH: "${ADMIN_PASS_HASH:-}"
       # Stripped source baked into the lobby image as a single tarball

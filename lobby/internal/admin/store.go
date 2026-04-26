@@ -27,8 +27,12 @@ func Flag(db *sql.DB, replayID, reason string) error {
 	if replayID == "" {
 		return errors.New("admin: replay_id required")
 	}
+	// INSERT OR IGNORE keeps re-flagging a true no-op — the original
+	// flagged_at timestamp and reason are preserved, matching the
+	// docstring contract. INSERT OR REPLACE would delete+reinsert and
+	// silently overwrite both.
 	_, err := db.Exec(
-		`INSERT OR REPLACE INTO flagged_runs (replay_id, reason) VALUES (?, ?)`,
+		`INSERT OR IGNORE INTO flagged_runs (replay_id, reason) VALUES (?, ?)`,
 		replayID, reason,
 	)
 	return err

@@ -196,11 +196,14 @@ func main() {
 		}
 	})))
 
-	// /source — landing page that points at the tarball. /source.tar.gz
-	// streams the file built at image-build time by the strip stage in
-	// lobby/Dockerfile. Players download once and browse the tree
-	// locally; no per-file HTTP traversal, no index.html collisions
-	// with the stripped client/index.html, no surprise SPA rendering.
+	// /source.tar.gz streams the stripped tarball baked into the image
+	// at build time by the strip stage in lobby/Dockerfile (linked from
+	// the nav bar of /register, /leaderboard, /spectate, /admin/, so no
+	// dedicated landing page). Players download once and browse the
+	// tree locally; no per-file HTTP traversal, no index.html
+	// collisions with the stripped client/index.html, no surprise SPA
+	// rendering. SOURCE_TARBALL only needs to be set for ad-hoc
+	// testing — the default points at the baked path.
 	mux.HandleFunc("/source.tar.gz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

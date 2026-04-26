@@ -32,7 +32,7 @@ graph TD
         TEST_ENV[Deploy → test]
         BUNDLE[".tar.gz → GitHub Release"]
         PROD[Deploy → prod<br/>2-reviewer gate]
-        DOCS["Stripped source tarball<br/>→ lobby /data/stripped-source/"]
+        DOCS["Stripped source<br/>baked into lobby image<br/>at /app/stripped-source"]
     end
 
     PR --> LINT
@@ -108,9 +108,9 @@ One public webapp for players (queue, leaderboard, source browser) — no separa
 
 ### Do-not-leak rules
 
-- Only `stripped-source.tar.gz` enters `/data/stripped-source/`. Never mount the raw repo into the volume.
-- The strip tool's allowlist (the "What is published" section above) is the canonical source of truth — paths outside it never enter the tarball, even if they happen to land in `/data/stripped-source/` by mistake.
-- Lobby's source handler is static file serving only — no directory traversal outside `/data/stripped-source/` (relies on `http.Dir`).
+- Only the strip stage in `lobby/Dockerfile` writes into `/app/stripped-source` (and packages it to `/app/source.tar.gz`). Never mount the raw repo or any host path into that location at runtime.
+- The strip tool's allowlist (the "What is published" section above) is the canonical source of truth — paths outside it never enter the baked tree, even if they happen to land in `/app/stripped-source/` by mistake.
+- Lobby's source handler streams a single pre-built `source.tar.gz` via `http.ServeFile` — no directory FileServer, no per-file traversal, no chance of serving anything outside the baked archive.
 - Lobby must not serve its **own** source or any file from outside the stripped tree.
 
 **Note on build tag stripping:** the stripping tool also removes the `//go:build !norace` line from the published source — otherwise it would be a direct hint about the kill-log file. Stripped source must compile on its own but with the race intact.

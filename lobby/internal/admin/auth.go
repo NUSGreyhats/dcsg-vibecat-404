@@ -14,6 +14,15 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// dummyHash is a valid bcrypt hash used when the username is wrong, so
+// the response time on bad-username matches bad-password (~one bcrypt
+// compare). Otherwise an attacker can probe usernames by timing the
+// response — a known username takes ~70 ms (bcrypt cost 10), an
+// unknown one returns in microseconds. The plaintext doesn't matter;
+// the goal is just to make CompareHashAndPassword do the same work.
+// (This is the well-known test vector for "password" at cost 10.)
+var dummyHash = []byte("$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy")
+
 // Auth is a Basic-auth gate. User is the expected admin username;
 // PassHash is the bcrypt hash of the expected password. Both must be
 // non-empty for the gate to authorize anything — an unset User makes
@@ -37,13 +46,22 @@ func (a *Auth) Wrap(next http.Handler) http.Handler {
 			a.challenge(w)
 			return
 		}
-		// Constant-time compare on the username so a probe can't
-		// time-distinguish "user is admin" from "user is wrong".
-		if subtle.ConstantTimeCompare([]byte(user), []byte(a.User)) != 1 {
-			a.challenge(w)
-			return
+		// Constant-time compare on the username, then ALWAYS run a
+		// bcrypt compare — against the real hash if the username
+		// matched, against a dummy hash if it didn't. Without the
+		// dummy compare, "wrong username" returns in microseconds
+		// while "right username, wrong password" takes ~one bcrypt
+		// (~70 ms at cost 10), letting an attacker enumerate
+		// usernames purely by timing. We fold both checks into a
+		// single authorize bool so an early return can't reintroduce
+		// the side channel.
+		userOK := subtle.ConstantTimeCompare([]byte(user), []byte(a.User)) == 1
+		hash := a.PassHash
+		if !userOK {
+			hash = dummyHash
 		}
-		if err := bcrypt.CompareHashAndPassword(a.PassHash, []byte(pass)); err != nil {
+		passOK := bcrypt.CompareHashAndPassword(hash, []byte(pass)) == nil
+		if !userOK || !passOK {
 			a.challenge(w)
 			return
 		}

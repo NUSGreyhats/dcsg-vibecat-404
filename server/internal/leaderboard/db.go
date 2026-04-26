@@ -16,6 +16,10 @@ import (
 // WAL mode + a 5 s busy timeout let the lobby's read-only connection
 // (lobby/internal/leaderboard) co-exist with the game server's writer
 // goroutine without lock contention.
+//
+// flagged_runs is created here as well so TopRuns' LEFT JOIN works on a
+// fresh DB regardless of which service starts first. Lobby's
+// admin.EnsureSchema produces identical DDL — last writer wins.
 func OpenDB(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
@@ -35,6 +39,11 @@ func OpenDB(path string) (*sql.DB, error) {
         );
         CREATE INDEX IF NOT EXISTS idx_runs_total_ms ON completed_runs(total_ms);
         CREATE INDEX IF NOT EXISTS idx_runs_player   ON completed_runs(player_id);
+        CREATE TABLE IF NOT EXISTS flagged_runs (
+            replay_id  TEXT PRIMARY KEY,
+            flagged_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            reason     TEXT NOT NULL DEFAULT ''
+        );
     `); err != nil {
 		db.Close()
 		return nil, err
