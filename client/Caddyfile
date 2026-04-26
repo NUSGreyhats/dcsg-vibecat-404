@@ -7,8 +7,10 @@
     encode gzip
 
     # Game-server WebSockets: /ws is the player path, /ws/spectate is the
-    # read-only viewer path (spectator fan-out lives in the gameLoop).
-    @ws path /ws /ws/spectate
+    # read-only viewer path (spectator fan-out lives in the gameLoop),
+    # /ws/replay is the admin-gated replay viewer (ticket-validated by
+    # the game server using the shared ADMIN_SESSION_SECRET).
+    @ws path /ws /ws/spectate /ws/replay
     handle @ws {
         reverse_proxy game-server:8080
     }
@@ -34,6 +36,20 @@
     @source path /source.tar.gz
     handle @source {
         reverse_proxy lobby:3001
+    }
+
+    # Replay viewer host page (admin-gated by the bundle's data-layer
+    # fetches, not by Caddy — the HTML itself is harmless and contains
+    # no replay-specific data; the bundle redirects to /admin/login on
+    # 401 from /admin/replay/:id/meta). Single non-empty path-segment
+    # matcher so a deep request like /admin/replay/abc/view/assets/x.js
+    # falls through to the static file_server. Must come BEFORE the
+    # @admin matcher or the reverse-proxy would catch it first.
+    @replay_viewer path_regexp ^/admin/replay/[^/]+/view/?$
+    handle @replay_viewer {
+        rewrite * /replay.html
+        root * /srv
+        file_server
     }
 
     # Admin panel (Phase 4 #24). Auth-protected by Basic auth at the lobby.

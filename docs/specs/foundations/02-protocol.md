@@ -45,8 +45,11 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 | 0x07 | `C2S_ENTER_DOOR`    | `{ door_id: uint32 }`                               |
 | 0x08 | `C2S_USE_ITEM`      | `{ item_name: string }`                             |
 | 0x09 | `C2S_SHOP_PURCHASE` | `{ item_id: uint8 }`                                |
+| 0x0A | `C2S_REPLAY_CONTROL`| `{ action: "play"\|"pause"\|"set_speed"\|"restart", speed?: float }` |
 
 `claimed_type` on `C2S_INTERACT` is the pickup type the *client* says it's interacting with. The server does **not** validate `claimed_type == pk.Type` — see [../features/shop.md#bug-12-pickup-type-confusion](../features/shop.md#bug-12-pickup-type-confusion).
+
+`C2S_REPLAY_CONTROL` is **only** valid on `/ws/replay`. The player and spectator endpoints reject it (any unrecognised C2S type is a bad-envelope error on `/ws`; spectator closes the WS on any frame). The replay endpoint, conversely, rejects every C2S type *except* `C2S_REPLAY_CONTROL` with `S2C_ERROR { code: "REPLAY_READ_ONLY" }`. See [08-leaderboard-replay.md#c2s_replay_control](./08-leaderboard-replay.md#c2s_replay_control).
 
 ### S2C — append new rows below `0x89` when adding features
 
