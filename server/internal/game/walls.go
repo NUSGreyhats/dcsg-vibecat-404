@@ -39,12 +39,12 @@ var wallGrids [12]*wallGrid
 
 // waterGIDs are the tileset GIDs that render as water. They live in the
 // "Walls" layer because they block movement, but bullets fly over them.
-// Range: tileset rows 2..5 × cols 0..7 (0-indexed) at firstgid=1, 12 cols.
+// Range: tileset rows 2..6 × cols 0..11 (0-indexed) at firstgid=1, 12 cols.
 var waterGIDs = func() map[int]struct{} {
 	const cols = 12
-	m := make(map[int]struct{}, 32)
-	for r := 2; r <= 5; r++ {
-		for c := 0; c <= 7; c++ {
+	m := make(map[int]struct{}, 60)
+	for r := 2; r <= 6; r++ {
+		for c := 0; c <= 11; c++ {
 			m[r*cols+c+1] = struct{}{}
 		}
 	}
