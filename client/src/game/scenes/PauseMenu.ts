@@ -37,7 +37,7 @@ const CONTROL_BINDINGS: ReadonlyArray<readonly [string, string]> = [
   ["Aim", "Mouse"],
   ["Shoot", "Left mouse button"],
   ["Switch weapon", "1 / 2 / 3"],
-  ["Interact / enter door", "E"],
+  ["Shop", "B"],
   ["Inventory", "I"],
   ["Menu", "Esc"],
 ];

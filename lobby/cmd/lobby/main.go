@@ -180,7 +180,11 @@ func main() {
 				limit = n
 			}
 		}
-		entries, err := leaderboard.TopRuns(gameDB, limit)
+		dedupe := true
+		if v := r.URL.Query().Get("dedupe"); v == "0" || v == "false" {
+			dedupe = false
+		}
+		entries, err := leaderboard.TopRuns(gameDB, limit, dedupe)
 		if err != nil {
 			log.Printf("leaderboard: top: %v", err)
 			http.Error(w, "leaderboard unavailable", http.StatusInternalServerError)

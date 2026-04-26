@@ -10,6 +10,7 @@ type Entry struct {
 	Splits      []Split `json:"splits"`
 	Seed        int64   `json:"seed"`
 	ReplayID    string  `json:"replay_id"`
+	SubmittedAt string  `json:"submitted_at"`
 }
 
 // Split mirrors protocol.SplitData. See

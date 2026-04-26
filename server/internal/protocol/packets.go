@@ -119,6 +119,7 @@ type LeaderboardEntry struct {
 	Splits      []SplitData `json:"splits"`
 	Seed        int64       `json:"seed"`
 	ReplayID    string      `json:"replay_id"`
+	SubmittedAt string      `json:"submitted_at"`
 }
 
 type AuthOkData struct {
