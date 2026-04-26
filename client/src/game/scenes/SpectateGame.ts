@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { getSpectatorSync, getActiveState } from "../net/runContext";
+import { getActiveState } from "../net/runContext";
 import { ROOM_WIDTH, ROOM_HEIGHT } from "../constants";
 import { Player } from "../entities/Player";
 import { Enemy } from "../entities/Enemy";

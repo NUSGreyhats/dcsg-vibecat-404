@@ -1,5 +1,10 @@
 import Phaser from "phaser";
 import { getSync } from "../net/runContext";
+import {
+  clearCachedPlayerId,
+  getCachedPlayerId,
+  setCachedPlayerId,
+} from "../prefs";
 import { WS_URL } from "../constants";
 import {
   ACCENT_PRIMARY,
@@ -347,8 +352,21 @@ export class MainMenu extends Phaser.Scene {
       .connect(WS_URL)
       .then(() => {
         this.connected = true;
-        this.statusText?.setText("Connected. Log in to play.");
-        this.statusText?.setColor(hex(SUCCESS));
+        const cachedId = getCachedPlayerId();
+        if (cachedId) {
+          // Skip the form — re-auth with the cached id and let onAuthOk
+          // kick off START_RUN. If the server rejects (account gone /
+          // server restarted), onError will clear the cache and re-show
+          // the form so the user can re-enter credentials.
+          this.hideLoginForm();
+          this.statusText?.setText("Resuming session...");
+          this.statusText?.setColor(hex(TEXT_MUTED));
+          this.submitting = true;
+          getSync().sendAuth(cachedId);
+        } else {
+          this.statusText?.setText("Connected. Log in to play.");
+          this.statusText?.setColor(hex(SUCCESS));
+        }
       })
       .catch((err) => {
         console.error("[MainMenu] connect failed", err);
@@ -357,6 +375,18 @@ export class MainMenu extends Phaser.Scene {
         );
         this.statusText?.setColor(hex(ERROR));
       });
+  }
+
+  private hideLoginForm(): void {
+    if (this.usernameInput) this.usernameInput.style.display = "none";
+    if (this.passwordInput) this.passwordInput.style.display = "none";
+    if (this.startButton) this.startButton.style.display = "none";
+  }
+
+  private showLoginForm(): void {
+    if (this.usernameInput) this.usernameInput.style.display = "";
+    if (this.passwordInput) this.passwordInput.style.display = "";
+    if (this.startButton) this.startButton.style.display = "";
   }
 
   /**
@@ -530,6 +560,9 @@ export class MainMenu extends Phaser.Scene {
         display_name: string;
       };
       this.statusText?.setText("Authenticating...");
+      // Cache for auto-relogin on subsequent runs (Restart, Play Again,
+      // page refresh). Cleared by onError if the server rejects the id.
+      setCachedPlayerId(body.player_id);
       getSync().sendAuth(body.player_id);
     } catch (err) {
       console.error("[MainMenu] login failed", err);
@@ -550,6 +583,13 @@ export class MainMenu extends Phaser.Scene {
   }
 
   private onError(err: { code: string; message: string }): void {
+    // If a cached auth attempt failed, drop the cache and re-expose the
+    // login form so the user can re-enter credentials. Network drops
+    // ("disconnected") aren't auth issues, so leave the cache alone.
+    if (err.code !== "disconnected") {
+      clearCachedPlayerId();
+      this.showLoginForm();
+    }
     this.statusText?.setText(`Error: ${err.message}`);
     this.statusText?.setColor(hex(ERROR));
     this.submitting = false;
@@ -576,6 +616,13 @@ export class MainMenu extends Phaser.Scene {
 
     for (const el of this.sponsorLogoEls) el.remove();
     this.sponsorLogoEls = [];
+
+    // Phaser reuses the same scene instance across stop/start, so any
+    // field set during a previous login (submitting/connected) would
+    // otherwise carry over to the next mount and silently swallow the
+    // first onStart click. Reset to the fresh-instance defaults.
+    this.submitting = false;
+    this.connected = false;
   }
 }
 

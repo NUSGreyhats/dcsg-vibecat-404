@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 
 import { PLAYER_MAX_HEALTH } from "../constants";
+import { isHitstopped } from "../fx";
 import { directionFromVector, type Direction8 } from "../ui/anims";
 import { WEAPON_STATS, weaponFromServerId, type WeaponId } from "../weapons";
 import {
@@ -50,6 +51,15 @@ export class Player extends Phaser.GameObjects.Container {
   // no shooter cursor to read from. Default false preserves the player's
   // original behaviour exactly.
   private useSnapshotAim = false;
+
+  /** Currently equipped weapon (driven by server snapshots). */
+  get currentWeaponId(): WeaponId {
+    return this.weaponId;
+  }
+  /** Current aim angle in world-space radians, polled by Game for fx. */
+  get currentAimAngle(): number {
+    return this.aimAngle;
+  }
 
   constructor(
     scene: Phaser.Scene,
@@ -167,15 +177,23 @@ export class Player extends Phaser.GameObjects.Container {
     if (!this.useSnapshotAim) {
       // Aim toward the pointer in world-space coords. Re-projecting per
       // frame guards against camera scroll changing the relationship
-      // between screen pixels and world coords. Spectators skip this
-      // entirely — their aimAngle is set in applySnapshot from the
-      // server's authoritative aim_angle field.
+      // between screen pixels and world coords. We update aim before
+      // the hitstop early-return below so the cursor stays responsive
+      // even during a freeze. Spectators skip this entirely — their
+      // aimAngle is set in applySnapshot from the server's
+      // authoritative aim_angle field.
       const pointer = this.scene.input.activePointer;
       const cam = this.scene.cameras.main;
       if (cam) pointer.updateWorldPoint(cam);
       const worldX = Number.isFinite(pointer.worldX) ? pointer.worldX : pointer.x;
       const worldY = Number.isFinite(pointer.worldY) ? pointer.worldY : pointer.y;
       this.aimAngle = Math.atan2(worldY - this.y, worldX - this.x);
+    }
+
+    if (isHitstopped(this.scene)) {
+      // Keep weapon glued to the player but skip lerp so the freeze reads.
+      this.updateWeaponSprite();
+      return;
     }
 
     // Smooth toward the server-authoritative target position.

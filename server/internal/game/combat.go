@@ -74,14 +74,14 @@ func HandleShoot(p *PlayerState, r *RoomState, aimAngle float32, now time.Time) 
 	if wid == 3 {
 		// shotgun: 3 pellets in a ±10° spread.
 		for _, deg := range []float64{-10, 0, 10} {
-			spawnProjectile(r, p, aimAngle+float32(deg*math.Pi/180), dmg, now)
+			spawnProjectile(r, p, wid, aimAngle+float32(deg*math.Pi/180), dmg, now)
 		}
 		return
 	}
-	spawnProjectile(r, p, aimAngle, dmg, now)
+	spawnProjectile(r, p, wid, aimAngle, dmg, now)
 }
 
-func spawnProjectile(r *RoomState, p *PlayerState, angle float32, dmg int16, now time.Time) {
+func spawnProjectile(r *RoomState, p *PlayerState, wid uint8, angle float32, dmg int16, now time.Time) {
 	id := r.NextProjID
 	r.NextProjID++
 	r.Projectiles[id] = &ProjectileState{
@@ -92,6 +92,7 @@ func spawnProjectile(r *RoomState, p *PlayerState, angle float32, dmg int16, now
 		VelY:      ProjectileSpeed * float32(math.Sin(float64(angle))),
 		Damage:    dmg,
 		OwnerID:   0,
+		WeaponID:  wid,
 		SpawnedAt: now,
 	}
 }
@@ -146,7 +147,11 @@ func AdvanceProjectiles(r *RoomState, dt float32, now time.Time) []collisionHit 
 		pr.X += pr.VelX * dt
 		pr.Y += pr.VelY * dt
 		age := now.Sub(pr.SpawnedAt).Seconds()
-		if age > float64(ProjectileLifeSec) ||
+		life := float64(ProjectileLifeSec)
+		if spec, ok := WeaponSpecs[pr.WeaponID]; ok && spec.LifeSec > 0 {
+			life = float64(spec.LifeSec)
+		}
+		if age > life ||
 			pr.X < 0 || pr.X > RoomWidth ||
 			pr.Y < 0 || pr.Y > RoomHeight ||
 			BlocksProjectileAt(r.RoomIndex, pr.X, pr.Y) {

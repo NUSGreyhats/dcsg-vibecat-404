@@ -113,7 +113,11 @@ export const DEPTH_BG_FALLBACK = -100;
 export const DEPTH_WALL_FALLBACK = -50;
 export const DEPTH_BADGE = -40;
 export const DEPTH_TILEMAP = -30;
+// Projectile tracer trails sit in the entity band (0–5 per
+// 10-ui-components.md) so the player and world FX still paint over them.
+export const DEPTH_PROJECTILE_TRAIL = 1;
 export const DEPTH_PLAYER = 10;
+export const DEPTH_FX = 20;
 export const DEPTH_SPLASH = -10;
 export const DEPTH_HUD_BG = 1000;
 export const DEPTH_HUD_FILL = 1001;
