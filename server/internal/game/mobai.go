@@ -168,8 +168,21 @@ func UpdateEnemy(e *EnemyState, p *PlayerState, roomIndex uint8, dt float32, now
 		pr, pc := TileOf(p.X, p.Y)
 		fr, fc := BiasedPlayerTile(pr, pc, e.JitterX, e.JitterY, roomIndex)
 		field := fields.Get(fr, fc)
-		nr, nc := NextStepTile(field, roomIndex, mr, mc)
-		aimX, aimY := TileCenter(nr, nc)
+		// Once the mob is at most one BFS step from the (biased) player
+		// tile, aim at the player's actual float position rather than a
+		// tile center. Otherwise the mob converges to a tile center
+		// while the player sits anywhere in their own tile, leaving
+		// real Euclidean distance > AttackRange (34 px) and the mob
+		// fails to land hits — see issue #36. BFS dist ≤ 1 implies no
+		// wall between the mob's tile and the source, so a direct aim
+		// is safe; moveTowardWithWalls handles any remaining slide.
+		var aimX, aimY float32
+		if field[mr][mc] <= 1 {
+			aimX, aimY = p.X, p.Y
+		} else {
+			nr, nc := NextStepTile(field, roomIndex, mr, mc)
+			aimX, aimY = TileCenter(nr, nc)
+		}
 		moveTowardWithWalls(e, aimX, aimY, dt, roomIndex)
 
 		if dist < 34 && now.After(e.AttackCooldown) {
