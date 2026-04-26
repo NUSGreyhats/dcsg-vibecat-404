@@ -169,4 +169,5 @@ export type LeaderboardEntry = {
   splits: SplitData[];
   seed: number;
   replay_id: string;
+  submitted_at: string;
 };

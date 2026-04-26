@@ -49,6 +49,24 @@
     border: 2px solid var(--mid-blue);
     padding: 16px;
   }
+  .toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 12px;
+  }
+  button {
+    background: transparent;
+    color: var(--bone);
+    border: 1px solid var(--mid-blue);
+    padding: 6px 10px;
+    font: inherit;
+    cursor: pointer;
+  }
+  button[aria-pressed="true"] {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  button:hover { border-color: var(--accent); }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -97,12 +115,16 @@
   </nav>
 </header>
 <main>
+  <div class="toolbar">
+    <button id="dedupe" type="button" aria-pressed="true">Deduplicate: on</button>
+  </div>
   <table id="board">
     <thead>
       <tr>
         <th>#</th>
         <th>Name</th>
         <th>Time</th>
+        <th>Submitted (SGT)</th>
         <th>Seed</th>
         <th>Replay</th>
       </tr>
@@ -117,6 +139,8 @@
   const rowsEl = document.getElementById('rows');
   const emptyEl = document.getElementById('empty');
   const metaEl = document.getElementById('meta');
+  const dedupeBtn = document.getElementById('dedupe');
+  let dedupe = true;
 
   function fmtMs(ms) {
     const total = Math.max(0, ms | 0);
@@ -126,9 +150,23 @@
     return m + ':' + String(s).padStart(2, '0') + '.' + String(cs).padStart(2, '0');
   }
 
+  function fmtSubmittedAt(value) {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '—';
+    return new Intl.DateTimeFormat('en-SG', {
+      timeZone: 'Asia/Singapore',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(d);
+  }
+
   async function load() {
     try {
-      const res = await fetch('/api/leaderboard?limit=50');
+      const res = await fetch('/api/leaderboard?limit=50&dedupe=' + (dedupe ? '1' : '0'));
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const body = await res.json();
       const entries = body.entries || [];
@@ -143,6 +181,7 @@
             '<td class="rank">' + e.rank + '</td>' +
             '<td>' + escape(e.display_name) + '</td>' +
             '<td class="time">' + fmtMs(e.total_ms) + '</td>' +
+            '<td>' + fmtSubmittedAt(e.submitted_at) + '</td>' +
             '<td>' + e.seed + '</td>' +
             '<td class="replay"><a href="/api/replay/' + encodeURIComponent(e.replay_id) + '" download>' +
               shortId(e.replay_id) + '</a></td>'
@@ -165,6 +204,13 @@
   function shortId(id) {
     return String(id).slice(0, 8);
   }
+
+  dedupeBtn.addEventListener('click', () => {
+    dedupe = !dedupe;
+    dedupeBtn.setAttribute('aria-pressed', dedupe ? 'true' : 'false');
+    dedupeBtn.textContent = 'Deduplicate: ' + (dedupe ? 'on' : 'off');
+    load();
+  });
 
   load();
   setInterval(load, 5000);
