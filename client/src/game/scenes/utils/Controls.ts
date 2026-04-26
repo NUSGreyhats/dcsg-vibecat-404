@@ -5,10 +5,10 @@ export type MovementInput = { dx: number; dy: number };
 export type Controls = {
   movement(): MovementInput;
   aimAngle(pivotX: number, pivotY: number): number;
-  shootPressed(): boolean;
   shootHeld(): boolean;
   interactPressed(): boolean;
   inventoryPressed(): boolean;
+  shopPressed(): boolean;
   pausePressed(): boolean;
   weaponSwitchPressed(): number | null;
 };
@@ -24,6 +24,7 @@ type KeyMap = {
   right: Phaser.Input.Keyboard.Key;
   interact: Phaser.Input.Keyboard.Key;
   inventory: Phaser.Input.Keyboard.Key;
+  shop: Phaser.Input.Keyboard.Key;
   pause: Phaser.Input.Keyboard.Key;
   one: Phaser.Input.Keyboard.Key;
   two: Phaser.Input.Keyboard.Key;
@@ -43,10 +44,10 @@ export function createControls(scene: Phaser.Scene): Controls {
     return {
       movement: () => ({ dx: 0, dy: 0 }),
       aimAngle: () => 0,
-      shootPressed: () => false,
       shootHeld: () => false,
       interactPressed: () => false,
       inventoryPressed: () => false,
+      shopPressed: () => false,
       pausePressed: () => false,
       weaponSwitchPressed: () => null,
     };
@@ -63,20 +64,12 @@ export function createControls(scene: Phaser.Scene): Controls {
     right: kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
     interact: kb.addKey(Phaser.Input.Keyboard.KeyCodes.E),
     inventory: kb.addKey(Phaser.Input.Keyboard.KeyCodes.I),
+    shop: kb.addKey(Phaser.Input.Keyboard.KeyCodes.B),
     pause: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
     one: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
     two: kb.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
     three: kb.addKey(Phaser.Input.Keyboard.KeyCodes.THREE),
   };
-
-  // Phaser's pointer API doesn't expose a frame-bounded "just pressed"
-  // for the main button, so we track the edge ourselves.
-  let shootEdge = false;
-  scene.input.on(Phaser.Input.Events.POINTER_DOWN, (p: Phaser.Input.Pointer) => {
-    if (p.leftButtonDown()) {
-      shootEdge = true;
-    }
-  });
 
   const justDown = Phaser.Input.Keyboard.JustDown;
 
@@ -102,13 +95,6 @@ export function createControls(scene: Phaser.Scene): Controls {
       const worldY = Number.isFinite(p.worldY) ? p.worldY : p.y;
       return Math.atan2(worldY - pivotY, worldX - pivotX);
     },
-    shootPressed(): boolean {
-      if (shootEdge) {
-        shootEdge = false;
-        return true;
-      }
-      return false;
-    },
     shootHeld(): boolean {
       return scene.input.activePointer.leftButtonDown();
     },
@@ -117,6 +103,9 @@ export function createControls(scene: Phaser.Scene): Controls {
     },
     inventoryPressed(): boolean {
       return justDown(keys.inventory);
+    },
+    shopPressed(): boolean {
+      return justDown(keys.shop);
     },
     pausePressed(): boolean {
       return justDown(keys.pause);

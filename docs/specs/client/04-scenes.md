@@ -13,17 +13,12 @@ Append rows here when adding a new scene. Registration order in `client/src/game
 | `Boot`           | `client/src/game/scenes/Boot.ts`                 | Minimal bootstrap; loads a 1×1 fallback pixel so `Preloader` always has at least one texture. | — |
 | `Preloader`      | `client/src/game/scenes/Preloader.ts`            | Loads atlases, images, and all 10 room tilemaps. Shows a progress bar.   | — |
 | `MainMenu`       | `client/src/game/scenes/MainMenu.ts`             | Connects the WebSocket, takes a `player_id` via HTML overlay, drives `C2S_AUTH` + `C2S_START_RUN`. | — |
-| `Game`           | `client/src/game/scenes/Game.ts`                 | Main gameplay: owns entity maps, reconciles S2C snapshots, forwards input. | `GameHUD`, `InventoryMenu` (while paused) |
-| `GameHUD`        | `client/src/game/scenes/GameHUD.ts`              | Overlay: HP bar, timer, room indicator, weapon + ammo text. Polls state each frame. | `Game` |
+| `Game`           | `client/src/game/scenes/Game.ts`                 | Main gameplay: owns entity maps, reconciles S2C snapshots, forwards input. | `GameHUD`, `InventoryMenu` / `ShopMenu` / `PauseMenu` (while paused) |
+| `GameHUD`        | `client/src/game/scenes/GameHUD.ts`              | Overlay: HP bar, timer, room indicator, weapon + ammo text, coin counter. Polls state each frame. Owns the "B" → `ShopMenu` and inventory-key bindings. | `Game` |
 | `InventoryMenu`  | `client/src/game/scenes/InventoryMenu.ts`        | Modal overlay: inventory list, selection, `C2S_USE_ITEM`. Pauses `Game` while open. | `Game` (paused) |
+| `ShopMenu`       | `client/src/game/scenes/ShopMenu.ts`             | Modal overlay launched by "B": static catalog mirror from [features/shop.md](../features/shop.md), Enter sends `C2S_SHOP_PURCHASE { item_id }`. Pauses `Game` while open. | `Game` (paused) |
+| `PauseMenu`      | `client/src/game/scenes/PauseMenu.ts`            | Modal overlay: pause screen / resume / quit. Pauses `Game` while open.   | `Game` (paused) |
 | `WinScreen`      | `client/src/game/scenes/WinScreen.ts`            | Run summary (total time, rank, splits) + live leaderboard + "Play Again". Title and leaderboard section branch on `runOutcome`: `"completed"` shows rank + submission row; `"failed"` shows a "RUN FAILED" banner and hides rank (no leaderboard submission occurred). | — |
-
-Scenes **not yet present** in the repo but referenced by older specs:
-
-| Key             | Status       | Notes |
-| --------------- | ------------ | ----- |
-| `PauseMenu`     | Not created  | Mentioned in earlier `foundations/10-client-architecture.md` scene table. Register when implemented. |
-| `ShopMenu`      | Not created  | Same. Scaffold file `client/src/game/shop.ts` exists as a placeholder module. |
 
 When a new scene is added, update:
 
@@ -96,6 +91,8 @@ graph TD
 | `Game`           | `E` pressed near pickup → `sync.sendInteract`; near door → `sync.sendEnterDoor`. See [07-input-controls.md](./07-input-controls.md). | No scene transition; server drives room via `S2C_ROOM_LOAD` which reuses `Game`. |
 | `Game`           | `I` pressed                                            | `scene.launch("InventoryMenu"); scene.pause();`                                  |
 | `InventoryMenu`  | `Esc` / `I` / `Enter` after use                        | `scene.resume("Game"); scene.stop();`                                            |
+| `Game`           | `B` pressed                                            | `scene.launch("ShopMenu"); scene.pause();`                                       |
+| `ShopMenu`       | `Esc` / `B` / `Enter` after purchase                   | `scene.resume("Game"); scene.stop();`                                            |
 | `Game`           | `runComplete` event from `sync.state`                  | `scene.stop("GameHUD"); scene.start("WinScreen");`                               |
 | `WinScreen`      | "Play Again" clicked                                   | Detach listeners; `resetSync()`; `scene.start("MainMenu");`                      |
 
@@ -260,7 +257,7 @@ Why the detach-before-reset dance: `resetSync()` invalidates the old `state` emi
 
 ## Implementation status
 
-Per the [Scene table](#scene-table-source-of-truth): `Boot`, `Preloader`, `MainMenu`, `Game`, `GameHUD`, `InventoryMenu`, `WinScreen` are implemented and wired up. `PauseMenu` and `ShopMenu` are future work; no placeholder files exist (except `client/src/game/shop.ts` which is a client-side data module, not a scene).
+All scenes in the [Scene table](#scene-table-source-of-truth) — `Boot`, `Preloader`, `MainMenu`, `Game`, `GameHUD`, `InventoryMenu`, `ShopMenu`, `PauseMenu`, `WinScreen` — are implemented and registered in `client/src/game/main.ts`.
 
 The spectator client (a slimmed-down variant that would mount `Game` + `GameHUD` only, bound to `/ws/spectate`) is greenfield — see [09-spectator-mode.md](./09-spectator-mode.md).
 

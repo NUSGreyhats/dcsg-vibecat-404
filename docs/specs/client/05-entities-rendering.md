@@ -194,14 +194,14 @@ Minimal: a 6×3 yellow rectangle, rotated to `snap.angle`. Two scalar targets fo
 
 ### Type → visual mapping
 
-| Type | Name           | Color     | Size | Glyph | Uses texture if loaded |
-| ---- | -------------- | --------- | ---- | ----- | ---------------------- |
-| 1    | HEALTH         | `#dc2d2d` | 14   | ♥     | `heart`                |
-| 2    | AMMO           | `#8b5a2b` | 14   | ■     | `coin`                 |
-| 3    | SPEED          | `#00e5ff` | 14   | ⚡    | —                       |
-| 4    | DAMAGE         | `#ff8c00` | 14   | ⚔     | —                       |
-| 5    | LARGE_HEART    | `#ff69b4` | 20   | ♥     | `heart`                |
-| else | unknown        | `#cccccc` | 12   | ?     | —                       |
+| Type | Name    | Color        | Size | Glyph | Uses texture if loaded |
+| ---- | ------- | ------------ | ---- | ----- | ---------------------- |
+| 1    | HEALTH  | `#dc2d2d`    | 16   | ♥     | `heart`                |
+| 2    | AMMO    | `COIN_GOLD`  | 16   | ■     | `coin`                 |
+| 3    | COIN    | `COIN_GOLD`  | 12   | $     | `coin`                 |
+| else | unknown | `#cccccc`    | 12   | ?     | —                      |
+
+Type 3 was previously SPEED; recycled to COIN by [features/shop.md](../features/shop.md). Types 4 (DAMAGE) and 5 (LARGE_HEART) were removed when their underlying pickups were retired — see [features/pickups.md](../features/pickups.md).
 
 ### Bob animation
 

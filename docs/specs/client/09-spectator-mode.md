@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the client-side variant that renders a live player's run **without participating in it** — the read-only Phaser viewer served at `/spectate/:player_id` by the lobby. This spec is mostly **greenfield**; the server-side spectator protocol already exists in [foundations/02-protocol.md#spectator-protocol](../foundations/02-protocol.md#spectator-protocol) and [foundations/05-server-runtime.md#spectator-fan-out](../foundations/05-server-runtime.md#spectator-fan-out), but the client viewer is not yet implemented. Document here is the design target.
+Defines the client-side variant that renders a live player's run **without participating in it** — the read-only Phaser viewer served at `/spectate/:player_id`. Implemented in #23 alongside server-side spectator fan-out (see [foundations/02-protocol.md#spectator-protocol](../foundations/02-protocol.md#spectator-protocol) and [foundations/05-server-runtime.md#spectator-fan-out](../foundations/05-server-runtime.md#spectator-fan-out)).
 
 ## Why a separate client mode
 
@@ -213,18 +213,22 @@ When a spectator connects and any cap is exceeded, the server returns HTTP `503`
 
 ## Implementation status
 
-**Not yet implemented.** Greenfield. The player client and all protocol surfaces (both S2C and the spectator WS path) are specified but the spectator client entry point, bundle, scenes, and sync class are all to be written.
+Shipped in #23. Files:
 
-Priority order for a first cut:
+- `client/src/spectate-main.ts` — entry that reads `/spectate/:player_id` from `window.location.pathname` and the optional `?name=…` query, then calls `startSpectator`.
+- `client/src/game/spectate-main.ts` — Phaser config with the spectator scene list (`Boot`, `Preloader`, `SpectateConnecting`, `SpectateGame`, `GameHUD`, `SpectateEnd`). Seeds the registry with `nextScene = "SpectateConnecting"` and the player_id / display_name in `callbacks.preBoot`.
+- `client/src/game/net/SpectatorSync.ts` — read-only sync, no `send*` methods. Owns the same `GameState` class as the player.
+- `client/src/game/scenes/SpectateConnecting.ts` — opens the WS, transitions on the first catchup `STATE`. Cap-503 retry loop: 3 attempts at 5 s spacing; final failure → `SpectateEnd`.
+- `client/src/game/scenes/SpectateGame.ts` — structural copy of `Game.ts` with all input wiring stripped. Adds an absence-based prune of `enemies` / `pickups` so dead mobs / consumed pickups from the cached `S2C_ROOM_LOAD` are despawned for spectators that attached after they died (which is everyone, since `S2C_ENTITY_DIED` events for pre-attach kills aren't replayed).
+- `client/src/game/scenes/SpectateEnd.ts` — terminal screen with reason / final time / rank / "Back to selector" link.
 
-1. `spectate-main.ts` entry + minimal Phaser config.
-2. `SpectatorSync` — subset of `GameStateSync` without the `send*` helpers.
-3. `SpectateConnecting` + `SpectateGame` (copy of `Game.ts` with input stripped).
-4. `SpectateEnd`.
-5. Cap-503 retry loop in `SpectateConnecting`.
-6. Lobby HTML `/spectate` and `/spectate/:player_id` pages that host the bundle.
+Player-client surfaces touched:
 
-The existing `client/public/leaderboard.html` proves the "non-Phaser static HTML page served by the public frontend" pattern and could be the starting point for `/spectate`'s selector.
+- `Preloader.create` reads `nextScene` from the registry; defaults to `MainMenu`. Player flow unchanged.
+- `runContext` exposes `getSpectatorSync` / `resetSpectatorSync` / `setActiveState` / `getActiveState`. `GameHUD` now reads `getActiveState` so it works for both flows; player flow defaults to `getSync().state`.
+- `Player` gains a `useSnapshotAim` constructor flag. When true, `applySnapshot` reads the new `aim_angle` field (radians) from `PlayerSnapshot` and `tick()` skips its cursor read. Player flow defaults to off — local cursor still wins for the actual player.
+
+Vite multi-entry: `client/index.html` (player) + `client/spectate.html` (spectator) both build into `dist/`. Caddy serves `/spectate/:player_id` viewer URLs by rewriting to `/spectate.html` (single non-empty path-segment matcher, with `<base href="/">` in the HTML for asset resolution).
 
 ## Implementation notes
 

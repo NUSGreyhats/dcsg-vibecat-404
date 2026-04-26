@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VIBECAT 404 — Leaderboard</title>
+<style>
+  :root {
+    --midnight: #0d1222;
+    --deep-navy: #1a2338;
+    --navy: #2b3d5c;
+    --mid-blue: #5c8fbf;
+    --bone: #f5f0e6;
+    --muted: #8a8679;
+    --accent: #ffdd33;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--midnight);
+    color: var(--bone);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 14px;
+    padding: 24px;
+  }
+  header {
+    max-width: 760px;
+    margin: 0 auto 16px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  h1 {
+    margin: 0;
+    font-size: 22px;
+    letter-spacing: 1px;
+  }
+  nav a {
+    color: var(--mid-blue);
+    text-decoration: none;
+    font-size: 13px;
+  }
+  nav a:hover { color: var(--accent); }
+  main {
+    max-width: 760px;
+    margin: 0 auto;
+    background: var(--deep-navy);
+    border: 2px solid var(--mid-blue);
+    padding: 16px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th, td {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--navy);
+  }
+  th {
+    color: var(--muted);
+    font-weight: normal;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  td.rank { color: var(--accent); width: 48px; }
+  td.time { font-variant-numeric: tabular-nums; }
+  td.replay a {
+    color: var(--mid-blue);
+    text-decoration: none;
+  }
+  td.replay a:hover { color: var(--accent); }
+  .empty {
+    padding: 24px 8px;
+    color: var(--muted);
+    text-align: center;
+  }
+  .meta {
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: 12px;
+    text-align: right;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Leaderboard</h1>
+  <nav>
+    <a href="/">→ Play</a>
+    &nbsp;·&nbsp;
+    <a href="/register">→ Register</a>
+    &nbsp;·&nbsp;
+    <a href="/source.tar.gz" download>→ Source</a>
+  </nav>
+</header>
+<main>
+  <table id="board">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Name</th>
+        <th>Time</th>
+        <th>Seed</th>
+        <th>Replay</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="empty" id="empty" hidden>No runs recorded yet.</div>
+  <div class="meta" id="meta"></div>
+</main>
+
+<script>
+  const rowsEl = document.getElementById('rows');
+  const emptyEl = document.getElementById('empty');
+  const metaEl = document.getElementById('meta');
+
+  function fmtMs(ms) {
+    const total = Math.max(0, ms | 0);
+    const m = Math.floor(total / 60000);
+    const s = Math.floor((total % 60000) / 1000);
+    const cs = Math.floor((total % 1000) / 10);
+    return m + ':' + String(s).padStart(2, '0') + '.' + String(cs).padStart(2, '0');
+  }
+
+  async function load() {
+    try {
+      const res = await fetch('/api/leaderboard?limit=50');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const body = await res.json();
+      const entries = body.entries || [];
+      rowsEl.innerHTML = '';
+      if (entries.length === 0) {
+        emptyEl.hidden = false;
+      } else {
+        emptyEl.hidden = true;
+        for (const e of entries) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = (
+            '<td class="rank">' + e.rank + '</td>' +
+            '<td>' + escape(e.display_name) + '</td>' +
+            '<td class="time">' + fmtMs(e.total_ms) + '</td>' +
+            '<td>' + e.seed + '</td>' +
+            '<td class="replay"><a href="/api/replay/' + encodeURIComponent(e.replay_id) + '" download>' +
+              shortId(e.replay_id) + '</a></td>'
+          );
+          rowsEl.appendChild(tr);
+        }
+      }
+      metaEl.textContent = entries.length + ' run' + (entries.length === 1 ? '' : 's') +
+        ' · refreshed ' + new Date().toLocaleTimeString();
+    } catch (err) {
+      metaEl.textContent = 'Error loading leaderboard: ' + err.message;
+    }
+  }
+
+  function escape(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[c]);
+  }
+  function shortId(id) {
+    return String(id).slice(0, 8);
+  }
+
+  load();
+  setInterval(load, 5000);
+</script>
+</body>
+</html>

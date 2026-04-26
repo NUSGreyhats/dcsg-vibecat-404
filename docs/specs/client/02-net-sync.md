@@ -42,9 +42,10 @@ All frames are UTF-8 JSON strings. The client does not use binary WebSocket fram
 | 0x03  | `C2S_INPUT`         | `sendInput(dx, dy)`                     | `Game.handleInput()`, throttled to `INPUT_SEND_INTERVAL_MS = 50 ms` |
 | 0x04  | `C2S_SHOOT`         | `sendShoot(aimAngle)`                   | `Game.handleInput()` on edge-triggered left-click |
 | 0x05  | `C2S_SWITCH_WEAPON` | `sendSwitchWeapon(slot)`                | `Game.handleInput()` on `1/2/3` keys |
-| 0x06  | `C2S_INTERACT`      | `sendInteract(targetId)`                | `Game.handleInput()` when `E` pressed near a pickup |
+| 0x06  | `C2S_INTERACT`      | `sendInteract(targetId, claimedType)`   | `Game.handleInput()` when `E` pressed near a pickup; `claimedType` is the rendered pickup's type — see [shop.md BUG-12](../features/shop.md#bug-12-pickup-type-confusion) |
 | 0x07  | `C2S_ENTER_DOOR`    | `sendEnterDoor(doorId)`                 | `Game.handleInput()` when `E` pressed near an unlocked door |
 | 0x08  | `C2S_USE_ITEM`      | `sendUseItem(itemName)`                 | `InventoryMenu.useSelected()` |
+| 0x09  | `C2S_SHOP_PURCHASE` | `sendShopPurchase(itemId)`              | `ShopMenu.purchaseSelected()` |
 
 ### Server → Client packet registry
 

@@ -63,7 +63,7 @@ physics step: advance each projectile by VelX*dt, VelY*dt
 collision pass:
     for each projectile:
         for each enemy:
-            if collides: enemy.HP -= effectiveDmg(projectile.Damage, enemy.armor)
+            if collides: enemy.HP -= projectile.Damage
     *** all collisions resolve before any death check ***
     │
     ▼
@@ -112,9 +112,7 @@ func (p *PlayerState) ApplyHeal(amount int16) {
 }
 
 func (e *EnemyState) TakeDamage(amount int16) {
-    reduction := e.computeArmor()          // returns int16
-    effectiveDmg := amount - reduction     // can underflow if armor > damage
-    e.HP -= effectiveDmg                   // subtracting negative = adding HP... unless it wraps
+    e.HP -= amount
 }
 
 // Enemy death — part of the post-collision death pass.
@@ -135,13 +133,12 @@ Both `PlayerState.HP` and `EnemyState.HP` are `int16`. Go performs silent wrapar
 
 - `client/src/game/weapons.ts` — mirrors `weaponSpecs` for UI (weapon icons, cooldown bars).
 - `client/src/game/entities/Bullet.ts` — renders projectiles from `ProjSnapshot`.
-- Fire input → `C2S_SHOOT { aim_angle }`. No client-side cooldown enforcement beyond visual polish; the server is authoritative.
+- Fire input → `C2S_SHOOT { aim_angle }`. The stock client emits shoots while the left mouse is held, throttled to the equipped weapon's effective cooldown — same `cooldown / (1 + 0.1 * fire_rate_stacks)` formula used here — so it doesn't spam faster than the equipped weapon's effective cooldown. See [client/07-input-controls.md](../client/07-input-controls.md#shoot-throttle). The throttle is a bandwidth shaper only; the server cooldown is still authoritative and BUG-04 / BUG-07 remain reachable from the stock client.
 
 ## Implementation notes
 
 - Package: `internal/game/combat` (target).
 - `now` captured at tick entry as `tickNow := time.Now()` and passed into every handler invoked during drain. This is load-bearing for BUG-04 + BUG-07 — do not replace with per-handler `time.Now()` calls.
-- Armor computation in `EnemyState.computeArmor()` returns `int16`. Debuffs can drive armor below zero; this is the ingress point for the BUG-08 double-overflow exploit.
 
 ## Implementation status
 
@@ -215,7 +212,7 @@ For enemies with HP slightly above the single-shot damage, this effectively doub
 
 ### BUG-08 HP Integer Overflow (Healing Past Max) — DISABLED
 
-**Status:** Disabled. The `+30000 HP` Heart pickup that delivered the overflow has been removed from `rooms_data.go`. `ApplyHeal` still has no overflow check, but the only path that calls it with an amount > 100 is gone — so the wrap is unreachable via normal gameplay. See [bugs.md — currently disabled](../bugs.md#currently-disabled).
+**Status:** Disabled. The `+30000 HP` Heart pickup that delivered the overflow has been removed from `rooms_data.go`. `ApplyHeal` still has no overflow check, but no path calls it with `amount > 100` — so the wrap is unreachable via normal gameplay. See [bugs.md — currently disabled](../bugs.md#currently-disabled).
 
 **To reintroduce:** re-add a large-heal pickup (Heart, or some other item). Before doing that, decide whether to keep the wrap or add a saturating clamp — the original bug was "too powerful" because a single pickup grab trivialized the boss.
 
@@ -223,10 +220,9 @@ For enemies with HP slightly above the single-shot damage, this effectively doub
 
 **Design choice enabling the bug:**
 
-1. Player and enemy HP are `int16` (max 32,767).
+1. Player HP is `int16` (max 32,767).
 2. `ApplyHeal` has no overflow check — `p.HP += amount` wraps silently.
-3. Armor reduction is `effectiveDmg := amount - reduction` with no clamp — can underflow or wrap.
-4. A specific high-value healing pickup exists (`+30000 HP`) in the boss room.
+3. A specific high-value healing pickup exists (`+30000 HP`) in the boss room.
 
 **Root cause sketch:**
 
@@ -243,30 +239,15 @@ If `p.HP` is high and `amount` is large, `p.HP += amount` wraps past `32767` to 
 
 **Twist:** the Heart pickup applies `ApplyHeal(+30000)` during `C2S_INTERACT` drain. If `HP > 2767` at pickup, the `int16` add wraps `32768 → -32768`, the `MaxHP` clamp misses (negative is not `> MaxHP`), and the player-death pass later in the same tick fails the run. Savvy players avoid the Heart unless `HP ≤ 2767`.
 
-For the enemy side:
+**Exploit path:** This is a player-side hazard, not a positive exploit — the wrap kills the player. Skilled play involves *avoiding* the trap when grabbing healing.
 
-```go
-func (e *EnemyState) TakeDamage(amount int16) {
-    reduction := e.computeArmor()          // returns int16
-    effectiveDmg := amount - reduction     // can underflow if armor > damage
-    e.HP -= effectiveDmg                   // subtracting negative = adding HP... unless it wraps
-}
-```
+**Bound:** Only reachable through `ApplyHeal` with a large `amount`. With the Heart pickup removed, no path delivers `amount > 100`.
 
-If `amount = 10` and `reduction = 50`, `effectiveDmg = -40`. `e.HP -= (-40)` → `e.HP += 40` (enemy heals). If a crafted scenario pushes the arithmetic further: `amount = 100, reduction = -32700` (achievable via a debuff stack that corrupts armor to large negative), `effectiveDmg = 100 - (-32700) = 32800` → wraps to `-32736` as int16. `e.HP -= (-32736)` → enemy HP increases by 32736... and if that overflows *enemy* `int16 HP` → wraps negative → **enemy dies**.
+**Detection:** Replay reproduces identically. Do NOT change HP to a wider integer type — that fixes the bug (safer) but also removes the intended skill-ceiling mechanic. Do NOT collapse the player-death pass into the enemy-death pass — they read different state (post-drain heals vs. post-collision enemy HP) and sharing the pass would either miss the BUG-08 wrap or force a second collision walk.
 
-**Exploit path:** Stack a specific debuff on the boss that corrupts its armor value to a large negative `int16`, then hit it with a normal attack. The damage arithmetic chain double-overflows, instantly killing the boss.
+**Synergies:** None active. Was previously paired with healing-pickup routing.
 
-**Bound:**
-- Requires finding the specific debuff + attack combination.
-- Only works on the boss (regular enemies die fast enough that the setup isn't worth it).
-- Player must avoid accidentally killing self with the `+30000` heal pickup.
-
-**Detection:** Replay reproduces identically. Do NOT change HP to a wider integer type — that fixes the bug for both players (safer) but also removes the intended skill-ceiling mechanic. Do NOT collapse the player-death pass into the enemy-death pass — they read different state (post-drain heals vs. post-collision enemy HP) and sharing the pass would either miss the BUG-08 wrap or force a second collision walk.
-
-**Synergies:** Faster setup via [BUG-04 swap cancel](#bug-04-swap-cancel). Historically enabled faster by [BUG-09 `instakill`](../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling) for adds cleanup before the boss — both BUG-09 and BUG-08 are now disabled, so this chain is moot until they return together.
-
-**Savings:** ~5–10 s on boss fight (when enabled).
+**Savings:** None directly — avoidance hazard, not an exploit.
 
 ## Packets used
 

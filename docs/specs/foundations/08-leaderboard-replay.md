@@ -22,7 +22,7 @@ CompletedRun {
 
 - `ReplayID` is a server-generated UUID.
 - `Checksum = SHA256(seed || serialize(InputLog))`. Computed at submission and stored; the replay endpoint recomputes to detect tampering on `game.db` at rest.
-- `InputLog` is the full ordered sequence of C2S packets (after drain, within each tick).
+- `InputLog` is the full ordered sequence of C2S packets (after drain, within each tick). Every C2S type code is recorded verbatim — including `C2S_INTERACT` (whose payload carries `claimed_type`, load-bearing for [BUG-12](../features/shop.md#bug-12-pickup-type-confusion)) and `C2S_SHOP_PURCHASE` (`item_id`).
 
 ## Replay engine
 
@@ -33,6 +33,10 @@ Given `(seed, InputLog)`:
 3. Record the reproduced final `total_ms`. It must match `CompletedRun.TotalMs` to within replay tolerance (nanosecond-level — they should be exactly equal for deterministic bugs).
 
 **Non-deterministic bugs** (specifically [BUG-11](./05-server-runtime.md#bug-11-kill-log-append-race)) violate byte-exact reproduction. The replay engine accommodates this by accepting runs whose reproduced time is within a tolerance window derived from known race bounds. The exact tolerance is TBD — see open questions in [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md).
+
+**Coin pickup ID permutation** (multi-kill ticks, see [../features/shop.md](../features/shop.md)) is observationally a no-op for replay: every coin's `applyPickup` effect is identical (`+1 Coin`) and dispatch ignores the underlying `pk.Type` (BUG-12), so swapping which `EntityID` the death pass assigns to which dropped coin does not change player state. This invariant relies on coins being interchangeable in dispatch — if a future feature differentiates coins (e.g., per-coin value), the replay engine will need to enforce a deterministic iteration order in the death pass at `combat.go`.
+
+**Wall-clock vs. synthetic time.** The live engine drives `stepTick` with real `time.Now()`, which means recorded `total_ms` (and `Splits[*].time_ms`) reflect tick-cadence jitter. Replay should advance `now` synthetically by `TickDuration` per tick anchored on a synthetic `RunStartTime`, and skip the `±2s` `ts` window check in `dispatch` — the recorded `Ts` values come from the original session's wall-clock and would otherwise reject every packet. All time math in the runtime is relative (`now.Add(...)`, `now.Sub(RunStartTime)`, `now.After(...)`), so this is sound.
 
 ## Data flow
 
@@ -104,8 +108,9 @@ None — this is the anticheat backstop. Bugs found here (e.g., weak checksum, m
 
 ## Cross-references
 
-- [02-protocol.md](./02-protocol.md) — `S2C_LEADERBOARD`, `S2C_RUN_COMPLETE`.
+- [02-protocol.md](./02-protocol.md) — `S2C_LEADERBOARD`, `S2C_RUN_COMPLETE`, `C2S_INTERACT.claimed_type`, `C2S_SHOP_PURCHASE`.
 - [05-server-runtime.md](./05-server-runtime.md) — `completedRunCh`, leaderboard goroutine.
 - [06-game-state-conventions.md](./06-game-state-conventions.md) — `InputLog`, `Splits`, `Seed`.
 - [07-determinism-seeding.md](./07-determinism-seeding.md) — RNG consumption invariant replay depends on.
 - [04-lobby.md](./04-lobby.md) — public `/api/leaderboard` + `/api/replay/:replay_id` endpoints.
+- [../features/shop.md](../features/shop.md) — coin drops, BUG-12 `claimed_type` reproducibility.
