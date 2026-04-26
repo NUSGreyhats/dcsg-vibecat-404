@@ -131,13 +131,13 @@ this.nextShootAt = now + baseCd / (1 + 0.1 * stacks);
 
 The formula matches the server's fire-rate stack math (`server/internal/game/combat.go`). On release, `nextShootAt` resets to 0, so a fresh click fires on the very next frame with no perceived delay.
 
-This is a **bandwidth shaper, not a server-policy gate**. The throttle's only job is to avoid spamming packets the server would silently reject — at 60 fps a held button would otherwise emit ~60 `C2S_SHOOT`/sec for a shotgun whose 520 ms cooldown only accepts ~2/sec. The client throttle sends at *exactly* the rate the server would accept (for the equipped weapon, with current upgrade stacks), never lower. Specifically, the client does **not**:
+This is a **bandwidth shaper, not a server-policy gate**. The throttle's only job is to avoid spamming packets that are too early for the equipped weapon's current effective cooldown — at 60 fps a held button would otherwise emit ~60 `C2S_SHOOT`/sec for a shotgun whose 520 ms cooldown only accepts ~2/sec. So the client throttle matches the server's **per-weapon fire-rate acceptance rate** (for the equipped weapon, with current upgrade stacks), but it does **not** guarantee that every emitted shoot will be accepted. Specifically, the client does **not**:
 
 - Predict swap cooldowns (the 400 ms post-`C2S_SWITCH_WEAPON` lockout). Shoots fired during a swap lockout are still sent and the server still rejects them.
 - Predict damage-batch overflow ([BUG-07](../features/combat-weapons.md)) or any other server-side rejection beyond fire rate.
 - Suppress shoots for any reason other than "too soon for the equipped weapon."
 
-So `BUG-04` (swap cancel) and `BUG-07` are still observable from the stock client — the throttle never hides them, because it never refuses a shoot that the server would have accepted.
+So `BUG-04` (swap cancel) and `BUG-07` are still observable from the stock client — the throttle never hides them, because it only filters per-weapon cooldown spam and leaves other server-side checks untouched.
 
 Why we accept the formula coupling now: `WEAPON_STATS` is already mirrored client-side for HUD/shop display, and `fire_rate_stacks` is part of every player snapshot. Computing the effective cooldown costs nothing extra and is necessary to stop shotgun-hold from flooding the wire 30× over.
 
