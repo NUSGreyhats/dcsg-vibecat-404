@@ -45,7 +45,7 @@ export type C2SDataFor<T extends C2SType> = T extends typeof C2SType.AUTH
     : T extends typeof C2SType.INPUT
       ? { dx: number; dy: number } // float32, normalized
       : T extends typeof C2SType.SHOOT
-        ? { aim_angle: number } // radians
+        ? { aim_angle: number; released: boolean } // radians; released=true means a fresh click (not a held continuation)
         : T extends typeof C2SType.SWITCH_WEAPON
           ? { weapon_id: number } // uint8
           : T extends typeof C2SType.INTERACT

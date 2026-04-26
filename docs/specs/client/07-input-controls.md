@@ -41,7 +41,7 @@ If `scene.input.keyboard` is null (Phaser's keyboard plugin disabled or unavaila
 | -------------------------- | ------------------------------------- | ---------------- | --------------------------------------- |
 | Movement                   | `W/A/S/D` + Arrow keys                | Held (per-frame) | `C2S_INPUT { dx, dy }` throttled to 50 ms |
 | Aim                        | Mouse position                        | Polled each frame | Used as `aimAngle` argument to `shoot` |
-| Shoot                      | Left mouse button (held)              | Polled per frame, throttled to weapon fire rate | `C2S_SHOOT { aim_angle }` |
+| Shoot                      | Left mouse button (held)              | Polled per frame, throttled to weapon fire rate (½ rate while held — issue #62) | `C2S_SHOOT { aim_angle, released }` |
 | Weapon slot 1/2/3          | `1`, `2`, `3` (just-pressed)          | Just-pressed     | `C2S_SWITCH_WEAPON { weapon_id }`       |
 | Interact                   | `E`                                   | Just-pressed     | `C2S_INTERACT { target_id, claimed_type }` or `C2S_ENTER_DOOR { door_id }` (whichever is nearest); `claimed_type` is the rendered pickup's type — see [features/shop.md BUG-12](../features/shop.md#bug-12-pickup-type-confusion) |
 | Open Inventory             | `I`                                   | Just-pressed     | `scene.launch("InventoryMenu")` (no C2S yet) |
@@ -75,8 +75,8 @@ shootHeld(): boolean {
 }
 ```
 
-- **Hold-to-shoot.** Holding the left mouse button fires continuously at the equipped weapon's max rate. Releasing stops fire on the next frame.
-- **Single click = one shot.** A click is just one frame (or a few) of "held"; the first held frame fires immediately because the throttle gate is reset on release (see [Shoot throttle](#shoot-throttle) below).
+- **Hold-to-shoot.** Holding the left mouse button fires continuously, but at **half** the equipped weapon's max rate — `Game` tracks whether the button was released between shots and sets `C2S_SHOOT { released }` accordingly; the server applies `HoldFireCooldownMult` (×2) when `released=false`. Releasing stops fire on the next frame. See issue #62 for rationale.
+- **Single click = one shot.** A click is just one frame (or a few) of "held"; the first held frame fires immediately because the throttle gate is reset on release (see [Shoot throttle](#shoot-throttle) below). Each click sends `released=true`, so spam-clicking stays at full weapon rate.
 - **No edge detection needed.** The previous `shootPressed()` (frame-bounded just-pressed) was removed. Phaser's pointer API has no frame-bounded just-pressed for the main button, but we don't need one — first-frame-held is functionally equivalent for a hold-to-shoot model.
 
 ### Just-pressed for keyboard

@@ -12,6 +12,12 @@ const (
 
 	SwapCooldownMs = 400
 
+	// HoldFireCooldownMult lengthens the per-shot cooldown when the client
+	// reports the fire button was NOT released since the previous shot —
+	// halving sustained hold-to-fire while leaving released-then-clicked
+	// shots at full weapon rate. See issue #62.
+	HoldFireCooldownMult = 2
+
 	// BUG-05: square-axis hitbox with a grossly-wrong range constant.
 	InteractRange = 2500
 

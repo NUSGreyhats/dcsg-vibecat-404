@@ -591,7 +591,7 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 			return
 		}
 		e.player.LastAimAngle = pkt.AimAngle
-		HandleShoot(e.player, e.room, pkt.AimAngle, now)
+		HandleShoot(e.player, e.room, pkt.AimAngle, pkt.Released, now)
 	case protocol.C2SSwitchWeapon:
 		var pkt protocol.SwitchWeaponPacket
 		if err := json.Unmarshal(env.Data, &pkt); err != nil {

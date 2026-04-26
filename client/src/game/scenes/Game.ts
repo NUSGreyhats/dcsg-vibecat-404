@@ -62,6 +62,10 @@ export class Game extends Phaser.Scene {
   controls!: Controls;
   inputSendAcc = 0;
   private nextShootAt = 0;
+  /** True when the fire button has been up at some point since the last
+   *  SHOOT we sent. Sent verbatim on the next shot so the server can
+   *  distinguish fresh clicks from held continuations (issue #62). */
+  private shootReleasedSinceLastShot = true;
   private requestedPickupIds = new Set<number>();
   private requestedDoorIds = new Set<number>();
   /** Read by fx.isHitstopped — entity ticks halt while non-zero. */
@@ -146,12 +150,18 @@ export class Game extends Phaser.Scene {
         // thinking the shot landed.
         if ((sp.ammo ?? 0) > 0) {
           const angle = this.controls.aimAngle(this.player.x, this.player.y);
-          sync.sendShoot(angle);
+          const released = this.shootReleasedSinceLastShot;
+          sync.sendShoot(angle, released);
+          this.shootReleasedSinceLastShot = false;
           this.player.triggerShootAnim();
           const id = weaponFromServerId(sp.weapon_id);
           const baseCd = WEAPON_STATS[id].cooldownMs;
           const stacks = sp.fire_rate_stacks ?? 0;
-          this.nextShootAt = now + baseCd / (1 + 0.1 * stacks);
+          // Mirror the server's HoldFireCooldownMult (=2) so the local
+          // throttle doesn't queue shots the server will reject. Held
+          // continuations fire at 50% rate; fresh clicks at full rate.
+          const heldMult = released ? 1 : 2;
+          this.nextShootAt = now + (baseCd * heldMult) / (1 + 0.1 * stacks);
 
           // Muzzle flash + camera shake fire on every shot. The
           // nextShootAt gate above already throttles this — no
@@ -168,8 +178,11 @@ export class Game extends Phaser.Scene {
         }
       }
     } else {
-      // Release resets the gate so the next click fires instantly.
+      // Release resets the gate so the next click fires instantly, and
+      // marks the next shot as a fresh click so the server applies the
+      // full weapon rate instead of the hold-fire penalty.
       this.nextShootAt = 0;
+      this.shootReleasedSinceLastShot = true;
     }
 
     const slot = this.controls.weaponSwitchPressed();

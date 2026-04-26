@@ -37,8 +37,10 @@ func HandleSwitchWeapon(p *PlayerState, weaponID uint8, now time.Time) {
 
 // HandleShoot spawns a projectile if the weapon's cooldown and the player's
 // swap cooldown permit it. `now` is the tick-shared timestamp captured at
-// tick start (load-bearing for BUG-04 and BUG-07).
-func HandleShoot(p *PlayerState, r *RoomState, aimAngle float32, now time.Time) {
+// tick start (load-bearing for BUG-04 and BUG-07). `released` indicates the
+// fire button was up between this shot and the previous one; held shots
+// (released=false) get a HoldFireCooldownMult× cooldown penalty.
+func HandleShoot(p *PlayerState, r *RoomState, aimAngle float32, released bool, now time.Time) {
 	wid := p.CurrentWeapon
 	spec, ok := WeaponSpecs[wid]
 	if !ok {
@@ -66,6 +68,9 @@ func HandleShoot(p *PlayerState, r *RoomState, aimAngle float32, now time.Time) 
 	cooldown := time.Duration(spec.CooldownMs) * time.Millisecond
 	if p.FireRateStacks > 0 {
 		cooldown = time.Duration(float64(cooldown) / (1 + 0.1*float64(p.FireRateStacks)))
+	}
+	if !released {
+		cooldown *= HoldFireCooldownMult
 	}
 	p.WeaponCooldown[wid] = now.Add(cooldown)
 

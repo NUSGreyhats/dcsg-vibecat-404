@@ -96,8 +96,8 @@ export class GameStateSync {
     this.send(C2SType.INPUT, { dx, dy });
   }
 
-  sendShoot(aimAngle: number): void {
-    this.send(C2SType.SHOOT, { aim_angle: aimAngle });
+  sendShoot(aimAngle: number, released: boolean): void {
+    this.send(C2SType.SHOOT, { aim_angle: aimAngle, released });
   }
 
   sendSwitchWeapon(weaponId: number): void {

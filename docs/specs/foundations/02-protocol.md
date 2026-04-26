@@ -39,7 +39,7 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 | 0x01 | `C2S_AUTH`          | `{ player_id: string }`                             |
 | 0x02 | `C2S_START_RUN`     | `{ start_time: int64 }`                             |
 | 0x03 | `C2S_INPUT`         | `{ dx: float32, dy: float32 }`                      |
-| 0x04 | `C2S_SHOOT`         | `{ aim_angle: float32 }`                            |
+| 0x04 | `C2S_SHOOT`         | `{ aim_angle: float32, released: bool }`            |
 | 0x05 | `C2S_SWITCH_WEAPON` | `{ weapon_id: uint8 }`                              |
 | 0x06 | `C2S_INTERACT`      | `{ target_id: uint32, claimed_type: uint8 }`        |
 | 0x07 | `C2S_ENTER_DOOR`    | `{ door_id: uint32 }`                               |
@@ -47,6 +47,8 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 | 0x09 | `C2S_SHOP_PURCHASE` | `{ item_id: uint8 }`                                |
 
 `claimed_type` on `C2S_INTERACT` is the pickup type the *client* says it's interacting with. The server does **not** validate `claimed_type == pk.Type` — see [../features/shop.md#bug-12-pickup-type-confusion](../features/shop.md#bug-12-pickup-type-confusion).
+
+`released` on `C2S_SHOOT` is true when the fire button was up at some point between this shot and the previous one (i.e. a fresh click, not a held continuation). Held continuations get a `HoldFireCooldownMult`× cooldown penalty server-side — see [../features/combat-weapons.md](../features/combat-weapons.md) and issue #62. The field is client-trusted; the goal is to nerf unskilled hold-to-fire players, not to defeat exploit clients.
 
 ### S2C — append new rows below `0x89` when adding features
 

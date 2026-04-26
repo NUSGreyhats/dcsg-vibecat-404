@@ -15,6 +15,12 @@ type InputPacket struct {
 
 type ShootPacket struct {
 	AimAngle float32 `json:"aim_angle"`
+	// Released is true when the fire button was up at some point between
+	// this shot and the previous one (i.e. a fresh click, not a held
+	// continuation). Server uses it to slow sustained hold-to-fire — see
+	// HoldFireCooldownMult and issue #62. Default (false) penalizes any
+	// client that omits the field.
+	Released bool `json:"released"`
 }
 
 type SwitchWeaponPacket struct {
