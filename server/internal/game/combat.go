@@ -15,11 +15,8 @@ func ApplyHeal(p *PlayerState, amount int16) {
 }
 
 // TakeDamage returns true when the enemy's HP drops to zero or below.
-// BUG-08 (enemy side): int16 arithmetic on `amount - reduction` can underflow.
 func TakeDamage(e *EnemyState, amount int16) bool {
-	reduction := e.Armor
-	effectiveDmg := amount - reduction
-	e.HP -= effectiveDmg
+	e.HP -= amount
 	return e.HP <= 0
 }
 

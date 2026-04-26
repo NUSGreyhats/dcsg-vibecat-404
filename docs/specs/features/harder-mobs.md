@@ -183,7 +183,7 @@ instantiation time (applies to both initial-pop enemies and wave mobs):
 
 Scaling is applied inside `InstantiateEnemy` based on `RoomState.RoomIndex`
 plus archetype baseline. **No RNG is consumed**, so the BUG-01 seed invariant
-and replay byte-stability are preserved. Archetype `AggroRange`, `Armor`, and
+and replay byte-stability are preserved. Archetype `AggroRange` and
 `AttackCooldownMs` are **not** scaled — only HP and Speed.
 
 Base archetype Speed values were also bumped globally in the same change

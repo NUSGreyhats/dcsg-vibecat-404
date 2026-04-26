@@ -31,7 +31,7 @@ function tintForType(type: number): number {
     case ENEMY_TYPE.RUNNER:
       return 0xffc080; // warm amber — runner
     case ENEMY_TYPE.TANK:
-      return 0x9eb8ff; // steely blue — armored
+      return 0x9eb8ff; // steely blue — tank
     case ENEMY_TYPE.KAMIKAZE:
       return 0xff8080; // pink-red — volatile
     case ENEMY_TYPE.BOSS:

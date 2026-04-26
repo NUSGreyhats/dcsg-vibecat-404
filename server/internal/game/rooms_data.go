@@ -336,51 +336,31 @@ var RoomTemplates = [12]*RoomTemplate{
 		TilemapID: "room-11",
 		Enemies: []EnemySpawnDef{
 			{EntityID: 1101, Type: EnemyBoss, X: 640, Y: 384},
-			// 6-grunt ring around the boss at radius 140.
+			// 3-grunt ring around the boss at radius 140 (120° spacing).
 			{EntityID: 1102, Type: EnemyGrunt, X: 780, Y: 384},
-			{EntityID: 1103, Type: EnemyGrunt, X: 710, Y: 505},
 			{EntityID: 1104, Type: EnemyGrunt, X: 570, Y: 505},
-			{EntityID: 1105, Type: EnemyGrunt, X: 500, Y: 384},
 			{EntityID: 1106, Type: EnemyGrunt, X: 570, Y: 263},
-			{EntityID: 1107, Type: EnemyGrunt, X: 710, Y: 263},
 		},
 		Waves: []WaveDef{
-			// Wave 1 — 10 runners at radius ~300, 36° spacing offset 18°
-			// so they don't line up with the inner ring.
+			// Wave 1 — 5 runners at radius ~300, 72° spacing.
 			{Mobs: []WaveMobDef{
 				{Type: EnemyRunner, X: 925, Y: 477},
-				{Type: EnemyRunner, X: 816, Y: 627},
 				{Type: EnemyRunner, X: 640, Y: 684},
-				{Type: EnemyRunner, X: 464, Y: 627},
 				{Type: EnemyRunner, X: 355, Y: 477},
-				{Type: EnemyRunner, X: 355, Y: 291},
 				{Type: EnemyRunner, X: 464, Y: 141},
-				{Type: EnemyRunner, X: 640, Y: 84},
 				{Type: EnemyRunner, X: 816, Y: 141},
-				{Type: EnemyRunner, X: 925, Y: 291},
 			}},
-			// Wave 2 — 20 kamikazes along the perimeter (7 top, 7 bottom,
-			// 3 left, 3 right).
+			// Wave 2 — 10 kamikazes along the perimeter.
 			{Mobs: []WaveMobDef{
 				{Type: EnemyKamikaze, X: 120, Y: 80},
-				{Type: EnemyKamikaze, X: 320, Y: 80},
 				{Type: EnemyKamikaze, X: 520, Y: 80},
-				{Type: EnemyKamikaze, X: 640, Y: 80},
 				{Type: EnemyKamikaze, X: 760, Y: 80},
-				{Type: EnemyKamikaze, X: 960, Y: 80},
 				{Type: EnemyKamikaze, X: 1160, Y: 80},
-				{Type: EnemyKamikaze, X: 120, Y: 688},
 				{Type: EnemyKamikaze, X: 320, Y: 688},
-				{Type: EnemyKamikaze, X: 520, Y: 688},
 				{Type: EnemyKamikaze, X: 640, Y: 688},
-				{Type: EnemyKamikaze, X: 760, Y: 688},
 				{Type: EnemyKamikaze, X: 960, Y: 688},
-				{Type: EnemyKamikaze, X: 1160, Y: 688},
-				{Type: EnemyKamikaze, X: 80, Y: 200},
 				{Type: EnemyKamikaze, X: 80, Y: 384},
-				{Type: EnemyKamikaze, X: 80, Y: 568},
 				{Type: EnemyKamikaze, X: 1200, Y: 200},
-				{Type: EnemyKamikaze, X: 1200, Y: 384},
 				{Type: EnemyKamikaze, X: 1200, Y: 568},
 			}},
 		},

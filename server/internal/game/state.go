@@ -141,7 +141,6 @@ type EnemyState struct {
 	Speed          float32
 	JitterX        float32
 	JitterY        float32
-	Armor          int16
 }
 
 type ProjectileState struct {

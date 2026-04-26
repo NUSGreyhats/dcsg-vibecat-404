@@ -12,16 +12,15 @@ type ArchetypeSpec struct {
 	Speed            float32
 	AggroRange       float32
 	AttackCooldownMs int
-	Armor            int16
 	MeleeDamage      int16 // Damage dealt to the player on a successful melee hit.
 }
 
 var Archetypes = map[uint8]ArchetypeSpec{
 	1: {Name: "grunt", HP: 3, Speed: 95, AggroRange: 200, AttackCooldownMs: 800, MeleeDamage: 5},
 	2: {Name: "runner", HP: 2, Speed: 165, AggroRange: 260, AttackCooldownMs: 600, MeleeDamage: 4},
-	3: {Name: "tank", HP: 12, Speed: 60, AggroRange: 160, AttackCooldownMs: 1200, Armor: 1, MeleeDamage: 8},
+	3: {Name: "tank", HP: 12, Speed: 60, AggroRange: 160, AttackCooldownMs: 1200, MeleeDamage: 8},
 	4: {Name: "kamikaze", HP: 1, Speed: 145, AggroRange: 220, AttackCooldownMs: 0, MeleeDamage: 15},
-	5: {Name: "boss", HP: 120, Speed: 70, AggroRange: 360, AttackCooldownMs: 900, Armor: 3, MeleeDamage: 20},
+	5: {Name: "boss", HP: 120, Speed: 70, AggroRange: 360, AttackCooldownMs: 900, MeleeDamage: 20},
 }
 
 // roomTier returns the HP and Speed multipliers applied to mobs spawned in a
@@ -121,7 +120,6 @@ func InstantiateEnemy(roomIndex uint8, id uint32, etype uint8, seed MobSeed, now
 		Speed:          spec.Speed * speedMult,
 		JitterX:        seed.JitterX,
 		JitterY:        seed.JitterY,
-		Armor:          spec.Armor,
 	}
 }
 
