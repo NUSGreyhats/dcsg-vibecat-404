@@ -80,6 +80,8 @@ export class Game extends Phaser.Scene {
   create(): void {
     const sync = getSync();
     this.controls = createControls(this);
+    this.requestedPickupIds.clear();
+    this.requestedDoorIds.clear();
 
     const roomData = sync.state.roomData;
     if (!roomData) {
@@ -474,6 +476,8 @@ export class Game extends Phaser.Scene {
     this.events.off("enemyHit", this.onEnemyHit, this);
     this.hitstopUntil = 0;
     this.prevPlayerHp = -1;
+    this.requestedPickupIds.clear();
+    this.requestedDoorIds.clear();
 
     for (const obj of this.backgroundObjs) obj.destroy();
     this.backgroundObjs = [];
