@@ -18,8 +18,7 @@ How physical input (keyboard, mouse) becomes C2S packets. Covers the `Controls` 
 export type Controls = {
     movement(): { dx: number, dy: number };
     aimAngle(pivotX: number, pivotY: number): number;
-    shootPressed(): boolean;     // edge-triggered (one-shot)
-    shootHeld(): boolean;        // pointer button currently down (polled)
+    shootHeld(): boolean;        // pointer button currently down (polled — drives hold-to-shoot)
     interactPressed(): boolean;  // Phaser JustDown on 'E'
     inventoryPressed(): boolean; // Phaser JustDown on 'I'
     shopPressed(): boolean;      // Phaser JustDown on 'B' — opens ShopMenu
@@ -31,7 +30,7 @@ All methods are re-queried live — nothing is cached across ticks. Callers invo
 
 ### Graceful degradation
 
-If `scene.input.keyboard` is null (Phaser's keyboard plugin disabled or unavailable), `createControls` returns a **no-op facade** whose `movement()` is `{0,0}`, `shootPressed` always `false`, etc. The game still runs — it's just un-steerable. This matters for:
+If `scene.input.keyboard` is null (Phaser's keyboard plugin disabled or unavailable), `createControls` returns a **no-op facade** whose `movement()` is `{0,0}`, `shootHeld` always `false`, etc. The game still runs — it's just un-steerable. This matters for:
 
 - Testing environments where the DOM / keyboard is absent.
 - Future spectator mode ([09-spectator-mode.md](./09-spectator-mode.md)) which should reuse `Game` + `GameHUD` without accepting input.
@@ -42,7 +41,7 @@ If `scene.input.keyboard` is null (Phaser's keyboard plugin disabled or unavaila
 | -------------------------- | ------------------------------------- | ---------------- | --------------------------------------- |
 | Movement                   | `W/A/S/D` + Arrow keys                | Held (per-frame) | `C2S_INPUT { dx, dy }` throttled to 50 ms |
 | Aim                        | Mouse position                        | Polled each frame | Used as `aimAngle` argument to `shoot` |
-| Shoot                      | Left mouse button (just-pressed edge) | Edge-triggered   | `C2S_SHOOT { aim_angle }`               |
+| Shoot                      | Left mouse button (held)              | Polled per frame, throttled to weapon fire rate | `C2S_SHOOT { aim_angle }` |
 | Weapon slot 1/2/3          | `1`, `2`, `3` (just-pressed)          | Just-pressed     | `C2S_SWITCH_WEAPON { weapon_id }`       |
 | Interact                   | `E`                                   | Just-pressed     | `C2S_INTERACT { target_id, claimed_type }` or `C2S_ENTER_DOOR { door_id }` (whichever is nearest); `claimed_type` is the rendered pickup's type — see [features/shop.md BUG-12](../features/shop.md#bug-12-pickup-type-confusion) |
 | Open Inventory             | `I`                                   | Just-pressed     | `scene.launch("InventoryMenu")` (no C2S yet) |
@@ -66,24 +65,19 @@ return Math.atan2(worldY - pivotY, worldX - pivotX);
 
 Preferring `worldX/Y` over screen `x/y` means future camera scrolling wouldn't warp the aim angle. Current rooms fit the viewport so `worldX === x`, but guarding now is free.
 
-### Shoot edge detection
+### Shoot polling
 
-Phaser's pointer API doesn't ship a frame-bounded "just-pressed for the main button," so `Controls` tracks it manually:
+`Controls.shootHeld()` returns the live pointer state — it is polled every frame from `Game.handleInput()`:
 
 ```ts
-let shootEdge = false;
-scene.input.on(Phaser.Input.Events.POINTER_DOWN, (p) => {
-    if (p.leftButtonDown()) shootEdge = true;
-});
-
-shootPressed(): boolean {
-    if (shootEdge) { shootEdge = false; return true; }
-    return false;
+shootHeld(): boolean {
+    return scene.input.activePointer.leftButtonDown();
 }
 ```
 
-- One click = one `true` from `shootPressed()`. `Game.update()` polls it each frame, so at 60 Hz with 50 ms ticks, a rapid clicker would generate one `C2S_SHOOT` per click up to roughly the frame rate.
-- `shootHeld()` is the polled variant for auto-fire weapons — not currently used (no server-side auto-fire), but available for future weapon behaviors.
+- **Hold-to-shoot.** Holding the left mouse button fires continuously at the equipped weapon's max rate. Releasing stops fire on the next frame.
+- **Single click = one shot.** A click is just one frame (or a few) of "held"; the first held frame fires immediately because the throttle gate is reset on release (see [Shoot throttle](#shoot-throttle) below).
+- **No edge detection needed.** The previous `shootPressed()` (frame-bounded just-pressed) was removed. Phaser's pointer API has no frame-bounded just-pressed for the main button, but we don't need one — first-frame-held is functionally equivalent for a hold-to-shoot model.
 
 ### Just-pressed for keyboard
 
@@ -98,8 +92,8 @@ graph LR
     GATE -->|yes| SEND_I["sync.sendInput(dx, dy)<br/>reset acc"]
     GATE -->|no| SKIP[" "]
 
-    SH["Controls.shootPressed()"] -->|true| AIM["Controls.aimAngle(player.x, player.y)"]
-    AIM --> SEND_S["sync.sendShoot(angle)"]
+    SH["Controls.shootHeld()"] -->|held & now ≥ nextShootAt| AIM["Controls.aimAngle(player.x, player.y)"]
+    AIM --> SEND_S["sync.sendShoot(angle)<br/>nextShootAt = now + effectiveCd"]
 
     SW["Controls.weaponSwitchPressed()"] -->|slot ∈ 1/2/3| SEND_W["sync.sendSwitchWeapon(slot)"]
 
@@ -126,13 +120,28 @@ No packet is sent when the player is idle (`dx = dy = 0`), **but** that's an opt
 
 ### Shoot throttle
 
-None at the client. `shootPressed()` returns true once per click-edge; left-holding the mouse does not auto-fire. The server's weapon cooldown (see [features/combat-weapons.md](../features/combat-weapons.md)) is authoritative — the client sends every edge-triggered `C2S_SHOOT` and trusts the server to accept or reject.
+While the left mouse button is held, `Game.handleInput` rate-limits outbound `C2S_SHOOT` to the equipped weapon's effective fire rate:
 
-Rationale: mirroring the server's cooldown on the client would:
-- Hide `BUG-04` and `BUG-07` (swap cancel, damage batch overflow) from the stock client — exploiters would still hit them via custom clients, but the UX asymmetry is awkward.
-- Force the `WEAPON_STATS` table to stay in perfect sync with `weaponSpecs` on the server. It's already mirrored for HUD display — adding a second reason tightens the coupling.
+```ts
+const id = weaponFromServerId(sp.weapon_id);
+const baseCd = WEAPON_STATS[id].cooldownMs;
+const stacks = sp.fire_rate_stacks ?? 0;
+this.nextShootAt = now + baseCd / (1 + 0.1 * stacks);
+```
 
-Instead, visual feedback for cooldown (greyed-out weapon icon when on cooldown) could be driven by comparing `now` to a client-maintained `nextFireAt` per weapon — but only as polish, not as a gate on `sendShoot`.
+The formula matches the server's fire-rate stack math (`server/internal/game/combat.go`). On release, `nextShootAt` resets to 0, so a fresh click fires on the very next frame with no perceived delay.
+
+This is a **bandwidth shaper, not a server-policy gate**. The throttle's only job is to avoid spamming packets that are too early for the equipped weapon's current effective cooldown — at 60 fps a held button would otherwise emit ~60 `C2S_SHOOT`/sec for a shotgun whose 520 ms cooldown only accepts ~2/sec. So the client throttle matches the server's **per-weapon fire-rate acceptance rate** (for the equipped weapon, with current upgrade stacks), but it does **not** guarantee that every emitted shoot will be accepted. Specifically, the client does **not**:
+
+- Predict swap cooldowns (the 400 ms post-`C2S_SWITCH_WEAPON` lockout). Shoots fired during a swap lockout are still sent and the server still rejects them.
+- Predict damage-batch overflow ([BUG-07](../features/combat-weapons.md)) or any other server-side rejection beyond fire rate.
+- Suppress shoots for any reason other than "too soon for the equipped weapon."
+
+So `BUG-04` (swap cancel) and `BUG-07` are still observable from the stock client — the throttle never hides them, because it only filters per-weapon cooldown spam and leaves other server-side checks untouched.
+
+Why we accept the formula coupling now: `WEAPON_STATS` is already mirrored client-side for HUD/shop display, and `fire_rate_stacks` is part of every player snapshot. Computing the effective cooldown costs nothing extra and is necessary to stop shotgun-hold from flooding the wire 30× over.
+
+Visual cooldown polish (greyed-out weapon icon when on cooldown) could be driven from the same `nextShootAt` field if we wanted it later — still as polish, not a gate.
 
 ### Interact precedence: pickup before door
 
@@ -202,7 +211,7 @@ The `B` key opens the shop. `ShopMenu` owns its own keys for while-open (Up/Down
 
 Repeatedly stressed in adjacent specs, worth restating here because input is where the temptation is strongest:
 
-- **Do not** suppress a `sendShoot` because `now < weaponCooldownEnd`. The server decides.
+- **Do not** suppress a `sendShoot` because the server *might* reject it (swap lockout, damage batch, etc.). The hold-to-shoot throttle (see [Shoot throttle](#shoot-throttle)) is allowed because it shapes bandwidth using the *exact* server-accepted rate for the equipped weapon — it never refuses a shoot the server would have accepted, so it doesn't divide stock-client behavior from custom-client behavior in any way the player can observe.
 - **Do not** suppress a `sendSwitchWeapon` because the weapon is "already equipped." The server tolerates; ignoring it costs nothing.
 - **Do not** suppress a `sendInteract` because the nearest pickup is outside 80 px. The 80 px is a target-selection threshold; pressing `E` with no target within range simply sends nothing. That's different from refusing a server-sanctioned interact.
 - **Do not** enforce ±30 min window on `start_time` before `sendStartRun`. The server validates that with `|start_time − time.Now()| ≤ 30 min`; the client just passes `Date.now()`.
@@ -227,7 +236,7 @@ The one grey area is the 80 px `radius` — that **does** gate the packet, but o
 ## Implementation status
 
 - `Controls` facade, `Game.handleInput`, and `InventoryMenu`'s local bindings all exist and work.
-- `shootHeld()` is exported but not used — reserved for future auto-fire weapons.
+- `shootHeld()` drives hold-to-shoot for all weapons. The per-weapon throttle is computed from `WEAPON_STATS[id].cooldownMs` and `player.fire_rate_stacks` each fire.
 - Weapon slots 1/2/3 map to pistol/rifle/shotgun (server ids 1/2/3). The client uses `weaponFromServerId()` to translate the server's numeric id to the client-side `WeaponId` — do NOT index into `ALL_WEAPON_IDS` with the server id directly.
 - No touch / gamepad support — desktop-keyboard-and-mouse only. Adding touch would involve a virtual joystick + tap-to-interact, and is not in scope for DEF CON.
 
