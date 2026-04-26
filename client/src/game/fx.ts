@@ -154,7 +154,7 @@ export function spawnMuzzleFlash(
   flash.setOrigin(0, 0.5);
   flash.setRotation(angle);
   flash.setBlendMode(Phaser.BlendModes.ADD);
-  flash.setDepth(12);
+  flash.setDepth(DEPTH_FX);
   scene.tweens.add({
     targets: flash,
     alpha: 0,
