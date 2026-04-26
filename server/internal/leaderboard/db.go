@@ -87,11 +87,11 @@ func TopRuns(db *sql.DB, n int) ([]protocol.LeaderboardEntry, error) {
 		return nil, nil
 	}
 	rows, err := db.Query(
-		`SELECT cr.replay_id, cr.display_name, cr.total_ms, cr.seed, cr.splits_json, cr.submitted_at
+		`SELECT cr.replay_id, cr.display_name, cr.total_ms, cr.seed, cr.splits_json
            FROM completed_runs cr
       LEFT JOIN flagged_runs fr ON fr.replay_id = cr.replay_id
           WHERE fr.replay_id IS NULL
-          ORDER BY cr.total_ms ASC, cr.submitted_at ASC
+          ORDER BY cr.total_ms ASC
           LIMIT ?`,
 		n,
 	)
@@ -109,9 +109,8 @@ func TopRuns(db *sql.DB, n int) ([]protocol.LeaderboardEntry, error) {
 			totalMs     int64
 			seed        int64
 			splitsJSON  string
-			submittedAt string
 		)
-		if err := rows.Scan(&replayID, &displayName, &totalMs, &seed, &splitsJSON, &submittedAt); err != nil {
+		if err := rows.Scan(&replayID, &displayName, &totalMs, &seed, &splitsJSON); err != nil {
 			return nil, fmt.Errorf("leaderboard: scan: %w", err)
 		}
 		var splits []protocol.SplitData
@@ -127,7 +126,6 @@ func TopRuns(db *sql.DB, n int) ([]protocol.LeaderboardEntry, error) {
 			Splits:      splits,
 			Seed:        seed,
 			ReplayID:    replayID,
-			SubmittedAt: submittedAt,
 		})
 		rank++
 	}

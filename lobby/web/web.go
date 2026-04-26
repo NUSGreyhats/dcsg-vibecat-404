@@ -11,6 +11,3 @@ var SpectateHTML []byte
 
 //go:embed admin.html
 var AdminHTML []byte
-
-//go:embed admin_login.html
-var AdminLoginHTML []byte

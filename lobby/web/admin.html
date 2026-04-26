@@ -78,44 +78,6 @@
   </section>
 
   <section>
-    <h2>Queue</h2>
-    <div id="queue-disabled" hidden>
-      <p>Queue is disabled (<code>QUEUE_ENABLED</code> not set). Set it on the
-      lobby + run with <code>AUTH_MODE=token</code> on the game server to
-      activate FIFO turn-taking.</p>
-    </div>
-    <div id="queue-active" hidden>
-      <h3 style="font-size:13px; color:var(--muted); margin:8px 0 4px; text-transform:uppercase;">Concurrency cap</h3>
-      <p style="margin:4px 0 8px; color:var(--muted); font-size:12px;">
-        Queue admission cap. <code>0</code> pauses new admissions without
-        kicking already-admitted players. Changes take effect within ~2 s
-        on the next advancer tick. The game server's
-        <code>MAX_CONCURRENT</code> env is the absolute backstop —
-        admitting beyond it will fail the WS upgrade as <em>server full</em>,
-        so keep this value &le; the env.
-      </p>
-      <form id="settings-form" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
-        <label for="max-concurrent" style="color:var(--muted); font-size:12px;">Max concurrent:</label>
-        <input id="max-concurrent" name="value" type="number" min="0" max="1024" step="1"
-          style="background:var(--midnight); color:var(--bone); border:1px solid var(--mid-blue); padding:4px 8px; font-family:inherit; font-size:13px; width:90px;">
-        <button type="submit" style="background:transparent; color:var(--mid-blue); border:1px solid var(--mid-blue); cursor:pointer; padding:4px 12px; font-family:inherit; font-size:12px;">Save</button>
-        <span id="settings-status" style="color:var(--muted); font-size:12px;"></span>
-      </form>
-      <h3 style="font-size:13px; color:var(--muted); margin:8px 0 4px; text-transform:uppercase;">Admitted (currently allowlisted)</h3>
-      <table id="admitted-tbl">
-        <thead><tr><th>Player ID</th><th></th></tr></thead>
-        <tbody id="admitted-rows"></tbody>
-      </table>
-      <h3 style="font-size:13px; color:var(--muted); margin:16px 0 4px; text-transform:uppercase;">Waiting (FIFO)</h3>
-      <table id="queue-tbl">
-        <thead><tr><th>Pos</th><th>Player ID</th><th>Joined</th><th></th></tr></thead>
-        <tbody id="queue-rows"></tbody>
-      </table>
-      <div class="meta" id="queue-meta"></div>
-    </div>
-  </section>
-
-  <section>
     <h2>Winner export</h2>
     <p>CSV with replay_id, player_id, display_name, contact, total_ms, submitted_at. Flagged runs are excluded.</p>
     <a class="export" href="/admin/winners.csv" download>Download winners.csv</a>
@@ -158,7 +120,7 @@
           '<td>' + (i + 1) + '</td>' +
           nameCell +
           '<td>' + fmtMs(e.total_ms) + '</td>' +
-          '<td><a href="/admin/replay/' + encodeURIComponent(e.replay_id) +
+          '<td><a href="/api/replay/' + encodeURIComponent(e.replay_id) +
             '" download style="color:var(--mid-blue)">' + shortId(e.replay_id) + '</a></td>' +
           '<td>' + escape(e.submitted_at) + '</td>' +
           '<td class="actions">' + flagBtn +
@@ -171,158 +133,6 @@
       metaEl.textContent = 'Error: ' + err.message;
     }
   }
-
-  const queueDisabledEl = document.getElementById('queue-disabled');
-  const queueActiveEl = document.getElementById('queue-active');
-  const admittedRowsEl = document.getElementById('admitted-rows');
-  const queueRowsEl = document.getElementById('queue-rows');
-  const queueMetaEl = document.getElementById('queue-meta');
-
-  function shortPid(id) { return String(id || '').slice(0, 12); }
-
-  function fmtJoined(ms) {
-    const d = new Date(Number(ms));
-    if (Number.isNaN(d.getTime())) return '—';
-    return d.toLocaleTimeString();
-  }
-
-  async function loadQueue() {
-    try {
-      const res = await fetch('/admin/queue.json');
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const body = await res.json();
-      if (!body.enabled) {
-        queueDisabledEl.hidden = false;
-        queueActiveEl.hidden = true;
-        return;
-      }
-      queueDisabledEl.hidden = true;
-      queueActiveEl.hidden = false;
-
-      admittedRowsEl.innerHTML = '';
-      (body.admitted || []).forEach((id) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = (
-          '<td title="' + escape(id) + '">' + escape(shortPid(id)) + '…</td>' +
-          '<td class="actions"><button class="del" data-action="free" data-id="' +
-            escape(id) + '">force-free</button></td>'
-        );
-        admittedRowsEl.appendChild(tr);
-      });
-      if ((body.admitted || []).length === 0) {
-        admittedRowsEl.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">— none —</td></tr>';
-      }
-
-      queueRowsEl.innerHTML = '';
-      (body.queue || []).forEach((e) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = (
-          '<td>' + e.position + '</td>' +
-          '<td title="' + escape(e.player_id) + '">' + escape(shortPid(e.player_id)) + '…</td>' +
-          '<td>' + escape(fmtJoined(e.joined_at)) + '</td>' +
-          '<td class="actions"><button class="del" data-action="kick" data-id="' +
-            escape(e.player_id) + '">kick</button></td>'
-        );
-        queueRowsEl.appendChild(tr);
-      });
-      if ((body.queue || []).length === 0) {
-        queueRowsEl.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">— empty —</td></tr>';
-      }
-
-      queueMetaEl.textContent =
-        (body.queue || []).length + ' waiting · ' +
-        (body.admitted || []).length + ' admitted · refreshed ' +
-        new Date().toLocaleTimeString();
-    } catch (err) {
-      queueMetaEl.textContent = 'Error: ' + err.message;
-    }
-  }
-
-  async function queueAction(action, id) {
-    let res;
-    if (action === 'kick') {
-      res = await fetch('/admin/queue/' + encodeURIComponent(id), { method: 'DELETE' });
-    } else if (action === 'free') {
-      res = await fetch('/admin/slot/free/' + encodeURIComponent(id), { method: 'POST' });
-    }
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-  }
-
-  document.addEventListener('click', async (ev) => {
-    const btn = ev.target.closest('button[data-action="kick"], button[data-action="free"]');
-    if (!btn) return;
-    const action = btn.dataset.action;
-    const id = btn.dataset.id;
-    const verb = action === 'kick' ? 'Kick' : 'Force-free';
-    if (!confirm(verb + ' player ' + shortPid(id) + '…?')) return;
-    btn.disabled = true;
-    try {
-      await queueAction(action, id);
-      loadQueue();
-    } catch (err) {
-      alert(verb + ' failed: ' + err.message);
-      btn.disabled = false;
-    }
-  });
-
-  loadQueue();
-  setInterval(loadQueue, 3000);
-
-  const settingsForm = document.getElementById('settings-form');
-  const maxConcurrentInput = document.getElementById('max-concurrent');
-  const settingsStatus = document.getElementById('settings-status');
-
-  function setSettingsStatus(msg, isError) {
-    settingsStatus.textContent = msg;
-    settingsStatus.style.color = isError ? 'var(--danger)' : 'var(--muted)';
-  }
-
-  async function loadSettings() {
-    try {
-      const res = await fetch('/admin/settings.json');
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const body = await res.json();
-      maxConcurrentInput.value = String(body.max_concurrent);
-      setSettingsStatus('Current: ' + body.max_concurrent, false);
-    } catch (err) {
-      setSettingsStatus('Load failed: ' + err.message, true);
-    }
-  }
-
-  async function saveSettings(value) {
-    const res = await fetch('/admin/settings/max-concurrent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ value }),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(text || ('HTTP ' + res.status));
-    }
-  }
-
-  settingsForm.addEventListener('submit', async (ev) => {
-    ev.preventDefault();
-    const raw = maxConcurrentInput.value.trim();
-    if (raw === '') {
-      setSettingsStatus('Value required', true);
-      return;
-    }
-    const n = Number(raw);
-    if (!Number.isInteger(n) || n < 0 || n > 1024) {
-      setSettingsStatus('Value must be 0–1024', true);
-      return;
-    }
-    setSettingsStatus('Saving…', false);
-    try {
-      await saveSettings(n);
-      await loadSettings();
-    } catch (err) {
-      setSettingsStatus('Save failed: ' + err.message, true);
-    }
-  });
-
-  loadSettings();
 
   rowsEl.addEventListener('click', async (ev) => {
     const btn = ev.target.closest('button');

@@ -9,10 +9,11 @@ Separate service (Repo B) that manages FIFO turn-taking in production, serves th
 | Endpoint                       | Method | Purpose                                                 |
 | ------------------------------ | ------ | ------------------------------------------------------- |
 | `/api/register`                | POST   | `{ display_name, contact, password }` → `{ player_id }` |
-| `/api/queue/join`              | POST   | `{ player_id, password }` → `{ position, est_wait_ms, admitted }`. Returns `503` when `QUEUE_ENABLED` is unset. `est_wait_ms = max(0, position-1) * AVG_TURN_MS`, so the front of the line and admitted callers report `0`. |
-| `/api/queue/status/:player_id` | GET    | `{ position, est_wait_ms, admitted }`. `position == 0 && admitted` ⇒ allowlisted; client should open the WS. |
+| `/api/queue/join`              | POST   | `{ player_id, password }` → `{ position, est_wait_ms }` |
+| `/api/queue/status/:player_id` | GET    | Current position                                        |
 | `/api/queue/:player_id`        | DELETE | `{ password }` — leave queue                            |
 | `/api/leaderboard`             | GET    | Rankings from `game.db`                                 |
+| `/api/replay/:replay_id`       | GET    | Replay data from `game.db`                              |
 | `/api/live`                    | GET    | JSON list of currently-playing games. See [Live spectating](#live-spectating). |
 | `/spectate`                    | GET    | HTML selector page: lists live games, links into viewer. |
 | `/spectate/:player_id`         | GET    | HTML viewer page that hosts the client in spectator mode. |
@@ -23,92 +24,16 @@ See [03-identity-auth.md](./03-identity-auth.md) for the registration / verifica
 
 ## Admin panel (auth-protected)
 
-- `/admin/queue` — list queued players, kick from line, force-free an admitted slot.
+- `/admin/queue` — reorder, kick, advance, pause.
 - `/admin/leaderboard` — flag, remove entries.
-- `/admin/replay/:replay_id` — download replay JSON (input log + seed). Moderators-only; not exposed publicly so input logs can't be data-mined for the intentional bugs.
 - `/admin/winners` — decrypt + export contact info.
-- `/admin/slot` — force-free a slot.
-- `/admin/settings` — set the queue admission cap (see [Concurrency cap](#concurrency-cap)). `0` pauses new admissions without kicking already-admitted players. (Pause = cap-to-0; explicit reorder is not yet implemented.)
+- `/admin/slot` — force-free slot, adjust `MAX_CONCURRENT`.
 
-### Admin auth (Telegram OTP)
-
-The admin panel is gated by a one-time-code flow that delivers the code through a configured Telegram chat instead of email. The chat itself is the access-control list — anyone in the chat is an admin — so there's no separate "allowed admins" allowlist to keep in sync.
-
-**Required env (lobby):**
-
-| Var                       | Purpose                                                                  |
-| ------------------------- | ------------------------------------------------------------------------ |
-| `TELEGRAM_BOT_TOKEN`      | Bot token from `@BotFather`. Empty → admin disabled (503).               |
-| `TELEGRAM_ADMIN_CHAT_ID`  | Numeric chat ID where OTPs are sent. Group or single user.               |
-| `ADMIN_SESSION_SECRET`    | HMAC key for session cookies. Used as raw bytes (no decoding); minimum length 16 bytes. Treat the env value as the literal key — pass random ASCII or a base64/hex string and it'll be HMAC'd as-is. |
-
-**Login flow:**
-
-1. `GET /admin/login` — public. Renders an HTML page with a "Send code to Telegram" button and (when the `admin_login` cookie is present) an OTP input field.
-2. `POST /admin/login` — generates a 6-digit code and a `session_id` (16 random bytes encoded as 32 hex characters), stores `(session_id, sha256(session_id || 0x00 || otp), expires_at)` in `pending_admin_logins` (the `0x00` separator forces a length boundary so `sessionID="ab"+otp="cd"` and `sessionID="abc"+otp="d"` hash differently), sets the `admin_login=<session_id>` cookie (HttpOnly, Secure when the request is HTTPS or arrived via an `X-Forwarded-Proto: https` proxy, SameSite=Lax, both `Max-Age` and matching `Expires` set to 5 min), and posts the code to the configured chat via `https://api.telegram.org/bot<token>/sendMessage`. The Telegram message uses `parse_mode=Markdown` and wraps the OTP in backticks so it renders as inline code — mobile clients then expose tap-to-copy on the digits. Rate-limited to 5 requests per 15 minutes per source IP (X-Forwarded-For is honoured only when the immediate peer is private/loopback so an internet client can't spoof the header to bypass the cap).
-3. `POST /admin/verify` — reads the OTP from the form body and the `session_id` from the cookie, looks up the row, increments `attempts` (rejecting after 5), verifies the hashed OTP, and on success deletes the row and sets a fresh `admin_session=<exp>.<hmac>` cookie (HttpOnly, Secure as above, SameSite=Lax, both `Max-Age` and matching `Expires` set to 24 h) before redirecting to `/admin/`. Cookie deletion paths (`HandleLogout`, `unauthorized()`) emit `Set-Cookie` with the same `Secure` attribute so HTTPS clients can reliably clear a Secure-issued cookie.
-4. `GET /admin/logout` — clears `admin_session`.
-5. All other `/admin/*` requests pass through middleware that verifies the `admin_session` cookie's HMAC + expiry; failures redirect to `/admin/login`.
-
-**Session cookie shape:** `<exp_unix>.<base64url(hmac_sha256(secret, exp_unix))>`. Stateless on the server — no DB lookup on the hot path. Rotation requires changing `ADMIN_SESSION_SECRET`, which forcibly invalidates every issued cookie.
-
-**Schema (`lobby.db`):**
-
-```sql
-CREATE TABLE pending_admin_logins (
-    session_id   TEXT PRIMARY KEY,
-    otp_hash     BLOB NOT NULL,         -- sha256(session_id || 0x00 || otp)
-    expires_at   INTEGER NOT NULL,      -- unix seconds, 5 min after issue
-    attempts     INTEGER NOT NULL DEFAULT 0,
-    created_at   INTEGER NOT NULL
-);
-CREATE INDEX idx_pending_admin_expires ON pending_admin_logins(expires_at);
-```
-
-A periodic sweep (or opportunistic delete during issue/verify) prunes expired rows; the table stays small.
-
-**Threat model:**
-
-- **OTP brute force:** 6 digits = 1 M space, 5 attempts per session, 5-min TTL. Even a fully concurrent attacker who steals the `admin_login` cookie has a `5 / 1_000_000` chance per session. Not session-binding the OTP would let an attacker race many sessions; we session-bind via cookie.
-- **Cookie theft:** session cookies are HttpOnly + Secure + SameSite=Lax. Compromise = full admin until expiry; recovery is rotating `ADMIN_SESSION_SECRET`.
-- **Telegram outage:** admin login is unavailable for the duration. Acceptable — there's no anti-cheat or live-state path that needs admin during an outage; runs continue, leaderboard moderation just defers.
-- **Bot token leak:** an attacker can spam the chat with bogus OTPs but cannot log in, because they don't have the `session_id` cookie. We rotate the bot token via BotFather and update env.
-
-**Why this over basic auth:** no shared password to rotate / leak / forget; no SMTP infrastructure; the chat itself is the audit log of who logged in when.
-
-See [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md) open questions for the prior IP-allowlist alternative; that remains a viable belt-and-braces add-on if we want network-layer scoping on top.
-
-### Concurrency cap
-
-The queue's admission cap is owned by the lobby and persisted in `lobby.db`. On first boot the schema seeds a default of `4`; admins set the runtime value from the panel without restarting either service:
-
-| Endpoint                         | Method | Body                 | Purpose                                                                                      |
-| -------------------------------- | ------ | -------------------- | -------------------------------------------------------------------------------------------- |
-| `/admin/settings.json`           | GET    | —                    | `{ "max_concurrent": <int> }`. Always present.                                              |
-| `/admin/settings/max-concurrent` | POST   | `{ "value": <int> }` | Set the cap. `0..1024`. Takes effect on the next advancer tick (~2 s).                       |
-
-Cap semantics:
-
-- **Set N**: the advancer admits up to N players from the queue. The game server's env-set `MAX_CONCURRENT` remains the absolute backstop — admitting beyond it just means players hit `server full` on WS upgrade, so admins should keep this value `≤` the env.
-- **`0`**: pause new admissions. Already-admitted players keep their slot; the queue grows. Setting `>0` resumes admissions on the next tick.
-- **Persistence**: the value lives in `lobby.db` (`lobby_settings` table) and survives a lobby restart. EnsureSchema's `INSERT OR IGNORE` only seeds when the row is missing, so an admin's edit is never clobbered by a redeploy.
-
-Schema (`lobby.db`):
-
-```sql
-CREATE TABLE lobby_settings (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
--- seeded on first boot: ('max_concurrent', '4').
--- value is a string-encoded non-negative integer.
-```
-
-If the DB read errors at tick time the advancer falls back to `/internal/slot-status` (defense-in-depth); under normal operation it reads `lobby_settings.max_concurrent`.
+Admin auth: basic auth or IP whitelist (TBD — see open questions in [../../../SPECIFICATIONS.md](../../../SPECIFICATIONS.md)).
 
 ## Queue ↔ game server handoff
 
-Lobby's advancer rewrites the shared `allowlist.json` every 2 s with the players it has admitted up to the cap above. The game server reads `allowlist.json` when a new WebSocket connection sends `C2S_AUTH` under `AUTH_MODE=token`. `/internal/slot-status` is no longer the source of truth for the cap — it remains as a defense-in-depth fallback only.
+Lobby polls `GET /internal/slot-status` on the game server every 2 s. When a slot is free **and** a player is at the front of the queue, lobby writes that `player_id` into the shared `allowlist.json`. The game server reads `allowlist.json` when a new WebSocket connection sends `C2S_AUTH` under `AUTH_MODE=token`.
 
 ## Queue rules
 
@@ -190,8 +115,8 @@ Spectators receive a near-identical packet stream to the player — enough to re
 ## Implementation notes
 
 - Package layout (target): `cmd/admin/`, `internal/queue/`, `internal/identity/`, `internal/admin/`, `web/`.
-- Queue storage: SQLite `lobby.db`, single `queue_entries` table: `(player_id, joined_at)`. Position is derived from FIFO order at read time (`COUNT(*) WHERE joined_at < ? OR (joined_at = ? AND player_id < ?)`), not stored — concurrent joins/leaves don't have to renumber siblings.
-- Notification to waiting clients: short polling. Clients hit `GET /api/queue/status/:player_id` every 2 s while waiting; when the response includes `admitted: true` the client renders an explicit "YOU'RE UP — press START" overlay rather than auto-opening the WS. The speedrun timer must not start without an intentional player action: an admitted player who walked away from the keyboard would otherwise lose the run instantly. The overlay's 50 s client-side countdown leaves ~10 s of margin before the lobby's 60 s `StartGrace` AFK eviction; an unclicked overlay times out, the player isn't authed, and the next advancer tick reclaims the slot. Cadence matches the advancer tick so one extra poll is the worst-case latency between admission and the prompt.
+- Queue storage: SQLite `lobby.db`, single `queue_entries` table: `(player_id, joined_at, position)`.
+- Notification to waiting clients: TBD — SSE, WebSocket, or short polling (see open questions).
 - `/internal/slot-status` and `/internal/live-games` are game-server endpoints the lobby polls; neither is exposed on the public interface (bind to loopback or require shared secret).
 - The live-games cache (2 s TTL) lives in the lobby process, not on disk. If the game server is down, `/api/live` returns `[]` rather than erroring.
 
@@ -202,8 +127,8 @@ Lobby split rolling out in five phases under epic #26:
 - **Phase 1 (#21, merged):** `lobby/` service stood up; identity HTTP serving (`/api/register`, `/api/login`, `/api/verify`, `/api/health`, `/register`) extracted from the monolith. Caddy routes identity endpoints to lobby.
 - **Phase 2 (#22, merged):** public leaderboard + replay download. Lobby owns `/api/leaderboard`, `/api/replay/:replay_id`, and the `/leaderboard` HTML page; reads `game.db` over WAL alongside the game-server writer. Replay download verifies the stored checksum on read.
 - **Phase 3 (#23, in flight):** live spectating. Lobby owns `/api/live` and the `/spectate` selector page; `/spectate/:player_id` viewer URLs serve a static spectator client bundle from the client container. Game server adds `/internal/live-games` (loopback) and `/ws/spectate` upgrade with caps + per-IP rate limit + read-only enforcement; per-engine spectator fan-out with non-blocking drop-on-full + catchup snapshot on register.
-- **Phase 4 (#24, merged):** source serving + non-queue admin (`/source.tar.gz`, `/admin/leaderboard`, `/admin/winners`, `/admin/replay/:replay_id`).
-- **Phase 5 (#25, in flight):** FIFO queue + slot handoff via `allowlist.json`. Lobby owns `lobby.db` (queue store + `lobby_settings`), the queue HTTP API (`/api/queue/{join,status,leave}`), the slot advancer goroutine (rewrites `/data/allowlist.json` on each tick), the `/admin/queue` panel, and the runtime concurrency cap at `/admin/settings/max-concurrent` (default seed `4`). Game server's allowlist reader gained refresh-on-miss to close the admit→connect race. Gated on `QUEUE_ENABLED=true` on the lobby + `AUTH_MODE=token` on the game server.
+- **Phase 4 (#24, not started):** source serving + non-queue admin (`/source/*`, `/admin/leaderboard`, `/admin/winners`).
+- **Phase 5 (#25, not started):** FIFO queue + slot handoff via `allowlist.json`. Only required when `MAX_CONCURRENT=4` for prod.
 
 The two-repo target in [01-architecture.md](./01-architecture.md) was relaxed to a single repo with three modules (`server/`, `lobby/`, `pkg/`) coordinated via `go.work` + `replace` directives. Both binaries open the same `/data/identity.db` (SQLite WAL).
 

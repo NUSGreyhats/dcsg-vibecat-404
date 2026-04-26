@@ -6,37 +6,11 @@ Build, test, and deploy pipeline for both services. Defines the environment matr
 
 ## Environment matrix
 
-| Env                  | Game Server    | Lobby            | Concurrency            | Auth Mode         |
-| -------------------- | -------------- | ---------------- | ---------------------- | ----------------- |
-| **dev**              | `:8080` on VPS | Not deployed     | Unlimited              | `open`            |
-| **test**             | `:8080` on VPS | `:3000` optional | Unlimited              | `open` or `token` |
-| **prod (official)**  | LAN on PC      | LAN on PC        | `MAX_CONCURRENT=4` env, lobby cap `4` | `token`  |
-| **prod (unofficial cloud mirror)** | VPS | VPS              | `MAX_CONCURRENT=32` env (CI default), lobby cap admin-tuned | `token`  |
-
-**Official competition deployment** is a single PC on the venue LAN running the full Docker Compose stack. Players connect over the LAN (router-mediated). The same PC also drives a wall-mounted display: the LAN-only public leaderboard (`/leaderboard`) and recorded-gameplay highlights produced separately. If a competitor doesn't bring their own laptop, that PC doubles as a play station — the queue treats it as just another client.
-
-**Unofficial cloud mirror** runs the same stack on a public VPS for remote/post-event play. It's not gated by the LAN, so it sees an unbounded audience; admins use the runtime concurrency cap on `/admin/` to throttle (or pause, by setting it to `0`) admissions when needed. The cloud mirror's leaderboard is independent of the LAN's — separate `game.db` per deployment. Bring-up and tear-down match the dev/test recipe in [`README.md`](../../../README.md#deployment-modes).
-
-The cloud-mirror deploy workflow ([`.github/workflows/deploy.yml`](../../../.github/workflows/deploy.yml)) sources every prod-cutover env var from repo Actions config — nothing operational lives in the YAML.
-
-**Repo Variables** (`Settings → Secrets and variables → Actions → Variables`). Visible in CI logs; not sensitive:
-
-| Variable          | Value                                                                              |
-| ----------------- | ---------------------------------------------------------------------------------- |
-| `AUTH_MODE`       | `token`                                                                            |
-| `QUEUE_ENABLED`   | `true`                                                                             |
-| `MAX_CONCURRENT`  | `32` — game-server WS semaphore for the cloud mirror. The lobby admission cap (admin-tunable, default `4`) sits below this; the env value is the absolute backstop. |
-
-**Repo Secrets** (same screen → Secrets tab). Masked in logs:
-
-| Secret                    | Value                                                                              |
-| ------------------------- | ---------------------------------------------------------------------------------- |
-| `DO_HOST`, `DO_USER`, `DO_SSH_KEY` | Droplet SSH credentials (existing).                                       |
-| `TELEGRAM_BOT_TOKEN`      | From [@BotFather](https://t.me/BotFather).                                         |
-| `TELEGRAM_ADMIN_CHAT_ID`  | Numeric Telegram chat ID receiving OTPs.                                           |
-| `ADMIN_SESSION_SECRET`    | ≥16 random bytes; HMAC key for admin session cookies.                              |
-
-The action forwards both buckets via `appleboy/ssh-action`'s `envs:` so they live only in the docker-compose process env on the droplet — no `.env` file written to disk.
+| Env      | Game Server    | Lobby      | Concurrency        | Auth Mode         |
+| -------- | -------------- | ---------------- | ------------------ | ----------------- |
+| **dev**  | `:8080` on VPS | Not deployed     | Unlimited          | `open`            |
+| **test** | `:8080` on VPS | `:3000` optional | Unlimited          | `open` or `token` |
+| **prod** | `:8080` on LAN | `:3000` on LAN   | `MAX_CONCURRENT=4` | `token`           |
 
 ## Pipeline — game server (Repo A)
 

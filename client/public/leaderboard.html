@@ -59,25 +59,6 @@
       font-size: 13px;
       color: var(--dim);
     }
-    .toolbar {
-      display: flex;
-      justify-content: flex-end;
-      margin-bottom: 12px;
-    }
-    button {
-      background: transparent;
-      color: var(--fg);
-      border: 1px solid var(--line);
-      border-radius: 4px;
-      padding: 7px 10px;
-      font: inherit;
-      cursor: pointer;
-    }
-    button[aria-pressed="true"] {
-      color: var(--accent);
-      border-color: var(--accent);
-    }
-    button:hover { border-color: var(--accent); }
     .pulse {
       width: 8px; height: 8px; border-radius: 50%;
       background: var(--accent);
@@ -204,10 +185,6 @@
       </div>
     </header>
 
-    <div class="toolbar">
-      <button id="dedupe" type="button" aria-pressed="true">Deduplicate: on</button>
-    </div>
-
     <div id="content">
       <div class="empty">Loading…</div>
     </div>
@@ -218,8 +195,8 @@
   </div>
 
   <script>
+    const API = "/api/leaderboard?limit=50";
     const REFRESH_MS = 5000;
-    let dedupe = true;
 
     function formatTime(ms) {
       if (typeof ms !== "number" || Number.isNaN(ms)) return "—";
@@ -242,20 +219,6 @@
       const str = String(s ?? "");
       if (str.length <= 12) return str;
       return str.slice(0, 6) + "…" + str.slice(-4);
-    }
-
-    function formatSubmittedAt(value) {
-      const d = new Date(value);
-      if (Number.isNaN(d.getTime())) return "—";
-      return new Intl.DateTimeFormat("en-SG", {
-        timeZone: "Asia/Singapore",
-        month: "short",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-      }).format(d);
     }
 
     function renderSplits(splits) {
@@ -286,13 +249,12 @@
               <div class="seed">seed ${e.seed}</div>
             </td>
             <td class="time">${formatTime(e.total_ms)}</td>
-            <td class="meta">${formatSubmittedAt(e.submitted_at)}</td>
             <td class="meta">
               <span class="expand-indicator">▸</span> splits
             </td>
           </tr>
           <tr class="splits-row">
-            <td colspan="5" style="padding: 0; border: none;">
+            <td colspan="4" style="padding: 0; border: none;">
               <div class="splits">
                 ${renderSplits(e.splits)}
                 <div class="replay">replay <code>${escapeHtml(truncateId(e.replay_id))}</code></div>
@@ -308,7 +270,6 @@
               <th>Rank</th>
               <th>Player</th>
               <th>Time</th>
-              <th>Submitted (SGT)</th>
               <th></th>
             </tr>
           </thead>
@@ -332,17 +293,9 @@
       });
     }
 
-    const dedupeButton = document.getElementById("dedupe");
-    dedupeButton.addEventListener("click", () => {
-      dedupe = !dedupe;
-      dedupeButton.setAttribute("aria-pressed", dedupe ? "true" : "false");
-      dedupeButton.textContent = `Deduplicate: ${dedupe ? "on" : "off"}`;
-      fetchOnce();
-    });
-
     async function fetchOnce() {
       try {
-        const res = await fetch(`/api/leaderboard?limit=50&dedupe=${dedupe ? "1" : "0"}`, { cache: "no-store" });
+        const res = await fetch(API, { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const entries = Array.isArray(data.entries) ? data.entries : [];

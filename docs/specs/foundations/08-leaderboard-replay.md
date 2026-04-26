@@ -58,7 +58,7 @@ S2C_LEADERBOARD to all connected players
 
 Only runs with `Status == RunCompleted` are submitted to `completedRunCh`. `RunFailed` runs (triggered by the [player-death pass](./05-server-runtime.md#player-death-pass) on `HP <= 0`) skip the leaderboard entirely — the `CompletedRun` struct is never constructed, no DB row is written, and replay verification never runs on a failed run. This preserves the "only boss-clear times are leaderboard-eligible" invariant and keeps the verification path simple: every row the replay engine sees is a successful completion.
 
-Lobby reads `game.db` read-only for its public leaderboard endpoint and the moderators-only replay-download endpoint (`/admin/replay/:replay_id`). See [04-lobby.md](./04-lobby.md).
+Lobby reads `game.db` read-only for its public leaderboard and replay-download endpoints. See [04-lobby.md](./04-lobby.md).
 
 ## `game.db` schema (target)
 
@@ -96,7 +96,7 @@ Broadcast to connected players on every new submission that changes the top N. F
 
 - Leaderboard goroutine is spawned once at server startup and owns `game.db`. All inserts go through `completedRunCh`.
 - Broadcast to connected players: the leaderboard goroutine holds a registry of per-player `outCh`s populated at `C2S_AUTH` time. Non-blocking sends (drop if `outCh` is full — it's OK, the next broadcast will catch up).
-- Replay endpoint (on lobby, admin-gated) streams `InputLog` as-is. Optional: replay verification run on-demand from admin panel.
+- Replay endpoint (on lobby) streams `InputLog` as-is. Optional: replay verification run on-demand from admin panel.
 
 ## Implementation status
 
@@ -112,5 +112,5 @@ None — this is the anticheat backstop. Bugs found here (e.g., weak checksum, m
 - [05-server-runtime.md](./05-server-runtime.md) — `completedRunCh`, leaderboard goroutine.
 - [06-game-state-conventions.md](./06-game-state-conventions.md) — `InputLog`, `Splits`, `Seed`.
 - [07-determinism-seeding.md](./07-determinism-seeding.md) — RNG consumption invariant replay depends on.
-- [04-lobby.md](./04-lobby.md) — public `/api/leaderboard` endpoint + admin-only `/admin/replay/:replay_id`.
+- [04-lobby.md](./04-lobby.md) — public `/api/leaderboard` + `/api/replay/:replay_id` endpoints.
 - [../features/shop.md](../features/shop.md) — coin drops, BUG-12 `claimed_type` reproducibility.

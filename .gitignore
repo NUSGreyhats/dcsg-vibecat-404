@@ -26,6 +26,3 @@ dist/
 # Local env overrides
 .env
 .env.local
-
-# Claude Code runtime state (per-worktree lock files etc.)
-.claude/

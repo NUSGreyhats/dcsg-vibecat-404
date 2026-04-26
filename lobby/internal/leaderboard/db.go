@@ -56,30 +56,20 @@ func Open(path string) (*sql.DB, error) {
 }
 
 // TopRuns returns the fastest n runs ordered by total_ms ascending, with
-// rank filled from the 1-based row position. When dedupe is true, only each
-// player's fastest run is returned.
-func TopRuns(db *sql.DB, n int, dedupe bool) ([]Entry, error) {
+// rank filled from the 1-based row position. Mirrors the game server's
+// TopRuns; duplicated here so the lobby module stays independent of
+// server/internal/leaderboard.
+func TopRuns(db *sql.DB, n int) ([]Entry, error) {
 	if n <= 0 {
 		return nil, nil
 	}
 	rows, err := db.Query(
-		`WITH ranked AS (
-             SELECT cr.replay_id, cr.player_id, cr.display_name, cr.total_ms,
-                    cr.seed, cr.splits_json, cr.submitted_at,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY cr.player_id
-                        ORDER BY cr.total_ms ASC, cr.submitted_at ASC
-                    ) AS player_rank
-               FROM completed_runs cr
-          LEFT JOIN flagged_runs fr ON fr.replay_id = cr.replay_id
-              WHERE fr.replay_id IS NULL
-         )
-         SELECT replay_id, display_name, total_ms, seed, splits_json, submitted_at
-           FROM ranked
-          WHERE (? = 0 OR player_rank = 1)
-          ORDER BY total_ms ASC, submitted_at ASC
+		`SELECT cr.replay_id, cr.display_name, cr.total_ms, cr.seed, cr.splits_json
+           FROM completed_runs cr
+      LEFT JOIN flagged_runs fr ON fr.replay_id = cr.replay_id
+          WHERE fr.replay_id IS NULL
+          ORDER BY cr.total_ms ASC
           LIMIT ?`,
-		boolInt(dedupe),
 		n,
 	)
 	if err != nil {
@@ -96,9 +86,8 @@ func TopRuns(db *sql.DB, n int, dedupe bool) ([]Entry, error) {
 			totalMs     int64
 			seed        int64
 			splitsJSON  string
-			submittedAt string
 		)
-		if err := rows.Scan(&replayID, &displayName, &totalMs, &seed, &splitsJSON, &submittedAt); err != nil {
+		if err := rows.Scan(&replayID, &displayName, &totalMs, &seed, &splitsJSON); err != nil {
 			return nil, fmt.Errorf("leaderboard: scan: %w", err)
 		}
 		var splits []Split
@@ -114,7 +103,6 @@ func TopRuns(db *sql.DB, n int, dedupe bool) ([]Entry, error) {
 			Splits:      splits,
 			Seed:        seed,
 			ReplayID:    replayID,
-			SubmittedAt: submittedAt,
 		})
 		rank++
 	}
@@ -122,13 +110,6 @@ func TopRuns(db *sql.DB, n int, dedupe bool) ([]Entry, error) {
 		return nil, fmt.Errorf("leaderboard: rows: %w", err)
 	}
 	return entries, nil
-}
-
-func boolInt(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
 }
 
 // Replay holds the fields needed to reconstruct a run client-side.

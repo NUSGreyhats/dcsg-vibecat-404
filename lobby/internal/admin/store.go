@@ -1,8 +1,3 @@
-// Package admin owns the lobby's /admin/* moderation surface — the
-// flagged_runs table, hard-delete + winner-export queries used by the
-// admin panel. Auth lives in lobby/internal/adminauth (Telegram OTP).
-//
-// Spec: docs/specs/foundations/04-lobby.md § Admin panel.
 package admin
 
 import (

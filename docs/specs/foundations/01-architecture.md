@@ -64,17 +64,13 @@ graph TB
 | Concern            | Game Server (Repo A)                                                                                             | Lobby Service (Repo B)                                                      |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | **Responsibility** | Game logic, WebSocket, leaderboard writes, replays                                                               | Queue FIFO, player identity, public webapp, admin tools, serves stripped game-server source |
-| **Concurrency**    | `MAX_CONCURRENT` env var (absolute backstop). Unlimited in dev/test, `4` in prod. Queue admission cap lives on the lobby (admin-tunable, default seed `4`) — see [04-lobby.md § Concurrency cap](./04-lobby.md#concurrency-cap). | N/A — manages queue, doesn't run games |
+| **Concurrency**    | `MAX_CONCURRENT` env var. Unlimited in dev/test, `4` in prod                                                     | N/A — manages queue, doesn't run games                                            |
 | **Database**       | `game.db` — leaderboard, completed runs, replay data                                                             | `lobby.db` — queue entries, identity. **Reads** `game.db` for leaderboard display |
 | **Auth**           | `AUTH_MODE=open` (dev/test): any connection. `AUTH_MODE=token` (prod): require valid hex player ID in `C2S_AUTH` | Issues hex player IDs, manages queue, provides admin panel                        |
 | **Repo**           | `defcon-dungeon/game-server`                                                                                     | `defcon-dungeon/lobby`                                                      |
 | **Deployed**       | Always                                                                                                           | Prod only (optional in test for queue testing)                                    |
 
 ## Deployment Topology (Production)
-
-The official competition deployment is the **LAN-on-PC** topology below: a single venue PC running the full Compose stack, with players connecting through a router on the venue LAN. The same PC drives a wall display (LAN leaderboard + recorded-gameplay reel) and doubles as a play station for competitors who didn't bring a laptop.
-
-A **cloud mirror** of the same stack runs unofficially on a public VPS for remote/post-event play. Same compose file, same images, same admin panel — only the leaderboard and queue state diverge (separate `/data/` per deployment). Admins lean on the runtime concurrency cap (see [04-lobby.md § Concurrency cap](./04-lobby.md#concurrency-cap)) when remote-audience load needs throttling.
 
 ```mermaid
 graph LR
@@ -114,7 +110,7 @@ The **lobby** is the only publicly-addressable service — it terminates all bro
 | Lobby `:3000`            | **Yes** | Public VPS in dev/test. DEF CON LAN in prod. TLS terminated at a reverse proxy (Caddy or nginx) in front of the Docker Compose stack — the container itself serves plain HTTP. |
 | Game server `:8080` (WS) | **Yes** | Same host as lobby. WebSocket, upgraded from the same domain. Reverse proxy routes `/ws` (player) and `/ws/spectate` (read-only spectator) → `:8080`; everything else → `:3000`. See [04-lobby.md#live-spectating](./04-lobby.md#live-spectating) and [02-protocol.md#spectator-protocol](./02-protocol.md#spectator-protocol). |
 | Game server `/internal/slot-status` | No | Bound to loopback or a Docker-internal network. Lobby polls it; never exposed externally. |
-| Admin panel (`/admin/*`) | **No, in practice** | Lives on the lobby, gated by Telegram-OTP login (see [04-lobby.md § Admin auth](./04-lobby.md#admin-auth-telegram-otp)). |
+| Admin panel (`/admin/*`) | **No, in practice** | Lives on the lobby, but gated by basic auth / IP allowlist (TBD — see [04-lobby.md](./04-lobby.md#admin-panel-auth-protected)). |
 
 The dev/test lobby VPS is also the host for the stripped source (served at `/source/`), so there is **one public domain per environment** covering everything a player sees.
 
