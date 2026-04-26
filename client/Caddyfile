@@ -27,10 +27,9 @@
         reverse_proxy lobby:3001
     }
 
-    # Stripped source tarball served by lobby (Phase 4 #24). The
-    # /source landing page links to /source.tar.gz which streams the
-    # file built at image-build time by lobby's strip stage.
-    @source path /source /source.tar.gz
+    # Stripped source tarball served by lobby (Phase 4 #24). Linked
+    # from the existing pages' nav bars; no dedicated landing page.
+    @source path /source.tar.gz
     handle @source {
         reverse_proxy lobby:3001
     }

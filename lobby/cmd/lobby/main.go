@@ -201,23 +201,6 @@ func main() {
 	// lobby/Dockerfile. Players download once and browse the tree
 	// locally; no per-file HTTP traversal, no index.html collisions
 	// with the stripped client/index.html, no surprise SPA rendering.
-	mux.HandleFunc("/source", func(w http.ResponseWriter, r *http.Request) {
-		// Allow GET and HEAD — http.ServeFile (used by /source.tar.gz)
-		// supports HEAD natively, and rejecting it from /source for
-		// "consistency" was making Chrome's download manager 405 on its
-		// pre-flight HEAD and stall the .tar.gz download at 99%. Match
-		// the same policy here so the entire /source* surface is
-		// browser-friendly.
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if r.Method == http.MethodHead {
-			return
-		}
-		_, _ = w.Write(web.SourceHTML)
-	})
 	mux.HandleFunc("/source.tar.gz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
