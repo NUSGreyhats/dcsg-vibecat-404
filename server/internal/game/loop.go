@@ -63,7 +63,11 @@ type Engine struct {
 	seq          uint32
 	tick         uint64
 	lastClientTs int64
-	dirtyInput   struct{ dx, dy float32 }
+	// lastInputAt is the server-side wall clock of the most recent C2S
+	// frame received on InCh. Used by the idle-timeout check in stepTick;
+	// initialized in initRun so the timer doesn't fire on tick 1.
+	lastInputAt time.Time
+	dirtyInput  struct{ dx, dy float32 }
 
 	// RegisterCh receives spectator register/deregister verbs from the
 	// /ws/spectate accept handler. Drained at the start of each tick so
@@ -301,6 +305,7 @@ func (e *Engine) initRun(startTime int64) bool {
 	}
 	e.player = NewPlayerState()
 	e.room = NewRoomState(1)
+	e.lastInputAt = now
 
 	tmpl := RoomTemplates[1]
 	roomData := LoadRoom(e.room, e.run.MobRNG, tmpl, now)
@@ -403,6 +408,27 @@ func (e *Engine) stepTick(now time.Time) {
 
 	e.drainSpectatorRegister()
 	e.drainInput(now)
+
+	// Liveness checks: hard cap on total run length, and idle timeout for
+	// AFK / disconnected-but-not-closed clients. Both fire RunFailed (no
+	// leaderboard submission) so handleWS releases its MAX_CONCURRENT slot
+	// for waiting players. Skipped in ReplayMode where `now` is synthetic
+	// — a long honest replay must not be terminated mid-playback.
+	if !e.ReplayMode && e.run.Status == RunRunning {
+		if elapsed := now.Sub(e.run.RunStartTime); elapsed >= MaxRunDuration {
+			log.Printf("run %s force-ended: max duration cap (elapsed=%v, cap=%v)", e.PlayerID, elapsed, MaxRunDuration)
+			e.finishRun(now, elapsed.Milliseconds(), RunFailed)
+			return
+		}
+		if !e.lastInputAt.IsZero() {
+			if idle := now.Sub(e.lastInputAt); idle >= IdleTimeout {
+				log.Printf("run %s force-ended: idle timeout (idle=%v, cap=%v)", e.PlayerID, idle, IdleTimeout)
+				e.finishRun(now, e.currentElapsed(now), RunFailed)
+				return
+			}
+		}
+	}
+
 	e.advancePlayer(dt, now)
 	deaths := e.advanceEnemies(dt, now)
 	hits := AdvanceProjectiles(e.room, dt, now)
@@ -598,7 +624,9 @@ func (e *Engine) closeSpectators() {
 }
 
 // drainInput pulls every queued C2S packet and dispatches each with the
-// tick-shared `now`.
+// tick-shared `now`. Receiving any frame (even one that fails to decode)
+// counts as liveness — we're trying to detect AFK/disconnected clients,
+// not malformed packets.
 func (e *Engine) drainInput(now time.Time) {
 	for {
 		select {
@@ -606,6 +634,7 @@ func (e *Engine) drainInput(now time.Time) {
 			if !ok {
 				return
 			}
+			e.lastInputAt = now
 			e.dispatch(raw, now)
 		default:
 			return
