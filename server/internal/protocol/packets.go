@@ -37,6 +37,14 @@ type ShopPurchasePacket struct {
 	ItemID uint8 `json:"item_id"`
 }
 
+// ReplayControlPacket is the only C2S type accepted on /ws/replay; see
+// docs/specs/foundations/08-leaderboard-replay.md#c2s_replay_control.
+// Any other C2S type closes the WS with REPLAY_READ_ONLY.
+type ReplayControlPacket struct {
+	Action string  `json:"action"` // "play" | "pause" | "set_speed" | "restart"
+	Speed  float32 `json:"speed,omitempty"`
+}
+
 type EnemySpawn struct {
 	EntityID uint32  `json:"entity_id"`
 	Type     uint8   `json:"type"`

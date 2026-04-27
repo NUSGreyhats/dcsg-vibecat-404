@@ -17,6 +17,11 @@ services:
       GAME_DB: "/data/game.db"
       IDENTITY_DB: "/data/identity.db"
       ALLOWLIST_PATH: "/data/allowlist.json"
+      # Shared with the lobby. Game server uses it to validate replay
+      # tickets minted by lobby's POST /admin/replay/:id/ticket. Empty
+      # disables /ws/replay (returns 503 — same posture as lobby's
+      # /admin/* with admin auth unconfigured).
+      ADMIN_SESSION_SECRET: "${ADMIN_SESSION_SECRET:-}"
     volumes:
       - game-data:/data
     # Bind to loopback only: all browser traffic goes through the Caddy

@@ -5,4 +5,5 @@ use (
 	./server
 	./lobby
 	./tools/strip
+	./tools/loadtest
 )

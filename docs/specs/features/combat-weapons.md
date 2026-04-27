@@ -133,7 +133,7 @@ Both `PlayerState.HP` and `EnemyState.HP` are `int16`. Go performs silent wrapar
 
 - `client/src/game/weapons.ts` — mirrors `weaponSpecs` for UI (weapon icons, cooldown bars).
 - `client/src/game/entities/Bullet.ts` — renders projectiles from `ProjSnapshot`.
-- Fire input → `C2S_SHOOT { aim_angle }`. The stock client emits shoots while the left mouse is held, throttled to the equipped weapon's effective cooldown — same `cooldown / (1 + 0.1 * fire_rate_stacks)` formula used here — so it doesn't spam faster than the equipped weapon's effective cooldown. See [client/07-input-controls.md](../client/07-input-controls.md#shoot-throttle). The throttle is a bandwidth shaper only; the server cooldown is still authoritative and BUG-04 / BUG-07 remain reachable from the stock client.
+- Fire input → `C2S_SHOOT { aim_angle }`. The stock client emits shoots while the left mouse is held, throttled to the equipped weapon's effective cooldown — same `cooldown / (1 + 0.1 * fire_rate_stacks)` formula used here — so it doesn't spam faster than the equipped weapon's effective cooldown. Sustained holds (no release between shots) divide the local cooldown by `HOLD_FIRE_RATE_MULT` (0.85) so held fire tops out at ~85% of the weapon's effective rate, leaving spam-clicking marginally ahead — see [client/07-input-controls.md](../client/07-input-controls.md#shoot-throttle) and issue #62. The throttle is a bandwidth shaper only; the server cooldown is still authoritative (and unchanged), and BUG-04 / BUG-07 remain reachable from the stock client.
 
 ## Implementation notes
 

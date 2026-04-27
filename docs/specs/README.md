@@ -29,7 +29,8 @@ specs/
 │   ├── 07-input-controls.md          — Controls facade, input → C2S mapping
 │   ├── 08-assets-pipeline.md         — asset layout, Vite build, Preloader
 │   ├── 09-spectator-mode.md          — read-only viewer variant (greenfield)
-│   └── 10-ui-components.md           — visual/UX design tokens + component catalog
+│   ├── 10-ui-components.md           — visual/UX design tokens + component catalog
+│   └── 11-replay-viewer.md           — third Phaser bundle: plays back stored runs
 └── features/              ← self-contained gameplay features
     ├── combat-weapons.md             — BUG-04, BUG-07, BUG-08 (disabled)
     ├── mob-ai.md                     — BUG-01
@@ -60,6 +61,7 @@ specs/
    8. [client/08-assets-pipeline.md](client/08-assets-pipeline.md) — assets + Vite.
    9. [client/09-spectator-mode.md](client/09-spectator-mode.md) — read-only viewer (greenfield).
    10. [client/10-ui-components.md](client/10-ui-components.md) — visual design tokens + UI catalog.
+   11. [client/11-replay-viewer.md](client/11-replay-viewer.md) — replay viewer (third Phaser bundle).
 10. `features/*.md` — any order; each file is self-contained. See [combat-weapons.md](features/combat-weapons.md), [mob-ai.md](features/mob-ai.md), [rooms-doors.md](features/rooms-doors.md), [pickups.md](features/pickups.md), [shop.md](features/shop.md).
 11. [bugs.md](bugs.md) — the index that ties it all together.
 12. [foundations/09-ci-cd-deploy.md](foundations/09-ci-cd-deploy.md) — read last; understand the build-tag strategy that ships BUG-11.

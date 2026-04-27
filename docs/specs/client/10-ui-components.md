@@ -228,10 +228,10 @@ Every reusable UI unit in the game. Each entry: purpose, visual states (using th
 
   | State        | Color                       | Example                                           |
   | ------------ | --------------------------- | ------------------------------------------------- |
-  | Idle         | Text muted `#8a8679`        | "Connecting..."                                   |
-  | In progress  | Text muted                  | "Authenticating...", "Starting run..."            |
-  | Success      | Success `#8de77a`           | "Connected. Enter a player ID and press Start."   |
-  | Warning      | Warning `#f5c03a`           | "Still connecting — hang on."                     |
+  | Idle         | Text muted `#8a8679`        | "Enter credentials to play."                      |
+  | In progress  | Text muted                  | "Connecting to game server...", "Authenticating...", "Starting run..." |
+  | Success      | Success `#8de77a`           | Queue/login success states                         |
+  | Warning      | Warning `#f5c03a`           | "In queue: 1st in line · <1 min wait"             |
   | Error        | Error `#c4303b` (Blood red) | "Could not connect to the game server."           |
 
 **Placement:** `.setOrigin(0, 0)` left-aligned, `.setOrigin(0.5)` centered, `.setOrigin(1, 0)` right-aligned, `.setOrigin(1, 0.5)` right+vcenter (weapon line).

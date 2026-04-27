@@ -6,14 +6,15 @@ import (
 )
 
 const (
-	C2SAuth         uint8 = 0x01
-	C2SStartRun     uint8 = 0x02
-	C2SInput        uint8 = 0x03
-	C2SShoot        uint8 = 0x04
-	C2SSwitchWeapon uint8 = 0x05
-	C2SInteract     uint8 = 0x06
-	C2SEnterDoor    uint8 = 0x07
-	C2SShopPurchase uint8 = 0x09
+	C2SAuth          uint8 = 0x01
+	C2SStartRun      uint8 = 0x02
+	C2SInput         uint8 = 0x03
+	C2SShoot         uint8 = 0x04
+	C2SSwitchWeapon  uint8 = 0x05
+	C2SInteract      uint8 = 0x06
+	C2SEnterDoor     uint8 = 0x07
+	C2SShopPurchase  uint8 = 0x09
+	C2SReplayControl uint8 = 0x0A
 )
 
 const (
