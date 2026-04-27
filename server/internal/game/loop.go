@@ -49,6 +49,13 @@ type Engine struct {
 	PlayerID    string
 	DisplayName string
 
+	// ReplayMode disables liveness-only checks (Ts ±2s window, ±30min
+	// SeedWindow), and skips Submit/Live/Engines registration so a
+	// replayed run is invisible to spectators and never re-submitted to
+	// the leaderboard. Set by the replay package; defaults to false.
+	// See docs/specs/foundations/08-leaderboard-replay.md#engine-extensions.
+	ReplayMode bool
+
 	run    *RunState
 	player *PlayerState
 	room   *RoomState
@@ -274,10 +281,12 @@ func (e *Engine) awaitStartRun(ctx context.Context) bool {
 // failure (an S2CError has already been sent).
 func (e *Engine) initRun(startTime int64) bool {
 	now := time.Now()
-	seedTime := time.UnixMilli(startTime)
-	if diff := now.Sub(seedTime); diff > SeedWindow || diff < -SeedWindow {
-		e.sendError("seed_out_of_window", "start_time must be within ±30min of server now")
-		return false
+	if !e.ReplayMode {
+		seedTime := time.UnixMilli(startTime)
+		if diff := now.Sub(seedTime); diff > SeedWindow || diff < -SeedWindow {
+			e.sendError("seed_out_of_window", "start_time must be within ±30min of server now")
+			return false
+		}
 	}
 	e.run = &RunState{
 		Status:       RunRunning,
@@ -311,10 +320,59 @@ func (e *Engine) initRun(startTime int64) bool {
 	// cached above, so any spectator that registers between this line
 	// and the next tick will see the catchup). Unregister fires in
 	// finishRun and in Run's deferred cleanup as belt-and-braces.
-	if e.Engines != nil {
+	//
+	// ReplayMode skips this — a replayed run is not visible to spectators
+	// and does not appear in /api/live.
+	if e.Engines != nil && !e.ReplayMode {
 		e.Engines.Register(e.PlayerID, e.RegisterCh)
 	}
 	return true
+}
+
+// RunReplay drives the engine using a caller-supplied advance function
+// instead of an internal time.Ticker. Used by the replay package; see
+// docs/specs/foundations/08-leaderboard-replay.md#streaming-replay-engine.
+//
+// advance is called once per tick. It returns the synthetic `now` to use
+// for the next stepTick and a boolean ok — false signals "stop the loop"
+// (cancellation, restart, etc.). The caller is responsible for sleeping
+// between calls to control playback speed and for honouring ctx.Done().
+//
+// The handshake reads C2S_AUTH and C2S_START_RUN from InCh exactly as
+// the live engine does, so the replay caller must feed those packets
+// before invoking RunReplay.
+func (e *Engine) RunReplay(ctx context.Context, advance func(prev time.Time) (time.Time, bool)) {
+	defer e.closeSpectators()
+	if !e.handshake(ctx) {
+		return
+	}
+	now := e.run.RunStartTime
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		next, ok := advance(now)
+		if !ok {
+			return
+		}
+		now = next
+		e.stepTick(now)
+		if e.run.Status.IsTerminal() {
+			return
+		}
+	}
+}
+
+// RunStartTime exposes the engine's anchor time for replay drivers that
+// need to compute synthetic now = RunStartTime + tick * TickDuration.
+// Returns zero time before initRun has run.
+func (e *Engine) RunStartTime() time.Time {
+	if e.run == nil {
+		return time.Time{}
+	}
+	return e.run.RunStartTime
 }
 
 // tickLoop is the 20 Hz heart of the engine.
@@ -411,8 +469,11 @@ func (e *Engine) stepTick(now time.Time) {
 // so /internal/live-games (and the lobby's selector) sees this run. Cheap
 // and non-blocking — drops on a full channel because the next tick's push
 // supersedes anyway.
+//
+// ReplayMode skips this — replays are not live games and must not appear
+// in the public spectator selector.
 func (e *Engine) publishLiveSummary() {
-	if e.Live == nil || e.run == nil || e.PlayerID == "" {
+	if e.Live == nil || e.run == nil || e.PlayerID == "" || e.ReplayMode {
 		return
 	}
 	live := 0
@@ -559,8 +620,10 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 		return
 	}
 	// Per-packet ts validation: ±2s absolute window. No cumulative drift
-	// check — BUG-02 substrate.
-	if env.Ts != 0 {
+	// check — BUG-02 substrate. Replay skips this entirely: recorded Ts
+	// values come from the original session's wall clock and would
+	// otherwise reject every packet.
+	if env.Ts != 0 && !e.ReplayMode {
 		diff := now.UnixMilli() - env.Ts
 		if diff > int64(TsValidationWindow/time.Millisecond) ||
 			diff < -int64(TsValidationWindow/time.Millisecond) {
@@ -769,7 +832,9 @@ func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {
 
 	// Only successful completions are leaderboard-eligible. Failed runs
 	// skip submission — no CompletedRun, no DB row, no replay verification.
-	if status == RunCompleted {
+	// Replay mode also skips submission: a replayed run must never
+	// re-insert itself into completed_runs.
+	if status == RunCompleted && !e.ReplayMode {
 		inputLog, _ := json.Marshal(e.run.InputLog)
 		replayID := uuid.NewString()
 		checksum := leaderboard.Checksum(e.run.Seed, inputLog)

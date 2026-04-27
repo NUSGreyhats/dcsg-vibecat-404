@@ -110,6 +110,9 @@ docker logs <project>-lobby-1 | tail -1
 | `GAME_DB`          | `/data/game.db`        | SQLite path for completed runs (writer).                                 |
 | `IDENTITY_DB`      | `/data/identity.db`    | SQLite path for `players` (read-only on this side).                      |
 | `ALLOWLIST_PATH`   | `/data/allowlist.json` | File watched under `AUTH_MODE=token`. Read-only here; lobby writes it.   |
+| `ADMIN_SESSION_SECRET` | _(empty)_          | Shared with lobby. Game server validates replay-viewer tickets minted by `/admin/replay/:id/ticket`. Empty disables `/ws/replay` (returns 503). |
+| `REPLAY_GLOBAL`    | `16`                   | Cap on concurrent replay viewers on the game server. Small by design — admin-only. |
+| `REPLAY_PER_IP`    | `5`                    | Per-IP new-connect rate per minute on `/ws/replay`.                      |
 
 ### `lobby`
 

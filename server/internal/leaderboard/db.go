@@ -1,14 +1,62 @@
 package leaderboard
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/greyhats/defcon-game/server/internal/protocol"
 
 	_ "modernc.org/sqlite"
 )
+
+// ErrNotFound and ErrChecksumMismatch are returned by GetReplay; mirror
+// the same errors the lobby's leaderboard package exports so a future
+// shared package can be a drop-in replacement.
+var (
+	ErrNotFound         = errors.New("leaderboard: replay not found")
+	ErrChecksumMismatch = errors.New("leaderboard: replay checksum mismatch")
+)
+
+// Replay is the on-disk shape of a single completed run, returned by
+// GetReplay for the replay engine to drive. Fields mirror the lobby's
+// /admin/replay/:id JSON contract.
+type Replay struct {
+	ReplayID    string `json:"replay_id"`
+	PlayerID    string `json:"player_id"`
+	DisplayName string `json:"display_name"`
+	TotalMs     int64  `json:"total_ms"`
+	Seed        int64  `json:"seed"`
+	InputLog    []byte `json:"input_log"`
+}
+
+// GetReplay loads a single completed run by replay_id and verifies the
+// stored checksum against SHA256(seed || input_log). Returns ErrNotFound
+// when the row is missing, ErrChecksumMismatch if the bytes have been
+// tampered with at rest. See docs/specs/foundations/08-leaderboard-replay.md.
+func GetReplay(db *sql.DB, replayID string) (*Replay, error) {
+	var r Replay
+	var stored []byte
+	err := db.QueryRow(
+		`SELECT replay_id, player_id, display_name, total_ms, seed, input_log, checksum
+           FROM completed_runs
+          WHERE replay_id = ?`,
+		replayID,
+	).Scan(&r.ReplayID, &r.PlayerID, &r.DisplayName, &r.TotalMs, &r.Seed, &r.InputLog, &stored)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("leaderboard: get replay: %w", err)
+	}
+	got := Checksum(r.Seed, r.InputLog)
+	if subtle.ConstantTimeCompare(stored, got[:]) != 1 {
+		return nil, ErrChecksumMismatch
+	}
+	return &r, nil
+}
 
 // OpenDB opens the leaderboard SQLite database at path and ensures the
 // schema from docs/specs/foundations/08-leaderboard-replay.md exists.

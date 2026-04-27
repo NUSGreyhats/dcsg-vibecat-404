@@ -8,8 +8,13 @@ export const C2SType = {
   ENTER_DOOR: 0x07,
   USE_ITEM: 0x08,
   SHOP_PURCHASE: 0x09,
+  // Only valid on /ws/replay; rejected by /ws and /ws/spectate. See
+  // docs/specs/foundations/08-leaderboard-replay.md#c2s_replay_control.
+  REPLAY_CONTROL: 0x0a,
 } as const;
 export type C2SType = (typeof C2SType)[keyof typeof C2SType];
+
+export type ReplayControlAction = "play" | "pause" | "set_speed" | "restart";
 
 export const S2CType = {
   AUTH_OK: 0x81,
@@ -56,7 +61,9 @@ export type C2SDataFor<T extends C2SType> = T extends typeof C2SType.AUTH
                 ? { item_name: string }
                 : T extends typeof C2SType.SHOP_PURCHASE
                   ? { item_id: number } // uint8, 1-indexed into ShopCatalog
-                  : never;
+                  : T extends typeof C2SType.REPLAY_CONTROL
+                    ? { action: ReplayControlAction; speed?: number }
+                    : never;
 
 export type S2CDataFor<T extends S2CType> = T extends typeof S2CType.AUTH_OK
   ? { display_name: string }
