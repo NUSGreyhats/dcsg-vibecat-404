@@ -72,18 +72,6 @@ export function setTimingsVisible(visible: boolean): void {
   safeSet(TIMINGS_KEY, visible ? "1" : "0");
 }
 
-/**
- * The most recently authenticated player_id. Kept only as local session
- * state so explicit logout can clear stale credentials; MainMenu still
- * performs WS auth only after a fresh username/password login (and queue
- * admission when enabled). Cleared on auth_failed so a stale id doesn't
- * trap the user in a loop.
- */
-export function getCachedPlayerId(): string | null {
-  const v = safeGet(PLAYER_ID_KEY);
-  return v && v.length > 0 ? v : null;
-}
-
 export function setCachedPlayerId(playerId: string): void {
   if (!playerId) return;
   safeSet(PLAYER_ID_KEY, playerId);
