@@ -12,17 +12,14 @@ import {
   BUTTON_HOVER_COLOR,
   DEEP_NAVY,
   DEPTH_SPLASH,
-  ERROR,
   FONT_FAMILY,
   FONT_SIZE_BODY,
   FONT_SIZE_CAPTION,
   FONT_SIZE_SMALL,
   MID_BLUE,
-  SUCCESS,
   TEXT_DIM,
   TEXT_MUTED,
   TEXT_PRIMARY,
-  WARNING,
   hex,
 } from "../ui/tokens";
 
@@ -89,6 +86,10 @@ export class MainMenu extends Phaser.Scene {
   // window is ±2s; we warn at ±1.5s so the banner appears before the
   // user actually trips ts_out_of_window.
   private static readonly CLOCK_SKEW_WARN_MS = 1500;
+  private static readonly IDLE_STATUS_COLOR = 0x342e37;
+  private static readonly WARNING_STATUS_COLOR = 0x4a5e88;
+  private static readonly SUCCESS_STATUS_COLOR = 0x2f7d32;
+  private static readonly ERROR_STATUS_COLOR = 0x7a2430;
 
   private static readonly PANEL_WIDTH = 460;
   private static readonly PANEL_MIN_WIDTH = 340;
@@ -231,16 +232,23 @@ export class MainMenu extends Phaser.Scene {
 
     const statusMargin = Math.min(MainMenu.PANEL_MARGIN, Math.max(16, w * 0.05));
     const statusWidth = Math.max(140, Math.min(360, w - statusMargin * 2));
-    this.statusDot = this.add.circle(w - statusMargin - 12, h - 18, 4, TEXT_MUTED);
     this.statusText = this.add
-      .text(w - statusMargin, h - 18, "Idle", {
+      .text(w - statusMargin - 14, h - 18, "Idle", {
         fontFamily: FONT_FAMILY,
         fontSize: FONT_SIZE_SMALL,
-        color: hex(TEXT_MUTED),
+        color: hex(MainMenu.IDLE_STATUS_COLOR),
         align: "right",
         wordWrap: { width: statusWidth },
       })
-      .setOrigin(1, 0.5);
+      .setOrigin(1, 0.5)
+      .setDepth(DEPTH_SPLASH + 2);
+    this.statusDot = this.add.circle(
+      w - statusMargin - 2,
+      h - 18,
+      4,
+      MainMenu.IDLE_STATUS_COLOR,
+    );
+    this.statusDot.setDepth(DEPTH_SPLASH + 3);
 
     this.loginTexts.push(
       ...this.makePanelActionRow(contentX, panelY + 140, inputWidth, [
@@ -278,7 +286,7 @@ export class MainMenu extends Phaser.Scene {
       .text(w / 2, 24, "", {
         fontFamily: FONT_FAMILY,
         fontSize: FONT_SIZE_BODY,
-        color: hex(WARNING),
+        color: hex(MainMenu.WARNING_STATUS_COLOR),
         align: "center",
         wordWrap: { width: bannerWidth },
         backgroundColor: hex(DEEP_NAVY),
@@ -519,20 +527,20 @@ export class MainMenu extends Phaser.Scene {
     const sync = getSync();
     if (sync.isConnected()) return true;
 
-    this.setStatus("Connecting", WARNING);
+    this.setStatus("Connecting", MainMenu.WARNING_STATUS_COLOR);
     try {
       await sync.connect(WS_URL);
       return true;
     } catch (err) {
       console.error("[MainMenu] connect failed", err);
-      this.setStatus("Connection failed. Refresh to retry.", ERROR);
+      this.setStatus("Connection failed. Refresh to retry.", MainMenu.ERROR_STATUS_COLOR);
       return false;
     }
   }
 
   private async resumeCachedSession(playerId: string): Promise<void> {
     this.hideLoginForm();
-    this.setStatus("Resuming", WARNING);
+    this.setStatus("Resuming", MainMenu.WARNING_STATUS_COLOR);
     this.submitting = true;
 
     if (!(await this.connectForAuth())) {
@@ -567,7 +575,7 @@ export class MainMenu extends Phaser.Scene {
     for (const text of this.loginTexts) text.setVisible(true);
     this.clearReadyView();
     this.readyActive = false;
-    this.setStatus("Idle", TEXT_MUTED);
+    this.setStatus("Idle", MainMenu.IDLE_STATUS_COLOR);
   }
 
   private showReadyView(displayName: string): void {
@@ -610,7 +618,7 @@ export class MainMenu extends Phaser.Scene {
       this.startAuthenticatedRun(),
     );
     const hint = this.add
-      .text(contentX + inputWidth / 2, buttonY + 51, "Press [ Enter ] or click Start to begin.", {
+      .text(contentX + inputWidth / 2, buttonY + 62, "Press [ Enter ] or click Start to begin.", {
         fontFamily: FONT_FAMILY,
         fontSize: FONT_SIZE_SMALL,
         color: hex(TEXT_MUTED),
@@ -638,7 +646,7 @@ export class MainMenu extends Phaser.Scene {
       ...start,
       ...actions,
     );
-    this.setStatus("Authenticated", SUCCESS);
+    this.setStatus("Authenticated", MainMenu.SUCCESS_STATUS_COLOR);
   }
 
   private setStatus(message: string, color: number): void {
@@ -646,20 +654,10 @@ export class MainMenu extends Phaser.Scene {
     this.statusDot?.setVisible(visible);
     this.statusText?.setVisible(visible);
     if (!visible) return;
-    const displayColor = this.darkenStatusColor(color);
+    const displayColor = color;
     this.statusDot?.setFillStyle(displayColor);
     this.statusText?.setText(message);
     this.statusText?.setColor(hex(displayColor));
-    if (this.statusDot && this.statusText) {
-      this.statusDot.setX(this.statusText.x - this.statusText.displayWidth - 12);
-    }
-  }
-
-  private darkenStatusColor(color: number): number {
-    if (color === SUCCESS) return 0x1f7f35;
-    if (color === WARNING) return 0xb88716;
-    if (color === ERROR) return 0x9f202a;
-    return TEXT_DIM;
   }
 
   private clearReadyView(): void {
@@ -752,7 +750,7 @@ export class MainMenu extends Phaser.Scene {
     this.submitting = true;
     this.readyActive = false;
     this.clearReadyView();
-    this.setStatus("Starting", WARNING);
+    this.setStatus("Starting", MainMenu.WARNING_STATUS_COLOR);
     getSync().sendStartRun();
   }
 
@@ -965,12 +963,12 @@ export class MainMenu extends Phaser.Scene {
     const username = this.usernameInput?.value.trim() ?? "";
     const password = this.passwordInput?.value ?? "";
     if (!username || !password) {
-      this.setStatus("Missing username or password", ERROR);
+      this.setStatus("Missing username or password", MainMenu.ERROR_STATUS_COLOR);
       return;
     }
 
     this.submitting = true;
-    this.setStatus("Logging in", WARNING);
+    this.setStatus("Logging in", MainMenu.WARNING_STATUS_COLOR);
 
     try {
       const res = await fetch("/api/login", {
@@ -994,7 +992,7 @@ export class MainMenu extends Phaser.Scene {
         const body = (await res.json().catch(() => ({}))) as {
           error?: string;
         };
-        this.setStatus(body.error ?? `Login failed (HTTP ${res.status})`, ERROR);
+        this.setStatus(body.error ?? `Login failed (HTTP ${res.status})`, MainMenu.ERROR_STATUS_COLOR);
         this.submitting = false;
         return;
       }
@@ -1013,7 +1011,7 @@ export class MainMenu extends Phaser.Scene {
         await this.waitForQueueAdmission(body.player_id, password);
       } catch (err) {
         console.error("[MainMenu] queue: failed", err);
-        this.setStatus(err instanceof Error ? err.message : "Queue error", ERROR);
+        this.setStatus(err instanceof Error ? err.message : "Queue error", MainMenu.ERROR_STATUS_COLOR);
         this.submitting = false;
         return;
       }
@@ -1023,7 +1021,7 @@ export class MainMenu extends Phaser.Scene {
         return;
       }
 
-      this.setStatus("Authenticating", WARNING);
+      this.setStatus("Authenticating", MainMenu.WARNING_STATUS_COLOR);
       // Cache the last authenticated id so explicit logout can clear any
       // stale local session state. WS auth is still performed only after
       // login + queue admission; pre-auth sockets can go idle behind the
@@ -1032,7 +1030,7 @@ export class MainMenu extends Phaser.Scene {
       getSync().sendAuth(body.player_id);
     } catch (err) {
       console.error("[MainMenu] login failed", err);
-      this.setStatus("Network error. Try again", ERROR);
+      this.setStatus("Network error. Try again", MainMenu.ERROR_STATUS_COLOR);
       this.submitting = false;
     }
   }
@@ -1142,7 +1140,7 @@ export class MainMenu extends Phaser.Scene {
       position > 0
         ? `In queue: ${this.formatOrdinal(position)} in line · ${wait} wait`
         : `Queue status: Checking admission… · ${wait} wait`;
-    this.setStatus(message, WARNING);
+    this.setStatus(message, MainMenu.WARNING_STATUS_COLOR);
   }
 
   /**
@@ -1185,7 +1183,7 @@ export class MainMenu extends Phaser.Scene {
     }
     this.readyActive = false;
     this.clearReadyView();
-    this.setStatus(`Error: ${err.message}`, ERROR);
+    this.setStatus(`Error: ${err.message}`, MainMenu.ERROR_STATUS_COLOR);
     this.submitting = false;
   }
 
@@ -1210,6 +1208,10 @@ export class MainMenu extends Phaser.Scene {
     this.passwordInput = undefined;
     this.startButton?.remove();
     this.startButton = undefined;
+    this.statusDot?.destroy();
+    this.statusDot = undefined;
+    this.statusText?.destroy();
+    this.statusText = undefined;
 
     for (const el of this.sponsorLogoEls) el.remove();
     this.sponsorLogoEls = [];
