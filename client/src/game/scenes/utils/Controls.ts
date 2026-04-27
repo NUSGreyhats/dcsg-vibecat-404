@@ -2,6 +2,16 @@ import Phaser from "phaser";
 
 export type MovementInput = { dx: number; dy: number };
 
+export const CONTROL_BINDINGS: ReadonlyArray<readonly [string, string]> = [
+  ["Move", "W A S D / Arrows"],
+  ["Aim", "Mouse"],
+  ["Shoot", "Left mouse button"],
+  ["Switch", "1 / 2 / 3"],
+  ["Shop", "B"],
+  ["Inventory", "I"],
+  ["Menu", "Esc"],
+];
+
 export type Controls = {
   movement(): MovementInput;
   aimAngle(pivotX: number, pivotY: number): number;

@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { resetSync } from "../net/runContext";
+import { CONTROL_BINDINGS } from "./utils/Controls";
 import {
   clearCachedPlayerId,
   isTimingsVisible,
@@ -29,18 +30,6 @@ type MainItem = {
   key: "resume" | "toggleTimings" | "controls" | "shop" | "restart" | "logout";
   label(): string;
 };
-
-// Single source of truth for the controls page. Mirrors the bindings
-// in scenes/utils/Controls.ts — keep in sync if a key is added there.
-const CONTROL_BINDINGS: ReadonlyArray<readonly [string, string]> = [
-  ["Move", "W A S D / Arrows"],
-  ["Aim", "Mouse"],
-  ["Shoot", "Left mouse button"],
-  ["Switch weapon", "1 / 2 / 3"],
-  ["Shop", "B"],
-  ["Inventory", "I"],
-  ["Menu", "Esc"],
-];
 
 const PANEL_WIDTH = 480;
 const PANEL_HEIGHT = 440;

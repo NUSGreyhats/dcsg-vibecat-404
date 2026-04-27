@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { getSync } from "../net/runContext";
+import { CONTROL_BINDINGS } from "./utils/Controls";
 import {
   clearCachedPlayerId,
   getCachedPlayerId,
@@ -64,7 +65,7 @@ const SPONSORS: ReadonlyArray<SponsorSpec> = [
  * Log In. The server resolves the credentials to a player_id via
  * /api/login, the scene then opens the WS, sends C2S_AUTH +
  * C2S_START_RUN, and hands off to the Game scene. Players with no
- * account click Register → to open the /register page in a new tab.
+ * account click Register to open the in-game registration modal.
  * A small sponsors panel sits directly below the login panel.
  */
 export class MainMenu extends Phaser.Scene {
@@ -81,6 +82,8 @@ export class MainMenu extends Phaser.Scene {
   private promptAfterAuth = false;
   private resizeHandlers: Array<() => void> = [];
   private sponsorLogoEls: HTMLImageElement[] = [];
+  private sponsorHoverRects: Phaser.GameObjects.Rectangle[] = [];
+  private controlsTexts: Phaser.GameObjects.Text[] = [];
   private spaceKey?: Phaser.Input.Keyboard.Key;
   private enterKey?: Phaser.Input.Keyboard.Key;
 
@@ -100,6 +103,16 @@ export class MainMenu extends Phaser.Scene {
   private static readonly SPONSOR_PANEL_GAP = 12;
   private static readonly SPONSOR_CARD_HEIGHT = 92;
   private static readonly SPONSOR_CARD_GAP = 10;
+  private setModalActive(active: boolean): void {
+    if (this.usernameInput) this.usernameInput.disabled = active;
+    if (this.passwordInput) this.passwordInput.disabled = active;
+    if (this.startButton) this.startButton.disabled = active;
+    for (const img of this.sponsorLogoEls) {
+      img.style.pointerEvents = active ? "none" : "auto";
+      img.style.filter = active ? "blur(4px) brightness(0.7)" : "";
+    }
+    this.input.enabled = !active;
+  }
 
   constructor() {
     super({ key: "MainMenu" });
@@ -204,7 +217,10 @@ export class MainMenu extends Phaser.Scene {
       registerLink.setColor(hex(ACCENT_PRIMARY)),
     );
     registerLink.on("pointerdown", () => {
-      window.open("/register", "_blank", "noopener,noreferrer");
+      this.hideLoginForm();
+      this.setModalActive(true);
+      this.scene.launch("RegisterMenu");
+      this.scene.pause();
     });
 
     const leaderboardLink = this.add
@@ -230,6 +246,8 @@ export class MainMenu extends Phaser.Scene {
       window.open("/leaderboard", "_blank", "noopener,noreferrer");
     });
 
+    this.drawControlsPanel(h);
+
     this.drawSponsorsPanel(panelX, sponsorTop);
 
     this.connect();
@@ -248,6 +266,7 @@ export class MainMenu extends Phaser.Scene {
     }
 
     this.events.on("shutdown", this.cleanup, this);
+    this.events.on("resume", this.onResume, this);
 
     setTimeout(() => this.usernameInput?.focus(), 50);
   }
@@ -311,13 +330,40 @@ export class MainMenu extends Phaser.Scene {
     // the parent DEEP_NAVY panel shows through. Logos are HTML <img>
     // overlays for high-quality browser downscaling that Phaser's NPOT
     // textures don't provide.
-    this.add
+    const frame = this.add
       .rectangle(x, y, w, h, 0, 0)
       .setStrokeStyle(1, MID_BLUE)
       .setOrigin(0, 0);
+    const glow = this.add
+      .rectangle(x, y, w, h, 0, 0)
+      .setStrokeStyle(2, ACCENT_PRIMARY, 0)
+      .setOrigin(0, 0);
+    this.sponsorHoverRects.push(frame, glow);
+
+    let hoverTween: Phaser.Tweens.Tween | undefined;
+    const setHover = (active: boolean): void => {
+      if (!sponsor.url) return;
+      frame.setStrokeStyle(1, active ? ACCENT_PRIMARY : MID_BLUE);
+      if (hoverTween) hoverTween.stop();
+      hoverTween = this.tweens.add({
+        targets: glow,
+        alpha: active ? 0.85 : 0,
+        duration: active ? 120 : 160,
+        ease: active ? "Sine.easeOut" : "Sine.easeIn",
+      });
+    };
+
+    if (sponsor.url) {
+      frame.setInteractive({ useHandCursor: true });
+      frame.on("pointerover", () => setHover(true));
+      frame.on("pointerout", () => setHover(false));
+      frame.on("pointerdown", () => {
+        window.open(sponsor.url, "_blank", "noopener,noreferrer");
+      });
+    }
 
     if (sponsor.imageSrc) {
-      this.mountSponsorImage(x, y, w, h, sponsor);
+      this.mountSponsorImage(x, y, w, h, sponsor, setHover);
     } else {
       this.add
         .text(x + w / 2, y + h / 2, sponsor.placeholder, {
@@ -341,6 +387,7 @@ export class MainMenu extends Phaser.Scene {
     sceneW: number,
     sceneH: number,
     sponsor: SponsorSpec,
+    onHoverChange?: (active: boolean) => void,
   ): void {
     const canvas = this.game.canvas;
     const parent = canvas.parentElement ?? document.body;
@@ -357,17 +404,28 @@ export class MainMenu extends Phaser.Scene {
       cursor: sponsor.url ? "pointer" : "default",
       userSelect: "none",
       pointerEvents: "auto",
+      transition: sponsor.url ? "transform 140ms ease, filter 140ms ease" : "none",
     } as Partial<CSSStyleDeclaration>);
+
+    if (!parent.style.position) parent.style.position = "relative";
+    parent.appendChild(img);
+    this.sponsorLogoEls.push(img);
 
     if (sponsor.url) {
       img.addEventListener("click", () => {
         window.open(sponsor.url, "_blank", "noopener,noreferrer");
       });
+      img.addEventListener("mouseenter", () => {
+        onHoverChange?.(true);
+        img.style.transform = "translateY(-1px) scale(1.03)";
+        img.style.filter = "brightness(1.08)";
+      });
+      img.addEventListener("mouseleave", () => {
+        onHoverChange?.(false);
+        img.style.transform = "";
+        img.style.filter = "";
+      });
     }
-
-    if (!parent.style.position) parent.style.position = "relative";
-    parent.appendChild(img);
-    this.sponsorLogoEls.push(img);
 
     const place = () => {
       const rect = canvas.getBoundingClientRect();
@@ -437,6 +495,71 @@ export class MainMenu extends Phaser.Scene {
     if (this.usernameInput) this.usernameInput.style.display = "";
     if (this.passwordInput) this.passwordInput.style.display = "";
     if (this.startButton) this.startButton.style.display = "";
+  }
+
+  private drawControlsPanel(sceneHeight: number): void {
+    const panelX = MainMenu.PANEL_MARGIN;
+    const panelHeight = 196;
+    const panelTop = sceneHeight - panelHeight - MainMenu.PANEL_MARGIN;
+    const panelWidth = 248;
+    const paddingX = 16;
+    const actionX = panelX + paddingX;
+    const keyX = panelX + panelWidth - paddingX;
+    const rowY = panelTop + 38;
+
+    this.add
+      .rectangle(panelX, panelTop, panelWidth, panelHeight, DEEP_NAVY, 0.68)
+      .setStrokeStyle(2, MID_BLUE)
+      .setOrigin(0, 0);
+
+    this.controlsTexts.push(
+      this.add.text(actionX, panelTop + 10, "// controls", {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_CAPTION,
+        color: hex(TEXT_PRIMARY),
+      }),
+      this.add
+        .text(actionX, rowY, "Action", {
+          fontFamily: FONT_FAMILY,
+          fontSize: FONT_SIZE_CAPTION,
+          color: hex(TEXT_MUTED),
+        })
+        .setAlpha(0.9),
+      this.add
+        .text(keyX, rowY, "Key", {
+          fontFamily: FONT_FAMILY,
+          fontSize: FONT_SIZE_CAPTION,
+          color: hex(TEXT_MUTED),
+        })
+        .setOrigin(1, 0)
+        .setAlpha(0.9),
+    );
+
+    for (let i = 0; i < CONTROL_BINDINGS.length; i++) {
+      const [action, key] = CONTROL_BINDINGS[i];
+      const y = rowY + 22 + i * 19;
+      this.controlsTexts.push(
+        this.add.text(actionX, y, action, {
+          fontFamily: FONT_FAMILY,
+          fontSize: FONT_SIZE_CAPTION,
+          color: hex(TEXT_PRIMARY),
+        }),
+        this.add
+          .text(keyX, y, key, {
+            fontFamily: FONT_FAMILY,
+            fontSize: FONT_SIZE_CAPTION,
+            color: hex(TEXT_PRIMARY),
+          })
+          .setOrigin(1, 0),
+      );
+    }
+  }
+
+  private onResume(): void {
+    this.setModalActive(false);
+    this.showLoginForm();
+    this.input.keyboard?.resetKeys();
+    setTimeout(() => this.usernameInput?.focus(), 50);
   }
 
   /**
@@ -977,7 +1100,7 @@ export class MainMenu extends Phaser.Scene {
     sync.state.off("authOk", this.onAuthOk, this);
     sync.state.off("runStarted", this.onRunStarted, this);
     sync.state.off("error", this.onError, this);
-
+    this.events.off("resume", this.onResume, this);
     if (this.spaceKey) {
       this.spaceKey.off("down", this.onQueueKey, this);
       this.spaceKey = undefined;
@@ -1002,6 +1125,12 @@ export class MainMenu extends Phaser.Scene {
 
     for (const el of this.sponsorLogoEls) el.remove();
     this.sponsorLogoEls = [];
+
+    for (const text of this.controlsTexts) text.destroy();
+    this.controlsTexts = [];
+
+    for (const rect of this.sponsorHoverRects) rect.destroy();
+    this.sponsorHoverRects = [];
 
     // Phaser reuses the same scene instance across stop/start, so any
     // field set during a previous login (submitting/connected/queued)
