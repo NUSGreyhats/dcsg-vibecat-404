@@ -84,8 +84,13 @@ services:
 
   client:
     build: ./client
+    environment:
+      DOMAIN: "${DOMAIN:-}"
     ports:
-      - "80:3000"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
     depends_on:
       - game-server
       - lobby
@@ -93,3 +98,4 @@ services:
 
 volumes:
   game-data:
+  caddy-data:

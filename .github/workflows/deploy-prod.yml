@@ -7,6 +7,10 @@ on:
     # any of these at trigger time when you want the prod cutover
     # posture (AUTH_MODE=token + QUEUE_ENABLED=true + MAX_CONCURRENT=4).
     inputs:
+      DOMAIN:
+        description: "Public hostname (e.g. game.example.com) — enables automatic HTTPS via Let's Encrypt"
+        required: false
+        default: ""
       AUTH_MODE:
         description: "AUTH_MODE (open|identity|token)"
         required: false
@@ -45,6 +49,7 @@ jobs:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
         env:
+          DOMAIN: ${{ inputs.DOMAIN }}
           AUTH_MODE: ${{ inputs.AUTH_MODE }}
           QUEUE_ENABLED: ${{ inputs.QUEUE_ENABLED }}
           MAX_CONCURRENT: ${{ inputs.MAX_CONCURRENT }}
@@ -60,7 +65,7 @@ jobs:
           key: ${{ secrets.DO_SSH_KEY_PROD }}
           script_stop: true
           command_timeout: 15m
-          envs: AUTH_MODE,QUEUE_ENABLED,MAX_CONCURRENT,LEADERBOARD_ENABLED,LEADERBOARD_DISABLED_MESSAGE,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,ADMIN_SESSION_SECRET,GITHUB_TOKEN
+          envs: DOMAIN,AUTH_MODE,QUEUE_ENABLED,MAX_CONCURRENT,LEADERBOARD_ENABLED,LEADERBOARD_DISABLED_MESSAGE,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,ADMIN_SESSION_SECRET,GITHUB_TOKEN
           script: |
             set -euo pipefail
 
@@ -102,6 +107,7 @@ jobs:
             echo "==> Writing .env"
             umask 077
             cat > .env <<EOF
+            DOMAIN=${DOMAIN:-}
             AUTH_MODE=${AUTH_MODE:-}
             QUEUE_ENABLED=${QUEUE_ENABLED:-}
             MAX_CONCURRENT=${MAX_CONCURRENT:-}
