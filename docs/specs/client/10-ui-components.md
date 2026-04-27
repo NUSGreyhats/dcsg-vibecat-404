@@ -379,7 +379,7 @@ Files: `Preloader.ts`, `GameHUD.ts`, `Player.ts`, `Enemy.ts`.
 **Structure:**
 
 1. **Dim layer** — full-screen rectangle, Panel dim (`#0d1222` α 0.55), depth 1000.
-2. **Panel** — centered rectangle, size per content (480 × 360 for the shop), fill Panel fill (`#1a2338` α 0.95), 2 px Panel stroke (Mid blue), depth 1001.
+2. **Panel** — centered rectangle, size per content (560 × 380 for the current shop layout), fill Panel fill (`#1a2338` α 0.95), 2 px Panel stroke (Mid blue), depth 1001.
 3. **Title** — 28 px Tracer yellow `#ffdd33`, centered at panel top.
 4. **Hint line** — 14 px Text muted, centered at panel bottom, lists shortcut keys.
 5. **Content area** — per modal.
