@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"math"
 	"math/rand"
@@ -233,6 +234,34 @@ func (e *Engine) sendError(code, msg string) {
 	e.send(protocol.S2CError, protocol.ErrorData{Code: code, Message: msg})
 }
 
+// validateTsWindow enforces the per-packet ±2s ts check
+// (TsValidationWindow). Returns true when the envelope is acceptable.
+// On rejection, sends ts_out_of_window with the actual offset in ms so
+// the client can surface an actionable "your clock is N ms ahead/behind"
+// message. Skipped in ReplayMode and for synthetic Ts=0 envelopes. No
+// cumulative drift bookkeeping — BUG-02 substrate stays exactly where
+// it was.
+func (e *Engine) validateTsWindow(ts int64, now time.Time) bool {
+	if e.ReplayMode || ts == 0 {
+		return true
+	}
+	diff := now.UnixMilli() - ts
+	windowMs := int64(TsValidationWindow / time.Millisecond)
+	if diff > windowMs || diff < -windowMs {
+		offsetMs := diff
+		direction := "behind"
+		if diff < 0 {
+			offsetMs = -diff
+			direction = "ahead of"
+		}
+		e.sendError("ts_out_of_window",
+			fmt.Sprintf("client clock is %d ms %s server (max ±%d ms) — please sync your system clock",
+				offsetMs, direction, windowMs))
+		return false
+	}
+	return true
+}
+
 // handshake blocks on AUTH and then START_RUN. Each phase is bounded
 // by a deadline (AuthDeadline / StartDeadline) so an idle attacker
 // can't pin a MAX_CONCURRENT slot indefinitely. Returns true when the
@@ -274,6 +303,15 @@ func (e *Engine) awaitAuth(ctx context.Context) bool {
 			if env.Type != protocol.C2SAuth {
 				e.sendError("auth_required", "send C2S_AUTH first")
 				continue
+			}
+			// Spec: every C2S packet (including AUTH) is validated
+			// against the ±2s ts window. Without this check a skewed
+			// client passes AUTH+START_RUN, enters the Game scene,
+			// and then has every C2S_INPUT silently rejected — the
+			// freeze reported in #46. Closing the connection here
+			// surfaces the error via MainMenu's onError handler.
+			if !e.validateTsWindow(env.Ts, time.Now()) {
+				return false
 			}
 			var pkt protocol.AuthPacket
 			if err := json.Unmarshal(env.Data, &pkt); err != nil {
@@ -323,6 +361,9 @@ func (e *Engine) awaitStartRun(ctx context.Context) bool {
 			if env.Type != protocol.C2SStartRun {
 				e.sendError("start_required", "send C2S_START_RUN")
 				continue
+			}
+			if !e.validateTsWindow(env.Ts, time.Now()) {
+				return false
 			}
 			var pkt protocol.StartRunPacket
 			if err := json.Unmarshal(env.Data, &pkt); err != nil {
@@ -741,13 +782,10 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 	// check — BUG-02 substrate. Replay skips this entirely: recorded Ts
 	// values come from the original session's wall clock and would
 	// otherwise reject every packet.
+	if !e.validateTsWindow(env.Ts, now) {
+		return
+	}
 	if env.Ts != 0 && !e.ReplayMode {
-		diff := now.UnixMilli() - env.Ts
-		if diff > int64(TsValidationWindow/time.Millisecond) ||
-			diff < -int64(TsValidationWindow/time.Millisecond) {
-			e.sendError("ts_out_of_window", "ts must be within ±2s of server now")
-			return
-		}
 		e.lastClientTs = env.Ts
 	}
 
