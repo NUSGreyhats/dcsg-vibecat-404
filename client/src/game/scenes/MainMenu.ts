@@ -115,8 +115,8 @@ export class MainMenu extends Phaser.Scene {
     const h = this.scale.height;
 
     // Restart / return-to-menu can leave gameplay keys marked as held on the
-    // shared keyboard manager. Clear them before focusing the login inputs so
-    // WASD types normally instead of behaving like stuck movement keys.
+    // shared keyboard manager. Clear that state before the menu becomes
+    // interactive again so held movement / restart keys don't leak across.
     this.input.keyboard?.resetKeys();
 
     if (this.textures.exists("title")) {

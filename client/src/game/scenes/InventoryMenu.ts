@@ -98,11 +98,11 @@ export class InventoryMenu extends Phaser.Scene {
 
     const kb = this.input.keyboard!;
     this.keys = {
-      up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
-      down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
-      enter: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER),
-      esc: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
-      i: kb.addKey(Phaser.Input.Keyboard.KeyCodes.I),
+      up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP, false),
+      down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN, false),
+      enter: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER, false),
+      esc: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC, false),
+      i: kb.addKey(Phaser.Input.Keyboard.KeyCodes.I, false),
     };
 
     this.keys.up.on("down", () => this.move(-1));

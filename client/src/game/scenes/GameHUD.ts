@@ -206,7 +206,7 @@ export class GameHUD extends Phaser.Scene {
 
     const kb = this.input.keyboard;
     if (kb) {
-      this.spaceKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+      this.spaceKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE, false);
       this.spaceKey.on("down", this.onSpaceDown, this);
       this.spaceKey.on("up", this.onSpaceUp, this);
     }
