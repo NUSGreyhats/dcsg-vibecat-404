@@ -384,9 +384,14 @@ export class Game extends Phaser.Scene {
         color = HP_GREEN;
         break;
       case AMMO: {
-        const weaponId = getSync().state.player?.weapon_id ?? 0;
+        const player = getSync().state.player;
+        const weaponId = player?.weapon_id ?? 0;
         const weapon = WEAPON_STATS[weaponFromServerId(weaponId)];
-        text = `+20 ${weapon.displayName} ammo`;
+        const currentAmmo = player?.ammo ?? 0;
+        const gained = Math.max(0, Math.min(20, weapon.ammoMax - currentAmmo));
+        text = gained > 0
+          ? `+${gained} ${weapon.displayName} ammo`
+          : `${weapon.displayName} ammo full`;
         color = BONE_WHITE;
         break;
       }

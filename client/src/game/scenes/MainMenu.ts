@@ -2,7 +2,6 @@ import Phaser from "phaser";
 import { getSync } from "../net/runContext";
 import {
   clearCachedPlayerId,
-  getCachedPlayerId,
   setCachedPlayerId,
 } from "../prefs";
 import { WS_URL } from "../constants";
@@ -18,7 +17,6 @@ import {
   FONT_SIZE_CAPTION,
   FONT_SIZE_SMALL,
   MID_BLUE,
-  SUCCESS,
   TEXT_MUTED,
   TEXT_PRIMARY,
   WARNING,
@@ -72,7 +70,6 @@ export class MainMenu extends Phaser.Scene {
   private passwordInput?: HTMLInputElement;
   private statusText?: Phaser.GameObjects.Text;
   private startButton?: HTMLButtonElement;
-  private connected = false;
   private submitting = false;
   private resizeHandlers: Array<() => void> = [];
   private sponsorLogoEls: HTMLImageElement[] = [];
@@ -175,12 +172,17 @@ export class MainMenu extends Phaser.Scene {
 
     this.startButton = this.mountButton(contentX, panelY + 78, "[ Log In ]");
 
-    this.statusText = this.add.text(contentX, panelY + 120, "Connecting...", {
-      fontFamily: FONT_FAMILY,
-      fontSize: FONT_SIZE_SMALL,
-      color: hex(TEXT_MUTED),
-      wordWrap: { width: MainMenu.INPUT_WIDTH },
-    });
+    this.statusText = this.add.text(
+      contentX,
+      panelY + 120,
+      "Enter credentials to play.",
+      {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_SMALL,
+        color: hex(TEXT_MUTED),
+        wordWrap: { width: MainMenu.INPUT_WIDTH },
+      },
+    );
 
     const registerLink = this.add
       .text(contentX, panelY + 146, "No account? [ Register → ]", {
@@ -201,8 +203,6 @@ export class MainMenu extends Phaser.Scene {
     });
 
     this.drawSponsorsPanel(panelX, sponsorTop);
-
-    this.connect();
 
     const sync = getSync();
     sync.state.on("authOk", this.onAuthOk, this);
@@ -346,41 +346,23 @@ export class MainMenu extends Phaser.Scene {
     this.resizeHandlers.push(place);
   }
 
-  private connect(): void {
+  private async connectForAuth(): Promise<boolean> {
     const sync = getSync();
-    sync
-      .connect(WS_URL)
-      .then(() => {
-        this.connected = true;
-        const cachedId = getCachedPlayerId();
-        if (cachedId) {
-          // Skip the form — re-auth with the cached id and let onAuthOk
-          // kick off START_RUN. If the server rejects (account gone /
-          // server restarted), onError will clear the cache and re-show
-          // the form so the user can re-enter credentials.
-          this.hideLoginForm();
-          this.statusText?.setText("Resuming session...");
-          this.statusText?.setColor(hex(TEXT_MUTED));
-          this.submitting = true;
-          getSync().sendAuth(cachedId);
-        } else {
-          this.statusText?.setText("Connected. Log in to play.");
-          this.statusText?.setColor(hex(SUCCESS));
-        }
-      })
-      .catch((err) => {
-        console.error("[MainMenu] connect failed", err);
-        this.statusText?.setText(
-          "Could not connect to the game server. Refresh to retry.",
-        );
-        this.statusText?.setColor(hex(ERROR));
-      });
-  }
+    if (sync.isConnected()) return true;
 
-  private hideLoginForm(): void {
-    if (this.usernameInput) this.usernameInput.style.display = "none";
-    if (this.passwordInput) this.passwordInput.style.display = "none";
-    if (this.startButton) this.startButton.style.display = "none";
+    this.statusText?.setText("Connecting to game server...");
+    this.statusText?.setColor(hex(TEXT_MUTED));
+    try {
+      await sync.connect(WS_URL);
+      return true;
+    } catch (err) {
+      console.error("[MainMenu] connect failed", err);
+      this.statusText?.setText(
+        "Could not connect to the game server. Refresh to retry.",
+      );
+      this.statusText?.setColor(hex(ERROR));
+      return false;
+    }
   }
 
   private showLoginForm(): void {
@@ -521,11 +503,6 @@ export class MainMenu extends Phaser.Scene {
 
   private async onStart(): Promise<void> {
     if (this.submitting) return;
-    if (!this.connected) {
-      this.statusText?.setText("Still connecting — hang on.");
-      this.statusText?.setColor(hex(WARNING));
-      return;
-    }
     const username = this.usernameInput?.value.trim() ?? "";
     const password = this.passwordInput?.value ?? "";
     if (!username || !password) {
@@ -588,17 +565,26 @@ export class MainMenu extends Phaser.Scene {
       if (viaQueue) {
         const ready = await this.showReadyPrompt();
         if (!ready) {
-          this.statusText?.setText("Forfeit — didn't start in time. Log in again to re-queue.");
+          this.statusText?.setText(
+            "Forfeit — didn't start in time. Log in again to re-queue.",
+          );
           this.statusText?.setColor(hex(ERROR));
           this.submitting = false;
           return;
         }
       }
 
+      if (!(await this.connectForAuth())) {
+        this.submitting = false;
+        return;
+      }
+
       this.statusText?.setText("Authenticating...");
       this.statusText?.setColor(hex(TEXT_MUTED));
-      // Cache for auto-relogin on subsequent runs (Restart, Play Again,
-      // page refresh). Cleared by onError if the server rejects the id.
+      // Cache the last authenticated id so explicit logout can clear any
+      // stale local session state. WS auth is still performed only after
+      // login + queue admission; pre-auth sockets can go idle behind the
+      // queue and leave the client stuck with an unsent AUTH packet.
       setCachedPlayerId(body.player_id);
       getSync().sendAuth(body.player_id);
     } catch (err) {
@@ -889,11 +875,10 @@ export class MainMenu extends Phaser.Scene {
     this.sponsorLogoEls = [];
 
     // Phaser reuses the same scene instance across stop/start, so any
-    // field set during a previous login (submitting/connected) would
-    // otherwise carry over to the next mount and silently swallow the
-    // first onStart click. Reset to the fresh-instance defaults.
+    // field set during a previous login would otherwise carry over to
+    // the next mount and silently swallow the first onStart click.
+    // Reset to the fresh-instance defaults.
     this.submitting = false;
-    this.connected = false;
   }
 }
 

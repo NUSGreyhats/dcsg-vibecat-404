@@ -101,13 +101,13 @@ func main() {
 	allowlist := auth.NewAllowlist(allowlistPath)
 
 	// Build the auth gate once so the WS handler doesn't re-derive it per
-	// connection. Identity mode requires the player_id to be present in
-	// identity.db — i.e. the player must have registered — and returns
-	// the stored display_name so the leaderboard sees the human name
-	// rather than the raw hex ID.
+	// connection. Identity and token modes both map the internal player_id
+	// back to the stored display_name so public surfaces (leaderboard,
+	// spectators) never show the raw 32-char session key. Token mode first
+	// checks the queue allowlist, then verifies the id still belongs to a
+	// registered identity.
 	authCheck := func(playerID string) (string, error) {
-		switch mode {
-		case auth.ModeIdentity:
+		lookupDisplayName := func() (string, error) {
 			p, err := identity.Lookup(identityDB, playerID)
 			if err != nil {
 				if errors.Is(err, identity.ErrNotFound) {
@@ -116,6 +116,16 @@ func main() {
 				return "", err
 			}
 			return p.DisplayName, nil
+		}
+
+		switch mode {
+		case auth.ModeIdentity:
+			return lookupDisplayName()
+		case auth.ModeToken:
+			if err := auth.Check(mode, allowlist, playerID); err != nil {
+				return "", err
+			}
+			return lookupDisplayName()
 		default:
 			return "", auth.Check(mode, allowlist, playerID)
 		}
