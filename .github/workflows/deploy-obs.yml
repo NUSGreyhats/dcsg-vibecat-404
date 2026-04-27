@@ -1,0 +1,109 @@
+name: Deploy OBS to DigitalOcean
+
+on:
+  workflow_dispatch:
+
+# Serialize OBS deploys so two pushes in a row don't fight for the droplet.
+concurrency:
+  group: deploy-obs-digitalocean
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy obs/ docker-compose stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          OBS_DOMAIN: ${{ vars.OBS_DOMAIN }}
+          OBS_BASIC_AUTH_HASH: ${{ secrets.OBS_BASIC_AUTH_HASH }}
+        with:
+          host: ${{ secrets.OBS_HOST }}
+          # Reuses DO_USER/DO_SSH_KEY from the existing game-droplet deploy.
+          # Both droplets are provisioned with the same admin SSH user and key.
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          script_stop: true
+          command_timeout: 15m
+          envs: OBS_DOMAIN,OBS_BASIC_AUTH_HASH
+          script: |
+            set -euo pipefail
+
+            REPO_SLUG="${{ github.repository }}"
+            REF="${{ github.ref_name }}"
+            DIR="$HOME/defcon-game"
+
+            echo "==> Target: $REPO_SLUG @ $REF"
+            echo "==> Host:   $(hostname)  user: $(whoami)"
+            echo "==> Path:   $DIR"
+            echo "==> Env:    OBS_DOMAIN=${OBS_DOMAIN:-<unset>} basic_auth=$([ -n "${OBS_BASIC_AUTH_HASH:-}" ] && echo set || echo unset)"
+
+            # Preflight: docker + compose v2.
+            docker version >/dev/null 2>&1 || {
+              echo "docker is not available to $USER" >&2; exit 1;
+            }
+            docker compose version >/dev/null 2>&1 || {
+              echo "docker compose v2 is required" >&2; exit 1;
+            }
+
+            # First deploy: clone. Subsequent: fetch + hard reset.
+            if [ ! -d "$DIR/.git" ]; then
+              echo "==> Cloning fresh checkout"
+              git clone --depth 50 "https://github.com/${REPO_SLUG}.git" "$DIR"
+            fi
+
+            cd "$DIR"
+            git remote set-url origin "https://github.com/${REPO_SLUG}.git"
+            git fetch --prune --tags origin "+refs/heads/*:refs/remotes/origin/*"
+            RESOLVED_SHA="$(git rev-parse "origin/${REF}" 2>/dev/null || git rev-parse "${REF}")"
+            echo "==> Resolved ${REF} → ${RESOLVED_SHA}"
+            git reset --hard "${RESOLVED_SHA}"
+
+            # One-shot swap setup. Idempotent — safe to run every deploy.
+            echo "==> swap setup"
+            sudo bash obs/setup-swap.sh
+
+            # Write obs/.env from forwarded Variables/Secrets.
+            # OBS_BASIC_AUTH_HASH is single-quoted because docker-compose's
+            # env_file parser applies parameter expansion to unquoted values
+            # — bcrypt hashes contain `$` chars that would otherwise be mangled.
+            echo "==> Writing obs/.env"
+            umask 077
+            cat > obs/.env <<EOF
+            OBS_DOMAIN=${OBS_DOMAIN:-}
+            OBS_BASIC_AUTH_HASH='${OBS_BASIC_AUTH_HASH:-}'
+            EOF
+            umask 022
+
+            # Build + launch.
+            echo "==> docker compose up -d --build"
+            docker compose -f obs/docker-compose.yml up -d --build --remove-orphans
+
+            echo "==> docker image prune"
+            docker image prune -f >/dev/null
+
+            echo "==> Status"
+            docker compose -f obs/docker-compose.yml ps
+
+            # Smoke checks. Caddy on :80 (plain HTTP) should redirect to https
+            # once a real domain is bound; for the smoke check we hit it
+            # directly and expect either 301/308 (HTTP→HTTPS redirect from
+            # Caddy auto-https) or 401 (basic-auth challenge if auto-https
+            # is off / domain isn't ready).
+            echo "==> Caddy on :80"
+            curl -sS -o /dev/null -w "  http://localhost/ → %{http_code}\n" http://localhost/ || true
+
+            # VictoriaMetrics health: check from Grafana's container, which
+            # we already know has network connectivity to victoria-metrics:8428
+            # (that's the datasource path mods rely on). VM's own image lacks
+            # a usable wget for self-checks.
+            echo "==> VictoriaMetrics health"
+            docker compose -f obs/docker-compose.yml exec -T grafana \
+              wget -qO- 'http://victoria-metrics:8428/health' \
+              && echo "  VM OK" \
+              || { echo "!! VictoriaMetrics health failed" >&2; exit 1; }
+
+            echo "==> Deploy complete: ${REPO_SLUG}@${RESOLVED_SHA}"

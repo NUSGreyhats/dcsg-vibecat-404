@@ -1,0 +1,25 @@
+# VictoriaMetrics scrape config (Prometheus-format).
+# Single-node VM reads this via -promscrape.config flag (see obs/docker-compose.yml).
+#
+# Phase 1: just the OBS VM itself (VM self-scrape + local node-exporter).
+# Phase 2 will add a 'game-droplet' job pointing at the existing client
+# Caddy's /_metrics/* paths.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  # VictoriaMetrics's own internal metrics. Useful for monitoring the
+  # monitoring stack (memory pressure, scrape failures, ingestion rate).
+  - job_name: victoria-metrics
+    static_configs:
+      - targets: ["victoria-metrics:8428"]
+
+  # Local node-exporter on the OBS VM. Reaches it over the Docker network
+  # by service name; node-exporter binds to :9100 inside the network.
+  - job_name: node-exporter-obs
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          host: obs

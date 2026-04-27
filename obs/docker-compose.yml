@@ -1,0 +1,89 @@
+# OBS observability stack.
+# Run from the obs/ directory: `docker compose up -d --build`
+# (compose auto-loads obs/.env from this directory).
+#
+# Architecture: see ../docs/specs/observability/design.md.
+# Phase 1 scope: stand up the platform monitoring itself.
+# Game-droplet exporters and app metrics arrive in Phases 2 and 3.
+
+services:
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:v1.108.1
+    container_name: obs-victoria-metrics
+    command:
+      - "-storageDataPath=/storage"
+      - "-retentionPeriod=7d"
+      - "-promscrape.config=/etc/victoria-metrics/scrape.yml"
+      - "-search.maxSeries=10000"
+      - "-memory.allowedPercent=70"
+      - "-httpListenAddr=:8428"
+    volumes:
+      - vm-data:/storage
+      - ./victoria-metrics/scrape.yml:/etc/victoria-metrics/scrape.yml:ro
+    restart: unless-stopped
+    # No ports exposed to host — only Grafana (via Caddy) talks to it,
+    # over the Docker network.
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: obs-grafana
+    environment:
+      # Auth: everyone past the Caddy basic-auth gate is anonymous Editor.
+      # No Grafana login flow — the admin user still exists internally
+      # but the login form is disabled and basic-auth API is off, so
+      # nothing can authenticate as admin. Provisioning still works
+      # (it bypasses HTTP auth).
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Editor
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_ALLOW_ORG_CREATE: "false"
+      GF_INSTALL_PLUGINS: ""
+      GF_LOG_LEVEL: warn
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - victoria-metrics
+    restart: unless-stopped
+    # No ports exposed to host — Caddy fronts it.
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: obs-caddy
+    env_file:
+      - ./.env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - grafana
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: obs-node-exporter
+    pid: host
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    restart: unless-stopped
+    # No ports exposed to host — VictoriaMetrics scrapes it over the Docker
+    # network at node-exporter:9100.
+
+volumes:
+  vm-data:
+  grafana-data:
+  caddy-data:
+  caddy-config:

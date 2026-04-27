@@ -1,0 +1,22 @@
+# Grafana provisioned datasource pointing at VictoriaMetrics.
+# Loaded automatically at Grafana boot — no UI clicks needed.
+#
+# isDefault: true means dashboards that reference an unknown datasource UID
+# (e.g. community dashboards downloaded from grafana.com) fall back to this
+# one. Saves us from rewriting the UID inside every dashboard JSON.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://victoria-metrics:8428
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "15s"
+      httpMethod: POST
+      prometheusType: Prometheus
+      prometheusVersion: "2.50.0"
