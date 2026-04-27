@@ -10,7 +10,7 @@ How physical input (keyboard, mouse) becomes C2S packets. Covers the `Controls` 
 - `client/src/game/scenes/Game.ts` — the sole consumer. Holds one `Controls` instance and calls its methods from `update()`.
 - `client/src/game/constants.ts` — hosts `INPUT_SEND_INTERVAL_MS = 50` (the 20 Hz throttle).
 
-`InventoryMenu` does **not** use `Controls`; it owns its own keyboard bindings locally. Rationale: inventory keys (`Up`/`Down`/`Enter`/`Esc`/`I`) are scene-local and using a separate `KeyMap` avoids an inadvertent `interactPressed`/`inventoryPressed` double-trigger when the menu closes and `Game` resumes.
+`ShopMenu` and `PauseMenu` do **not** use `Controls`; each owns its own keyboard bindings locally. Rationale: modal keys are scene-local and using a separate `KeyMap` avoids an inadvertent `interactPressed`/`shopPressed` double-trigger when the menu closes and `Game` resumes.
 
 ## `Controls` facade
 
@@ -20,7 +20,6 @@ export type Controls = {
     aimAngle(pivotX: number, pivotY: number): number;
     shootHeld(): boolean;        // pointer button currently down (polled — drives hold-to-shoot)
     interactPressed(): boolean;  // Phaser JustDown on 'E'
-    inventoryPressed(): boolean; // Phaser JustDown on 'I'
     shopPressed(): boolean;      // Phaser JustDown on 'B' — opens ShopMenu
     weaponSwitchPressed(): number | null; // 1/2/3 just-pressed → 1/2/3, else null
 };
@@ -44,9 +43,7 @@ If `scene.input.keyboard` is null (Phaser's keyboard plugin disabled or unavaila
 | Shoot                      | Left mouse button (held)              | Polled per frame, throttled to weapon fire rate | `C2S_SHOOT { aim_angle }` |
 | Weapon slot 1/2/3          | `1`, `2`, `3` (just-pressed)          | Just-pressed     | `C2S_SWITCH_WEAPON { weapon_id }`       |
 | Interact                   | `E`                                   | Just-pressed     | `C2S_INTERACT { target_id, claimed_type }` or `C2S_ENTER_DOOR { door_id }` (whichever is nearest); `claimed_type` is the rendered pickup's type — see [features/shop.md BUG-12](../features/shop.md#bug-12-pickup-type-confusion) |
-| Open Inventory             | `I`                                   | Just-pressed     | `scene.launch("InventoryMenu")` (no C2S yet) |
 | Open Shop                  | `B`                                   | Just-pressed     | `scene.launch("ShopMenu")` (no `C2S_SHOP_OPEN`; the menu is fully client-side until purchase) |
-| Inventory: Up / Down / Enter / Esc / I | same keys (scene-local, in `InventoryMenu`) | Just-pressed | Use selected → `C2S_USE_ITEM`, or close menu |
 | Shop: Up / Down / Enter / Esc / B | same keys (scene-local, in `ShopMenu`)      | Just-pressed | Purchase selected → `C2S_SHOP_PURCHASE`, or close menu |
 
 Movement normalization: diagonal input is divided by `Math.hypot(dx, dy)` so the magnitude caps at 1. This is **client-side politeness** — the server is free to ignore or re-normalize. An exploiter who wants to send `dx=5, dy=5` just bypasses the client.
@@ -81,7 +78,7 @@ shootHeld(): boolean {
 
 ### Just-pressed for keyboard
 
-`Phaser.Input.Keyboard.JustDown(key)` returns true only on the frame the key transitions from up to down. Used for every single-action key (`E`, `I`, `1`, `2`, `3`). Released → pressed → released → pressed fires once per transition, regardless of how long the key is held.
+`Phaser.Input.Keyboard.JustDown(key)` returns true only on the frame the key transitions from up to down. Used for every single-action key (`E`, `B`, `1`, `2`, `3`). Released → pressed → released → pressed fires once per transition, regardless of how long the key is held.
 
 ## Input → packet mapping in `Game.handleInput(delta)`
 
@@ -102,7 +99,6 @@ graph LR
     NEAR_P -->|no| NEAR_D{"nearestUnlockedDoorId ≤ 80 px?"}
     NEAR_D -->|yes| SEND_D["sync.sendEnterDoor(id)"]
 
-    INV["Controls.inventoryPressed()"] -->|true| OPEN["scene.launch('InventoryMenu')<br/>scene.pause()"]
     SHP["Controls.shopPressed()"] -->|true| OPEN_SHOP["scene.launch('ShopMenu')<br/>scene.pause()"]
 
     style SEND_I fill:#3498db,color:#fff
@@ -185,17 +181,6 @@ private nearestPickupId(x, y, radius): number | null {
 
 Doors: same pattern, but filtered by `state.unlockedDoors.has(id)` — locked doors are not candidates for `C2S_ENTER_DOOR`. Note: the server-side door handler only cares about `Unlocked` state, not distance ([features/rooms-doors.md#bug-03-door-skip-no-proximity](../features/rooms-doors.md#bug-03-door-skip-no-proximity)). So again, the 80 px client gate is UX-only; a custom client can skip it.
 
-### Inventory toggle
-
-```ts
-if (Controls.inventoryPressed()) {
-    scene.launch("InventoryMenu");
-    scene.pause();
-}
-```
-
-The `I` key opens the inventory. `InventoryMenu` owns its own keys for while-open (Up/Down/Enter/Esc/I) — pressing `I` inside the menu closes it. See [04-scenes.md#inventorymenu-modal-overlay](./04-scenes.md#inventorymenu--modal-overlay).
-
 ### Shop toggle
 
 ```ts
@@ -235,7 +220,7 @@ The one grey area is the 80 px `radius` — that **does** gate the packet, but o
 
 ## Implementation status
 
-- `Controls` facade, `Game.handleInput`, and `InventoryMenu`'s local bindings all exist and work.
+- `Controls` facade, `Game.handleInput`, and the modal scenes' local bindings all exist and work.
 - `shootHeld()` drives hold-to-shoot for all weapons. The per-weapon throttle is computed from `WEAPON_STATS[id].cooldownMs` and `player.fire_rate_stacks` each fire.
 - Weapon slots 1/2/3 map to pistol/rifle/shotgun (server ids 1/2/3). The client uses `weaponFromServerId()` to translate the server's numeric id to the client-side `WeaponId` — do NOT index into `ALL_WEAPON_IDS` with the server id directly.
 - No touch / gamepad support — desktop-keyboard-and-mouse only. Adding touch would involve a virtual joystick + tap-to-interact, and is not in scope for DEF CON.
@@ -246,7 +231,7 @@ None. Input is the honest-player's conduit; exploits happen on the wire, not her
 
 ## Cross-references
 
-- [04-scenes.md](./04-scenes.md) — `Game.handleInput()` site and `InventoryMenu` scene-local keys.
+- [04-scenes.md](./04-scenes.md) — `Game.handleInput()` site and the modal scenes' scene-local keys.
 - [02-net-sync.md](./02-net-sync.md) — `send*` helpers this module invokes.
 - [05-entities-rendering.md](./05-entities-rendering.md) — `Player` position used by `aimAngle`.
 - [06-world-rooms.md](./06-world-rooms.md) — `pickups` / `doors` maps that `nearestXxx` scans.

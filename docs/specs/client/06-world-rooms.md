@@ -161,7 +161,7 @@ sequenceDiagram
 
 `player` persists because:
 
-- The player's HP / weapon / inventory are run-long state. Re-creating a new `Player` would mean re-reading all that from the next `S2C_STATE` — valid but noisy.
+- The player's HP / weapon / coins / stacks are run-long state. Re-creating a new `Player` would mean re-reading all that from the next `S2C_STATE` — valid but noisy.
 - The `Player` owns the HP-bar Graphics and sprite. Re-creating discards accumulated render state.
 - Lerp continuity: the `Player`'s current rendered `(x, y)` is already on screen; on `S2C_ROOM_LOAD` we reposition it to the server-provided start (from `state.player`), and the next `S2C_STATE` re-targets as normal. Zero jitter.
 

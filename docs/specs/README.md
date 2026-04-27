@@ -10,7 +10,7 @@ specs/
 ├── bugs.md                ← central index of all 11 intentional bugs
 ├── foundations/           ← server-side cross-cutting invariants
 │   ├── 01-architecture.md            — service topology + deployment
-│   ├── 02-protocol.md                — WS envelope + packet registry + BUG-09 parser half
+│   ├── 02-protocol.md                — WS envelope + packet registry
 │   ├── 03-identity-auth.md           — player_id, bcrypt, AES, token allowlist
 │   ├── 04-lobby.md                   — lobby service
 │   ├── 05-server-runtime.md          — goroutines, tick loop, BUG-02 / BUG-06 / BUG-11
@@ -34,11 +34,10 @@ specs/
     ├── combat-weapons.md             — BUG-04, BUG-07, BUG-08 (disabled)
     ├── mob-ai.md                     — BUG-01
     ├── rooms-doors.md                — BUG-03
-    ├── pickups.md                    — BUG-05
-    └── inventory-items.md            — BUG-10 (disabled), BUG-09 dispatch half (disabled)
+    └── pickups.md                    — BUG-05
 ```
 
-> BUG-08, BUG-09, BUG-10 are currently **disabled** in the shipping code — the specs are kept for reference and future reintroduction. See [bugs.md — currently disabled](bugs.md#currently-disabled).
+> BUG-08 is currently **disabled** in the shipping code — the spec is kept for reference and future reintroduction. See [bugs.md — currently disabled](bugs.md#currently-disabled).
 
 ## Reading order for a new implementer
 
@@ -61,7 +60,7 @@ specs/
    8. [client/08-assets-pipeline.md](client/08-assets-pipeline.md) — assets + Vite.
    9. [client/09-spectator-mode.md](client/09-spectator-mode.md) — read-only viewer (greenfield).
    10. [client/10-ui-components.md](client/10-ui-components.md) — visual design tokens + UI catalog.
-10. `features/*.md` — any order; each file is self-contained. See [combat-weapons.md](features/combat-weapons.md), [mob-ai.md](features/mob-ai.md), [rooms-doors.md](features/rooms-doors.md), [pickups.md](features/pickups.md), [inventory-items.md](features/inventory-items.md).
+10. `features/*.md` — any order; each file is self-contained. See [combat-weapons.md](features/combat-weapons.md), [mob-ai.md](features/mob-ai.md), [rooms-doors.md](features/rooms-doors.md), [pickups.md](features/pickups.md), [shop.md](features/shop.md).
 11. [bugs.md](bugs.md) — the index that ties it all together.
 12. [foundations/09-ci-cd-deploy.md](foundations/09-ci-cd-deploy.md) — read last; understand the build-tag strategy that ships BUG-11.
 
@@ -126,7 +125,7 @@ Append one row to the scene table in [client/04-scenes.md](client/04-scenes.md) 
 
 ### 6. Cross-link from adjacent features
 
-If the new feature's data flow touches another feature (e.g. a shop reads inventory or spawns pickups), add cross-references in both directions.
+If the new feature's data flow touches another feature (e.g. a shop spawns pickups), add cross-references in both directions.
 
 ## Worked example — adding an in-game shop
 
@@ -143,11 +142,10 @@ Between-room shop where the player trades Coins for items, weapons, or consumabl
 ## Data model
 Lives on PlayerState (via features/shop.md registration):
   Coins    int32
-  ShopInventory ShopInventory  // feature-local struct
 
 ## Data flow
 C2S_SHOP_OPEN → server validates (between-rooms only) → S2C_SHOP_STATE
-C2S_SHOP_PURCHASE { item_id } → server debits Coins, adds to inventory → S2C_STATE
+C2S_SHOP_PURCHASE { item_id } → server debits Coins → S2C_STATE
 
 ## Intentional bugs in this area
 (decide — e.g. BUG-12 price underflow if going to add one)
@@ -156,7 +154,6 @@ C2S_SHOP_PURCHASE { item_id } → server debits Coins, adds to inventory → S2C
 C2S_SHOP_OPEN (0x09), C2S_SHOP_PURCHASE (0x0a), S2C_SHOP_STATE (0x8a)
 
 ## Cross-references
-- features/inventory-items.md — purchased items enter Inventory
 - features/combat-weapons.md — purchased weapons unlock UnlockedWeapons
 ```
 
@@ -181,7 +178,6 @@ In the `PlayerState` block:
 PlayerState {
     ...existing fields...
     Coins          int32           // owned by features/shop.md
-    ShopInventory  *ShopInventory  // owned by features/shop.md
 }
 ```
 
@@ -199,7 +195,7 @@ Append to scene table in [client/04-scenes.md](client/04-scenes.md):
 
 **Step 6 — cross-links:**
 
-Add cross-refs in [features/inventory-items.md](features/inventory-items.md) and [features/combat-weapons.md](features/combat-weapons.md) pointing at the new `features/shop.md`.
+Add cross-refs in [features/combat-weapons.md](features/combat-weapons.md) pointing at the new `features/shop.md`.
 
 **Total changes:** 1 new file + ~4 small appends. No restructure.
 

@@ -69,6 +69,8 @@ export class GameHUD extends Phaser.Scene {
   private weaponText?: Phaser.GameObjects.Text;
   private weaponIcon?: Phaser.GameObjects.Sprite;
   private weaponPanel?: Phaser.GameObjects.Rectangle;
+  private powerupText?: Phaser.GameObjects.Text;
+  private powerupPanel?: Phaser.GameObjects.Rectangle;
   private splitsHeader?: Phaser.GameObjects.Text;
   private splitsPanel?: Phaser.GameObjects.Rectangle;
   private splitsRows: Phaser.GameObjects.Text[] = [];
@@ -161,6 +163,26 @@ export class GameHUD extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD_BG);
 
+    // Active shop trait stacks — sits just above the weapon widget. Hidden
+    // until at least one stack is owned so the HUD stays clean early-run.
+    this.powerupText = this.add
+      .text(w - GUTTER_MEDIUM, h - 58, "", {
+        ...HUD_TEXT_STYLE,
+        fontSize: FONT_SIZE_SMALL,
+        color: hex(ACCENT_PRIMARY),
+      })
+      .setOrigin(1, 0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_FILL)
+      .setVisible(false);
+
+    this.powerupPanel = this.add
+      .rectangle(w - GUTTER_MEDIUM, h - 58, 1, 1, MIDNIGHT, PANEL_ALPHA)
+      .setOrigin(1, 0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_BG)
+      .setVisible(false);
+
     const state = getActiveState();
     state.on("runComplete", this.onRunComplete, this);
 
@@ -216,6 +238,34 @@ export class GameHUD extends Phaser.Scene {
     }
 
     this.refreshWeapon(state.player?.weapon_id ?? 0, state.player?.ammo ?? 0);
+    this.refreshPowerups(
+      state.player?.speed_stacks ?? 0,
+      state.player?.fire_rate_stacks ?? 0,
+      state.player?.damage_stacks ?? 0,
+    );
+  }
+
+  private refreshPowerups(
+    speed: number,
+    fireRate: number,
+    damage: number,
+  ): void {
+    if (!this.powerupText || !this.powerupPanel) return;
+    const parts: string[] = [];
+    if (speed > 0) parts.push(`SPD×${speed}`);
+    if (fireRate > 0) parts.push(`ROF×${fireRate}`);
+    if (damage > 0) parts.push(`DMG×${damage}`);
+
+    if (parts.length === 0) {
+      this.powerupText.setVisible(false);
+      this.powerupPanel.setVisible(false);
+      return;
+    }
+
+    this.powerupText.setText(parts.join("  "));
+    this.powerupText.setVisible(true);
+    this.fitPanelTo(this.powerupPanel, this.powerupText);
+    this.powerupPanel.setVisible(true);
   }
 
   private buildSplitsPanel(width: number): void {
@@ -445,6 +495,8 @@ export class GameHUD extends Phaser.Scene {
     this.weaponText?.destroy();
     this.weaponIcon?.destroy();
     this.weaponPanel?.destroy();
+    this.powerupText?.destroy();
+    this.powerupPanel?.destroy();
     this.splitsHeader?.destroy();
     this.splitsPanel?.destroy();
     for (const r of this.splitsRows) r.destroy();
@@ -460,6 +512,8 @@ export class GameHUD extends Phaser.Scene {
     this.weaponText = undefined;
     this.weaponIcon = undefined;
     this.weaponPanel = undefined;
+    this.powerupText = undefined;
+    this.powerupPanel = undefined;
     this.splitsHeader = undefined;
     this.splitsPanel = undefined;
     this.currentWeaponKey = undefined;

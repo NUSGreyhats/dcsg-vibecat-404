@@ -613,8 +613,6 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 			return
 		}
 		e.tryEnterDoor(pkt.DoorID, now)
-	case protocol.C2SUseItem:
-		e.dispatchUseItem(env.Data, now)
 	case protocol.C2SShopPurchase:
 		var pkt protocol.ShopPurchasePacket
 		if err := json.Unmarshal(env.Data, &pkt); err != nil {
@@ -622,17 +620,6 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 		}
 		HandleShopPurchase(e.player, pkt.ItemID)
 	}
-}
-
-// dispatchUseItem runs both the audit parser (BUG-09 parser half) and the
-// stdlib json parser (BUG-09 dispatch half) on the raw payload.
-func (e *Engine) dispatchUseItem(raw []byte, now time.Time) {
-	protocol.LogItemUse(e.PlayerID, raw)
-	var pkt protocol.UseItemPacket
-	if err := json.Unmarshal(raw, &pkt); err != nil {
-		return
-	}
-	HandleUseItem(e.player, e.run, e.room, pkt.ItemName, now)
 }
 
 func (e *Engine) tryEnterDoor(doorID uint32, now time.Time) {
@@ -687,7 +674,7 @@ func (e *Engine) transitionToRoom(nextRoom uint8, now time.Time) {
 }
 
 func (e *Engine) advancePlayer(dt float32, now time.Time) {
-	speed := PlayerSpeed * EffectiveSpeedMult(e.player, now)
+	speed := PlayerSpeed * EffectiveSpeedMult(e.player)
 
 	const hw float32 = 10 // player half-width used for wall collision
 	const hh float32 = 10
@@ -717,15 +704,7 @@ func (e *Engine) advanceEnemies(dt float32, now time.Time) []uint32 {
 	var deaths []uint32
 	for id, en := range e.room.Enemies {
 		if UpdateEnemy(en, e.player, e.run.CurrentRoom, dt, now, fields) {
-			// Per-archetype melee damage. Shield halves it (integer divide,
-			// floor 1) so boss/tank hits scale proportionally.
 			dmg := Archetypes[en.Type].MeleeDamage
-			if now.Before(e.player.ShieldUntil) {
-				dmg /= 2
-				if dmg < 1 {
-					dmg = 1
-				}
-			}
 			e.player.HP -= dmg
 			e.player.DamageTaken += int32(dmg)
 			if en.Type == EnemyKamikaze {
@@ -860,7 +839,6 @@ func (e *Engine) sendState(now time.Time) {
 			HP:             e.player.HP,
 			WeaponID:       e.player.CurrentWeapon,
 			Ammo:           e.player.WeaponAmmo[e.player.CurrentWeapon],
-			Inventory:      append([]string(nil), e.player.Inventory...),
 			Coins:          e.player.Coins,
 			SpeedStacks:    e.player.SpeedStacks,
 			FireRateStacks: e.player.FireRateStacks,

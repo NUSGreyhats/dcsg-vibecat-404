@@ -119,10 +119,6 @@ export class GameStateSync {
     this.send(C2SType.ENTER_DOOR, { door_id: doorId });
   }
 
-  sendUseItem(itemName: string): void {
-    this.send(C2SType.USE_ITEM, { item_name: itemName });
-  }
-
   private send<T extends C2SType>(type: T, data: C2SDataFor<T>): void {
     const envelope: C2SEnvelope<T> = {
       type,
