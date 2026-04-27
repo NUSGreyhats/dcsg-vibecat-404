@@ -132,7 +132,7 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
-	// Identity HTTP endpoints, /register, /api/leaderboard, and /api/replay/:id
+	// Identity HTTP endpoints, /api/leaderboard, and /api/replay/:id
 	// all live on the lobby service. The game server still imports
 	// pkg/identity for WS-time Lookup in authCheck above and writes to
 	// game.db via the leaderboard goroutine started below.
