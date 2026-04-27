@@ -58,6 +58,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
           ADMIN_SESSION_SECRET: ${{ secrets.ADMIN_SESSION_SECRET }}
+          OBS_HOST: ${{ secrets.OBS_HOST }}
         with:
           host: ${{ secrets.DO_HOST }}
           username: ${{ secrets.DO_USER }}
@@ -70,7 +71,7 @@ jobs:
           # can write the droplet's .env file from them. Operational
           # toggles come from repo Variables (visible in CI logs);
           # credentials come from repo Secrets (masked).
-          envs: AUTH_MODE,QUEUE_ENABLED,MAX_CONCURRENT,LEADERBOARD_ENABLED,LEADERBOARD_DISABLED_MESSAGE,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,ADMIN_SESSION_SECRET
+          envs: AUTH_MODE,QUEUE_ENABLED,MAX_CONCURRENT,LEADERBOARD_ENABLED,LEADERBOARD_DISABLED_MESSAGE,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,ADMIN_SESSION_SECRET,OBS_HOST
           script: |
             set -euo pipefail
 
@@ -124,6 +125,7 @@ jobs:
             TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
             TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID:-}
             ADMIN_SESSION_SECRET=${ADMIN_SESSION_SECRET:-}
+            OBS_HOST=${OBS_HOST:-}
             EOF
             umask 022
 
