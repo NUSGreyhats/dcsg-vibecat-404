@@ -2,7 +2,7 @@
 
 > Tracks GitHub issue [#75 "Admin panel observability"](https://github.com/NUSGreyhats/DEFCON-Game/issues/75).
 
-**Status:** design (pending implementation plans per phase)
+**Status:** Phase 1 implementation in progress (plan at [`phase-1-plan.md`](./phase-1-plan.md)); Phases 2 + 3 plans deferred until Phase 1 ships.
 **Date:** 2026-04-27
 **Target event:** DEF CON SG (3-day window)
 
@@ -239,7 +239,7 @@ Each phase ships working, useful software on its own. One spec, three plans (thi
   - run with `pid: host` so it can see all host processes
   - Without these the dashboard shows the container's own (mostly empty) view, not the host's.
 - New `.github/workflows/deploy-obs.yml` — same shape as the existing droplet deploy: rsync the `obs/` tree, write `.env` from secrets, `docker compose up -d --build`.
-- `.env.example` updated with the OBS-specific variables.
+- New `obs/.env.example` documenting the OBS-specific variables used by the deploy workflow (separate from the repo-root `.env.example` which is for the game stack).
 - Runbook section in `docs/specs/foundations/09-ci-cd-deploy.md` covering: provisioning the droplet, the swap setup, the live-resize escape hatch.
 
 **Validates:** TLS chain, basic-auth, provisioning, deploy pipeline, swap, retention flags. If any of these are wrong, find out before instrumenting any code.

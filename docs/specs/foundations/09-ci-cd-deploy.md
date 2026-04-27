@@ -181,7 +181,7 @@ The workflow:
 
 ### Verifying after deploy
 
-- Open `https://OBS_DOMAIN/` — basic-auth prompt → enter the credential you configured. You should land in Grafana.
+- Open `https://<OBS_DOMAIN>/` (i.e. `https://observability.nusgreyhats.org/`) — basic-auth prompt → enter username `nusgreyhats` and the password you configured. You should land in Grafana.
 - Dashboards → "Node Exporter Full" — CPU/memory/disk should populate within ~30 s of scrape.
 - If Grafana shows "No data", `ssh` into the OBS droplet and:
     ```bash
@@ -202,9 +202,9 @@ The 7-day retention plus VictoriaMetrics's lower memory profile means this shoul
 
 ### Tearing down (e.g. post-event)
 
-To stop running while preserving data: `docker compose -f obs/docker-compose.yml down`. Volumes persist.
+To stop running while preserving data: `docker compose -f ~/defcon-game/obs/docker-compose.yml down`. Volumes persist.
 
-To wipe everything: `docker compose -f obs/docker-compose.yml down -v`. Then destroy the droplet from the DO console.
+To wipe everything: `docker compose -f ~/defcon-game/obs/docker-compose.yml down -v`. Then destroy the droplet from the DO console.
 
 ## Implementation status
 

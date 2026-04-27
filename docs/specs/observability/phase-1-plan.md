@@ -67,7 +67,11 @@ Write to `obs/.env.example`:
 
 ```text
 # OBS observability droplet env. Copy to obs/.env and fill in.
-# docker-compose -f obs/docker-compose.yml auto-loads obs/.env from this directory.
+#
+# Docker Compose auto-loads .env from the current working directory.
+# Run from inside obs/ (`cd obs && docker compose up -d`) so compose
+# picks up obs/.env, OR from the repo root with an explicit env-file:
+#   docker compose -f obs/docker-compose.yml --env-file obs/.env up -d
 #
 # obs/.env is gitignored (.env is matched anywhere by .gitignore).
 # The deploy workflow writes this file onto the OBS droplet from repo
@@ -638,7 +642,7 @@ OBS_BASIC_AUTH_HASH='${TEST_HASH}'
 EOF
 ```
 
-`OBS_DOMAIN=:80` tells Caddy to bind to all interfaces on port 80 with auto-https disabled — useful for local testing without TLS. The credential is `mod` / `localtest`. The single quotes around `${TEST_HASH}` are required so docker-compose passes the `$`-containing bcrypt hash through literally instead of treating each `$X` as parameter expansion.
+`OBS_DOMAIN=:80` tells Caddy to bind to all interfaces on port 80 with auto-https disabled — useful for local testing without TLS. The credential is `nusgreyhats` / `localtest`. The single quotes around `${TEST_HASH}` are required so docker-compose passes the `$`-containing bcrypt hash through literally instead of treating each `$X` as parameter expansion.
 
 - [ ] **Step 3: Bring the stack up**
 
@@ -665,14 +669,14 @@ Expected: `401`.
 
 ```bash
 # With wrong credentials → 401
-curl -sS -o /dev/null -w "%{http_code}\n" -u mod:wrong http://localhost/
+curl -sS -o /dev/null -w "%{http_code}\n" -u nusgreyhats:wrong http://localhost/
 ```
 
 Expected: `401`.
 
 ```bash
 # With right credentials → 302 redirect to /login (Grafana's response)
-curl -sS -o /dev/null -w "%{http_code}\n" -u mod:localtest http://localhost/
+curl -sS -o /dev/null -w "%{http_code}\n" -u nusgreyhats:localtest http://localhost/
 ```
 
 Expected: `302` or `200` (depends on whether Grafana redirects to /login). Anything in the 2xx/3xx range is success — the basic-auth gate passed.
@@ -686,7 +690,7 @@ If a panel says "No data": check that the datasource selector at the top of the 
 - [ ] **Step 6: Verify VictoriaMetrics is scraping**
 
 ```bash
-curl -fsS -u mod:localtest 'http://localhost/api/datasources/proxy/uid/prometheus/api/v1/query?query=count(up==1)'
+curl -fsS -u nusgreyhats:localtest 'http://localhost/api/datasources/proxy/uid/prometheus/api/v1/query?query=count(up==1)'
 ```
 
 Expected: a JSON response containing `"value":[<timestamp>,"<n>"]` where `<n>` is `2` (one for VM, one for node-exporter). If `<n>` is `0`, scrapes are failing — check `docker compose logs victoria-metrics` for `connection refused` errors.
@@ -943,7 +947,7 @@ The workflow:
 
 ### Verifying after deploy
 
-- Open `https://OBS_DOMAIN/` — basic-auth prompt → enter the credential you configured. You should land in Grafana.
+- Open `https://<OBS_DOMAIN>/` (i.e. `https://observability.nusgreyhats.org/`) — basic-auth prompt → enter username `nusgreyhats` and the password you configured. You should land in Grafana.
 - Dashboards → "Node Exporter Full" — CPU/memory/disk should populate within ~30 s of scrape.
 - If Grafana shows "No data", `ssh` into the OBS droplet and:
     ```bash
@@ -1012,8 +1016,8 @@ gh pr create --title "obs(phase 1): stand up observability droplet" --body "$(ca
 
 - [ ] Local: `docker compose -f obs/docker-compose.yml --env-file obs/.env config` succeeds.
 - [ ] Local: with a placeholder `obs/.env`, `docker compose -f obs/docker-compose.yml up -d` brings all four services up healthy.
-- [ ] Local: `curl -u mod:localtest http://localhost/` → 302 (Grafana login redirect via Caddy + basic-auth).
-- [ ] Local: `curl -u mod:localtest 'http://localhost/api/datasources/proxy/uid/prometheus/api/v1/query?query=count(up==1)'` → returns `2` (VM + node-exporter).
+- [ ] Local: `curl -u nusgreyhats:localtest http://localhost/` → 302 (Grafana login redirect via Caddy + basic-auth).
+- [ ] Local: `curl -u nusgreyhats:localtest 'http://localhost/api/datasources/proxy/uid/prometheus/api/v1/query?query=count(up==1)'` → returns `2` (VM + node-exporter).
 - [ ] Production: GitHub Secrets/Variables configured per `.github/workflows/deploy-obs.yml`.
 - [ ] Production: workflow run completes successfully on a real OBS droplet.
 - [ ] Production: `https://<OBS_DOMAIN>/` serves Grafana with valid TLS, basic-auth gates correctly, "Node Exporter Full" dashboard populates.
