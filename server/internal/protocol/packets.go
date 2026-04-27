@@ -33,12 +33,16 @@ type EnterDoorPacket struct {
 	DoorID uint32 `json:"door_id"`
 }
 
-type UseItemPacket struct {
-	ItemName string `json:"item_name"`
-}
-
 type ShopPurchasePacket struct {
 	ItemID uint8 `json:"item_id"`
+}
+
+// ReplayControlPacket is the only C2S type accepted on /ws/replay; see
+// docs/specs/foundations/08-leaderboard-replay.md#c2s_replay_control.
+// Any other C2S type closes the WS with REPLAY_READ_ONLY.
+type ReplayControlPacket struct {
+	Action string  `json:"action"` // "play" | "pause" | "set_speed" | "restart"
+	Speed  float32 `json:"speed,omitempty"`
 }
 
 type EnemySpawn struct {
@@ -79,16 +83,15 @@ type RoomData struct {
 }
 
 type PlayerSnapshot struct {
-	X              float32  `json:"x"`
-	Y              float32  `json:"y"`
-	HP             int16    `json:"hp"`
-	WeaponID       uint8    `json:"weapon_id"`
-	Ammo           int      `json:"ammo"`
-	Inventory      []string `json:"inventory"`
-	Coins          int32    `json:"coins"`
-	SpeedStacks    uint8    `json:"speed_stacks"`
-	FireRateStacks uint8    `json:"fire_rate_stacks"`
-	DamageStacks   uint8    `json:"damage_stacks"`
+	X              float32 `json:"x"`
+	Y              float32 `json:"y"`
+	HP             int16   `json:"hp"`
+	WeaponID       uint8   `json:"weapon_id"`
+	Ammo           int     `json:"ammo"`
+	Coins          int32   `json:"coins"`
+	SpeedStacks    uint8   `json:"speed_stacks"`
+	FireRateStacks uint8   `json:"fire_rate_stacks"`
+	DamageStacks   uint8   `json:"damage_stacks"`
 	// AimAngle is the radians angle of the player's most recent
 	// C2S_SHOOT. Spectators render the gun rotation from this; the
 	// player ignores it (their local cursor is more responsive).
@@ -125,6 +128,7 @@ type LeaderboardEntry struct {
 	Splits      []SplitData `json:"splits"`
 	Seed        int64       `json:"seed"`
 	ReplayID    string      `json:"replay_id"`
+	SubmittedAt string      `json:"submitted_at"`
 }
 
 type AuthOkData struct {
@@ -132,8 +136,9 @@ type AuthOkData struct {
 }
 
 type RunStartedData struct {
-	Seed int64    `json:"seed"`
-	Room RoomData `json:"room"`
+	Seed        int64    `json:"seed"`
+	Room        RoomData `json:"room"`
+	DisplayName string   `json:"display_name,omitempty"`
 }
 
 type StateData struct {

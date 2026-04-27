@@ -1,14 +1,62 @@
 package leaderboard
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/greyhats/defcon-game/server/internal/protocol"
 
 	_ "modernc.org/sqlite"
 )
+
+// ErrNotFound and ErrChecksumMismatch are returned by GetReplay; mirror
+// the same errors the lobby's leaderboard package exports so a future
+// shared package can be a drop-in replacement.
+var (
+	ErrNotFound         = errors.New("leaderboard: replay not found")
+	ErrChecksumMismatch = errors.New("leaderboard: replay checksum mismatch")
+)
+
+// Replay is the on-disk shape of a single completed run, returned by
+// GetReplay for the replay engine to drive. Fields mirror the lobby's
+// /admin/replay/:id JSON contract.
+type Replay struct {
+	ReplayID    string `json:"replay_id"`
+	PlayerID    string `json:"player_id"`
+	DisplayName string `json:"display_name"`
+	TotalMs     int64  `json:"total_ms"`
+	Seed        int64  `json:"seed"`
+	InputLog    []byte `json:"input_log"`
+}
+
+// GetReplay loads a single completed run by replay_id and verifies the
+// stored checksum against SHA256(seed || input_log). Returns ErrNotFound
+// when the row is missing, ErrChecksumMismatch if the bytes have been
+// tampered with at rest. See docs/specs/foundations/08-leaderboard-replay.md.
+func GetReplay(db *sql.DB, replayID string) (*Replay, error) {
+	var r Replay
+	var stored []byte
+	err := db.QueryRow(
+		`SELECT replay_id, player_id, display_name, total_ms, seed, input_log, checksum
+           FROM completed_runs
+          WHERE replay_id = ?`,
+		replayID,
+	).Scan(&r.ReplayID, &r.PlayerID, &r.DisplayName, &r.TotalMs, &r.Seed, &r.InputLog, &stored)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("leaderboard: get replay: %w", err)
+	}
+	got := Checksum(r.Seed, r.InputLog)
+	if subtle.ConstantTimeCompare(stored, got[:]) != 1 {
+		return nil, ErrChecksumMismatch
+	}
+	return &r, nil
+}
 
 // OpenDB opens the leaderboard SQLite database at path and ensures the
 // schema from docs/specs/foundations/08-leaderboard-replay.md exists.
@@ -80,18 +128,30 @@ func InsertRun(db *sql.DB, run *CompletedRun) error {
 	return nil
 }
 
-// TopRuns returns the fastest n runs ordered by total_ms ascending, with
-// rank filled from the 1-based row position.
+// TopRuns returns the fastest n deduplicated runs ordered by total_ms
+// ascending, with rank filled from the 1-based row position. Only each
+// player's fastest unflagged run is included, matching the public lobby
+// leaderboard's default view.
 func TopRuns(db *sql.DB, n int) ([]protocol.LeaderboardEntry, error) {
 	if n <= 0 {
 		return nil, nil
 	}
 	rows, err := db.Query(
-		`SELECT cr.replay_id, cr.display_name, cr.total_ms, cr.seed, cr.splits_json
-           FROM completed_runs cr
-      LEFT JOIN flagged_runs fr ON fr.replay_id = cr.replay_id
-          WHERE fr.replay_id IS NULL
-          ORDER BY cr.total_ms ASC
+		`WITH ranked AS (
+             SELECT cr.replay_id, cr.player_id, cr.display_name, cr.total_ms,
+                    cr.seed, cr.splits_json, cr.submitted_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY cr.player_id
+                        ORDER BY cr.total_ms ASC, cr.submitted_at ASC, cr.replay_id ASC
+                    ) AS player_rank
+               FROM completed_runs cr
+          LEFT JOIN flagged_runs fr ON fr.replay_id = cr.replay_id
+              WHERE fr.replay_id IS NULL
+         )
+         SELECT replay_id, display_name, total_ms, seed, splits_json, submitted_at
+           FROM ranked
+          WHERE player_rank = 1
+          ORDER BY total_ms ASC, submitted_at ASC, replay_id ASC
           LIMIT ?`,
 		n,
 	)
@@ -109,8 +169,9 @@ func TopRuns(db *sql.DB, n int) ([]protocol.LeaderboardEntry, error) {
 			totalMs     int64
 			seed        int64
 			splitsJSON  string
+			submittedAt string
 		)
-		if err := rows.Scan(&replayID, &displayName, &totalMs, &seed, &splitsJSON); err != nil {
+		if err := rows.Scan(&replayID, &displayName, &totalMs, &seed, &splitsJSON, &submittedAt); err != nil {
 			return nil, fmt.Errorf("leaderboard: scan: %w", err)
 		}
 		var splits []protocol.SplitData
@@ -126,6 +187,7 @@ func TopRuns(db *sql.DB, n int) ([]protocol.LeaderboardEntry, error) {
 			Splits:      splits,
 			Seed:        seed,
 			ReplayID:    replayID,
+			SubmittedAt: submittedAt,
 		})
 		rank++
 	}
@@ -133,4 +195,32 @@ func TopRuns(db *sql.DB, n int) ([]protocol.LeaderboardEntry, error) {
 		return nil, fmt.Errorf("leaderboard: rows: %w", err)
 	}
 	return entries, nil
+}
+
+// RankOfRun returns the 1-based all-runs rank for replayID, excluding
+// flagged runs. The broadcast TopRuns view is player-deduped, but the
+// submitted run still receives its exact raw placement.
+func RankOfRun(db *sql.DB, replayID string) (int, error) {
+	var rank int
+	err := db.QueryRow(
+		`SELECT rank
+		   FROM (
+		         SELECT cr.replay_id,
+		                ROW_NUMBER() OVER (
+		                    ORDER BY cr.total_ms ASC, cr.submitted_at ASC, cr.replay_id ASC
+		                ) AS rank
+		           FROM completed_runs cr
+		      LEFT JOIN flagged_runs fr ON fr.replay_id = cr.replay_id
+		          WHERE fr.replay_id IS NULL
+		        )
+		  WHERE replay_id = ?`,
+		replayID,
+	).Scan(&rank)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrNotFound
+		}
+		return 0, fmt.Errorf("leaderboard: rank: %w", err)
+	}
+	return rank, nil
 }

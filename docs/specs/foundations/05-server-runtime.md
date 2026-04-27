@@ -205,7 +205,7 @@ Reverse-proxy-level connect-rate limiting is the lobby's concern, not the game s
 
 ### Interaction with intentional bugs
 
-Spectators receive the raw `S2C_STATE` stream, so they **see every intentional-bug artifact as it happens**: kill-log garbage (BUG-11), room-settle shots landing pre-visual-move (BUG-06), time-warp nudges (BUG-09). This is intentional — the show is the point. No bug's exploit path is altered by the presence of spectators, because spectators are a pure sink (no inputs enter the drain phase from them).
+Spectators receive the raw `S2C_STATE` stream, so they **see every intentional-bug artifact as it happens**: kill-log garbage (BUG-11), room-settle shots landing pre-visual-move (BUG-06). This is intentional — the show is the point. No bug's exploit path is altered by the presence of spectators, because spectators are a pure sink (no inputs enter the drain phase from them).
 
 Drop-on-full for spectators also means that a viewer's locally-reconstructed state may briefly diverge from the server's — a lost `S2C_ENTITY_DIED` is not re-sent, but the next `S2C_STATE` (50 ms later) carries the current entity list and resyncs the client. Viewers are not replay-grade; they're good-enough-for-watching.
 
@@ -255,7 +255,7 @@ Three-goroutine model live in `server/cmd/server/main.go` + `server/internal/gam
 
 - `connReader` / `gameLoop` (`game.Engine.Run`) / `connWriter` per connection, with `inCh` (buf 64) and `outCh` (buf 64) wiring them. `gameLoop` owns all player + room state; no mutex on game state.
 - 20 Hz `time.NewTicker(50ms)` in `Engine.tickLoop` drives drain → physics → collision → death → wave → door → timer → send.
-- `leaderboard.Service.Submit` is the channel out to the leaderboard goroutine (buf 128); spec called this `completedRunCh`.
+- `leaderboard.Service.Submit` is the channel out to the leaderboard goroutine (buf 128); spec called this `completedRunCh`. When `LEADERBOARD_ENABLED=false` (see [08-leaderboard-replay.md](./08-leaderboard-replay.md#deployment-toggle)) the engine is wired with no submit callback/channel, so the nil guard in `loop.go` skips only the actual leaderboard submission path on `RUN_COMPLETED`. The current runtime still constructs the `CompletedRun` and marshals `InputLog` before that guard.
 - `MAX_CONCURRENT` semaphore lives in `main.go` accept loop; defaults to 64 in dev/test.
 - **Spectator fan-out** shipped in #23: each engine owns a `spectators []*spectator.Conn` slice, drains `RegisterCh` (buf 8) at the start of each tick, and fan-outs every non-`AUTH_OK` S2C type to attached spectators with per-spectator seq + drop-on-full. Catchup (cached `RUN_STARTED` / `ROOM_LOAD` / `STATE`) on register; 500 ms grace flush on run end.
 - **Live-games registry** (`server/internal/spectator.LiveRegistry`) is a separate aggregator goroutine; engines push a `Summary` per tick non-blocking, and `/internal/live-games` serves a sorted snapshot. Lobby polls every 2 s.

@@ -3,6 +3,7 @@ package game
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math"
 	"math/rand"
@@ -33,6 +34,13 @@ type Engine struct {
 	InCh   <-chan []byte
 	OutCh  chan<- protocol.S2CEnvelope
 	Submit func(*leaderboard.CompletedRun) bool
+	// SubmitAndRefresh is the live completion path: it persists a completed
+	// run and returns the refreshed top list before the terminal packet is
+	// sent, so the player's end screen has leaderboard data.
+	SubmitAndRefresh func(*leaderboard.CompletedRun) leaderboard.SubmitResult
+	// RegisterLeaderboard hooks the authenticated player's websocket into
+	// leaderboard broadcasts. The server owns the actual registry.
+	RegisterLeaderboard func(playerID string)
 	// AuthCheck gates the WS auth handshake. It returns the player's
 	// display name (empty to fall back to the raw player_id) and an
 	// error to reject the connection.
@@ -49,6 +57,13 @@ type Engine struct {
 	PlayerID    string
 	DisplayName string
 
+	// ReplayMode disables liveness-only checks (Ts ±2s window, ±30min
+	// SeedWindow), and skips Submit/Live/Engines registration so a
+	// replayed run is invisible to spectators and never re-submitted to
+	// the leaderboard. Set by the replay package; defaults to false.
+	// See docs/specs/foundations/08-leaderboard-replay.md#engine-extensions.
+	ReplayMode bool
+
 	run    *RunState
 	player *PlayerState
 	room   *RoomState
@@ -56,7 +71,11 @@ type Engine struct {
 	seq          uint32
 	tick         uint64
 	lastClientTs int64
-	dirtyInput   struct{ dx, dy float32 }
+	// lastInputAt is the server-side wall clock of the most recent C2S
+	// frame received on InCh. Used by the idle-timeout check in stepTick;
+	// initialized in initRun so the timer doesn't fire on tick 1.
+	lastInputAt time.Time
+	dirtyInput  struct{ dx, dy float32 }
 
 	// RegisterCh receives spectator register/deregister verbs from the
 	// /ws/spectate accept handler. Drained at the start of each tick so
@@ -180,6 +199,35 @@ func (e *Engine) sendError(code, msg string) {
 	e.send(protocol.S2CError, protocol.ErrorData{Code: code, Message: msg})
 }
 
+// validateTsWindow enforces the per-packet ±2s ts check
+// (TsValidationWindow). Returns true when the envelope is acceptable.
+// On rejection, sends ts_out_of_window with the actual offset in ms so
+// the client can surface an actionable "your clock is N ms ahead/behind"
+// message. Skipped in ReplayMode and for synthetic Ts=0 envelopes
+// (matches the dispatch-time check at the call site below). No
+// cumulative drift bookkeeping — BUG-02 substrate stays exactly where
+// it was.
+func (e *Engine) validateTsWindow(ts int64, now time.Time) bool {
+	if e.ReplayMode || ts == 0 {
+		return true
+	}
+	diff := now.UnixMilli() - ts
+	windowMs := int64(TsValidationWindow / time.Millisecond)
+	if diff > windowMs || diff < -windowMs {
+		offsetMs := diff
+		direction := "behind"
+		if diff < 0 {
+			offsetMs = -diff
+			direction = "ahead of"
+		}
+		e.sendError("ts_out_of_window",
+			fmt.Sprintf("client clock is %d ms %s server (max ±%d ms) — please sync your system clock",
+				offsetMs, direction, windowMs))
+		return false
+	}
+	return true
+}
+
 // handshake blocks on AUTH and then START_RUN. Returns true when the run
 // has been initialized and the tick loop may begin.
 func (e *Engine) handshake(ctx context.Context) bool {
@@ -207,6 +255,15 @@ func (e *Engine) awaitAuth(ctx context.Context) bool {
 				e.sendError("auth_required", "send C2S_AUTH first")
 				continue
 			}
+			// Spec: every C2S packet (including AUTH) is validated
+			// against the ±2s ts window. Without this check a skewed
+			// client passes AUTH+START_RUN, enters the Game scene,
+			// and then has every C2S_INPUT silently rejected — the
+			// freeze reported in #46. Closing the connection here
+			// surfaces the error via MainMenu's onError handler.
+			if !e.validateTsWindow(env.Ts, time.Now()) {
+				return false
+			}
 			var pkt protocol.AuthPacket
 			if err := json.Unmarshal(env.Data, &pkt); err != nil {
 				e.sendError("bad_auth", err.Error())
@@ -233,6 +290,9 @@ func (e *Engine) awaitAuth(ctx context.Context) bool {
 			// window would hang waiting for catchup that can't be sent
 			// and would consume per-game cap until the run started.
 			e.send(protocol.S2CAuthOk, protocol.AuthOkData{DisplayName: e.DisplayName})
+			if e.RegisterLeaderboard != nil && !e.ReplayMode {
+				e.RegisterLeaderboard(e.PlayerID)
+			}
 			return true
 		}
 	}
@@ -256,6 +316,9 @@ func (e *Engine) awaitStartRun(ctx context.Context) bool {
 				e.sendError("start_required", "send C2S_START_RUN")
 				continue
 			}
+			if !e.validateTsWindow(env.Ts, time.Now()) {
+				return false
+			}
 			var pkt protocol.StartRunPacket
 			if err := json.Unmarshal(env.Data, &pkt); err != nil {
 				e.sendError("bad_start", err.Error())
@@ -274,10 +337,12 @@ func (e *Engine) awaitStartRun(ctx context.Context) bool {
 // failure (an S2CError has already been sent).
 func (e *Engine) initRun(startTime int64) bool {
 	now := time.Now()
-	seedTime := time.UnixMilli(startTime)
-	if diff := now.Sub(seedTime); diff > SeedWindow || diff < -SeedWindow {
-		e.sendError("seed_out_of_window", "start_time must be within ±30min of server now")
-		return false
+	if !e.ReplayMode {
+		seedTime := time.UnixMilli(startTime)
+		if diff := now.Sub(seedTime); diff > SeedWindow || diff < -SeedWindow {
+			e.sendError("seed_out_of_window", "start_time must be within ±30min of server now")
+			return false
+		}
 	}
 	e.run = &RunState{
 		Status:       RunRunning,
@@ -292,6 +357,7 @@ func (e *Engine) initRun(startTime int64) bool {
 	}
 	e.player = NewPlayerState()
 	e.room = NewRoomState(1)
+	e.lastInputAt = now
 
 	tmpl := RoomTemplates[1]
 	roomData := LoadRoom(e.room, e.run.MobRNG, tmpl, TilemapEnemies(1), TilemapWaves(1), now)
@@ -301,8 +367,9 @@ func (e *Engine) initRun(startTime int64) bool {
 	placePlayerSpawn(e.player, 1)
 
 	e.send(protocol.S2CRunStarted, protocol.RunStartedData{
-		Seed: startTime,
-		Room: roomData,
+		Seed:        startTime,
+		Room:        roomData,
+		DisplayName: e.DisplayName,
 	})
 	// Make the engine reachable from /ws/spectate. We delayed this from
 	// the AUTH handshake so spectators only ever attach to engines with
@@ -310,10 +377,59 @@ func (e *Engine) initRun(startTime int64) bool {
 	// cached above, so any spectator that registers between this line
 	// and the next tick will see the catchup). Unregister fires in
 	// finishRun and in Run's deferred cleanup as belt-and-braces.
-	if e.Engines != nil {
+	//
+	// ReplayMode skips this — a replayed run is not visible to spectators
+	// and does not appear in /api/live.
+	if e.Engines != nil && !e.ReplayMode {
 		e.Engines.Register(e.PlayerID, e.RegisterCh)
 	}
 	return true
+}
+
+// RunReplay drives the engine using a caller-supplied advance function
+// instead of an internal time.Ticker. Used by the replay package; see
+// docs/specs/foundations/08-leaderboard-replay.md#streaming-replay-engine.
+//
+// advance is called once per tick. It returns the synthetic `now` to use
+// for the next stepTick and a boolean ok — false signals "stop the loop"
+// (cancellation, restart, etc.). The caller is responsible for sleeping
+// between calls to control playback speed and for honouring ctx.Done().
+//
+// The handshake reads C2S_AUTH and C2S_START_RUN from InCh exactly as
+// the live engine does, so the replay caller must feed those packets
+// before invoking RunReplay.
+func (e *Engine) RunReplay(ctx context.Context, advance func(prev time.Time) (time.Time, bool)) {
+	defer e.closeSpectators()
+	if !e.handshake(ctx) {
+		return
+	}
+	now := e.run.RunStartTime
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		next, ok := advance(now)
+		if !ok {
+			return
+		}
+		now = next
+		e.stepTick(now)
+		if e.run.Status.IsTerminal() {
+			return
+		}
+	}
+}
+
+// RunStartTime exposes the engine's anchor time for replay drivers that
+// need to compute synthetic now = RunStartTime + tick * TickDuration.
+// Returns zero time before initRun has run.
+func (e *Engine) RunStartTime() time.Time {
+	if e.run == nil {
+		return time.Time{}
+	}
+	return e.run.RunStartTime
 }
 
 // tickLoop is the 20 Hz heart of the engine.
@@ -344,6 +460,27 @@ func (e *Engine) stepTick(now time.Time) {
 
 	e.drainSpectatorRegister()
 	e.drainInput(now)
+
+	// Liveness checks: hard cap on total run length, and idle timeout for
+	// AFK / disconnected-but-not-closed clients. Both fire RunFailed (no
+	// leaderboard submission) so handleWS releases its MAX_CONCURRENT slot
+	// for waiting players. Skipped in ReplayMode where `now` is synthetic
+	// — a long honest replay must not be terminated mid-playback.
+	if !e.ReplayMode && e.run.Status == RunRunning {
+		if elapsed := now.Sub(e.run.RunStartTime); elapsed >= MaxRunDuration {
+			log.Printf("run %s force-ended: max duration cap (elapsed=%v, cap=%v)", e.PlayerID, elapsed, MaxRunDuration)
+			e.finishRun(now, elapsed.Milliseconds(), RunFailed)
+			return
+		}
+		if !e.lastInputAt.IsZero() {
+			if idle := now.Sub(e.lastInputAt); idle >= IdleTimeout {
+				log.Printf("run %s force-ended: idle timeout (idle=%v, cap=%v)", e.PlayerID, idle, IdleTimeout)
+				e.finishRun(now, e.currentElapsed(now), RunFailed)
+				return
+			}
+		}
+	}
+
 	e.advancePlayer(dt, now)
 	deaths := e.advanceEnemies(dt, now)
 	hits := AdvanceProjectiles(e.room, dt, now)
@@ -415,8 +552,11 @@ func (e *Engine) stepTick(now time.Time) {
 // so /internal/live-games (and the lobby's selector) sees this run. Cheap
 // and non-blocking — drops on a full channel because the next tick's push
 // supersedes anyway.
+//
+// ReplayMode skips this — replays are not live games and must not appear
+// in the public spectator selector.
 func (e *Engine) publishLiveSummary() {
-	if e.Live == nil || e.run == nil || e.PlayerID == "" {
+	if e.Live == nil || e.run == nil || e.PlayerID == "" || e.ReplayMode {
 		return
 	}
 	live := 0
@@ -541,7 +681,9 @@ func (e *Engine) closeSpectators() {
 }
 
 // drainInput pulls every queued C2S packet and dispatches each with the
-// tick-shared `now`.
+// tick-shared `now`. Receiving any frame (even one that fails to decode)
+// counts as liveness — we're trying to detect AFK/disconnected clients,
+// not malformed packets.
 func (e *Engine) drainInput(now time.Time) {
 	for {
 		select {
@@ -549,6 +691,7 @@ func (e *Engine) drainInput(now time.Time) {
 			if !ok {
 				return
 			}
+			e.lastInputAt = now
 			e.dispatch(raw, now)
 		default:
 			return
@@ -563,14 +706,13 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 		return
 	}
 	// Per-packet ts validation: ±2s absolute window. No cumulative drift
-	// check — BUG-02 substrate.
-	if env.Ts != 0 {
-		diff := now.UnixMilli() - env.Ts
-		if diff > int64(TsValidationWindow/time.Millisecond) ||
-			diff < -int64(TsValidationWindow/time.Millisecond) {
-			e.sendError("ts_out_of_window", "ts must be within ±2s of server now")
-			return
-		}
+	// check — BUG-02 substrate. Replay skips this entirely: recorded Ts
+	// values come from the original session's wall clock and would
+	// otherwise reject every packet.
+	if !e.validateTsWindow(env.Ts, now) {
+		return
+	}
+	if env.Ts != 0 && !e.ReplayMode {
 		e.lastClientTs = env.Ts
 	}
 
@@ -617,8 +759,6 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 			return
 		}
 		e.tryEnterDoor(pkt.DoorID, now)
-	case protocol.C2SUseItem:
-		e.dispatchUseItem(env.Data, now)
 	case protocol.C2SShopPurchase:
 		var pkt protocol.ShopPurchasePacket
 		if err := json.Unmarshal(env.Data, &pkt); err != nil {
@@ -626,17 +766,6 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 		}
 		HandleShopPurchase(e.player, pkt.ItemID)
 	}
-}
-
-// dispatchUseItem runs both the audit parser (BUG-09 parser half) and the
-// stdlib json parser (BUG-09 dispatch half) on the raw payload.
-func (e *Engine) dispatchUseItem(raw []byte, now time.Time) {
-	protocol.LogItemUse(e.PlayerID, raw)
-	var pkt protocol.UseItemPacket
-	if err := json.Unmarshal(raw, &pkt); err != nil {
-		return
-	}
-	HandleUseItem(e.player, e.run, e.room, pkt.ItemName, now)
 }
 
 func (e *Engine) tryEnterDoor(doorID uint32, now time.Time) {
@@ -648,9 +777,16 @@ func (e *Engine) tryEnterDoor(doorID uint32, now time.Time) {
 }
 
 func (e *Engine) transitionToRoom(nextRoom uint8, now time.Time) {
-	// Split time for the room we're leaving.
+	// Split time for the room we're leaving. Apply the room bonus to the
+	// run clock before emitting ROOM_LOAD so the live HUD timer (STATE) and
+	// split row (ROOM_LOAD.split_ms) stay on the same timeline.
+	elapsed := e.currentElapsed(now)
 	bonus := ComputeRoomBonus(e.room.KillLog)
-	elapsed := e.currentElapsed(now) + bonus
+	if bonus != 0 {
+		e.run.TimeAdjustmentMs += bonus
+		elapsed += bonus
+	}
+	e.run.ElapsedMs = elapsed
 	e.run.Splits = append(e.run.Splits, protocol.SplitData{
 		RoomIndex: e.run.CurrentRoom,
 		TimeMs:    elapsed,
@@ -692,7 +828,7 @@ func (e *Engine) transitionToRoom(nextRoom uint8, now time.Time) {
 }
 
 func (e *Engine) advancePlayer(dt float32, now time.Time) {
-	speed := PlayerSpeed * EffectiveSpeedMult(e.player, now)
+	speed := PlayerSpeed * EffectiveSpeedMult(e.player)
 
 	const hw float32 = 10 // player half-width used for wall collision
 	const hh float32 = 10
@@ -722,15 +858,7 @@ func (e *Engine) advanceEnemies(dt float32, now time.Time) []uint32 {
 	var deaths []uint32
 	for id, en := range e.room.Enemies {
 		if UpdateEnemy(en, e.player, e.run.CurrentRoom, dt, now, fields) {
-			// Per-archetype melee damage. Shield halves it (integer divide,
-			// floor 1) so boss/tank hits scale proportionally.
 			dmg := Archetypes[en.Type].MeleeDamage
-			if now.Before(e.player.ShieldUntil) {
-				dmg /= 2
-				if dmg < 1 {
-					dmg = 1
-				}
-			}
 			e.player.HP -= dmg
 			e.player.DamageTaken += int32(dmg)
 			if en.Type == EnemyKamikaze {
@@ -755,7 +883,7 @@ func (e *Engine) updateElapsed(now time.Time) {
 }
 
 func (e *Engine) currentElapsed(now time.Time) int64 {
-	return now.Sub(e.run.RunStartTime).Milliseconds()
+	return now.Sub(e.run.RunStartTime).Milliseconds() + e.run.TimeAdjustmentMs
 }
 
 // finishRun transitions the run to a terminal status and emits
@@ -774,7 +902,10 @@ func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {
 
 	// Only successful completions are leaderboard-eligible. Failed runs
 	// skip submission — no CompletedRun, no DB row, no replay verification.
-	if status == RunCompleted {
+	// Replay mode also skips submission: a replayed run must never
+	// re-insert itself into completed_runs.
+	rank := 0
+	if status == RunCompleted && !e.ReplayMode {
 		inputLog, _ := json.Marshal(e.run.InputLog)
 		replayID := uuid.NewString()
 		checksum := leaderboard.Checksum(e.run.Seed, inputLog)
@@ -789,7 +920,17 @@ func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {
 			Checksum:    checksum,
 			SubmittedAt: now,
 		}
-		if e.Submit != nil {
+		if e.SubmitAndRefresh != nil {
+			result := e.SubmitAndRefresh(cr)
+			if result.Err != nil {
+				log.Printf("leaderboard: submit run %s: %v", replayID, result.Err)
+			} else {
+				rank = result.Rank
+				e.send(protocol.S2CLeaderboard, protocol.LeaderboardData{
+					Entries: result.Entries,
+				})
+			}
+		} else if e.Submit != nil {
 			if !e.Submit(cr) {
 				log.Printf("completedCh full, dropping run %s", replayID)
 			}
@@ -799,7 +940,7 @@ func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {
 	e.send(protocol.S2CRunComplete, protocol.RunCompleteData{
 		Outcome: status.Outcome(),
 		TotalMs: totalMs,
-		Rank:    0,
+		Rank:    rank,
 		Splits:  e.run.Splits,
 	})
 	// Spectators have just received the RUN_COMPLETE via fan-out; schedule
@@ -865,7 +1006,6 @@ func (e *Engine) sendState(now time.Time) {
 			HP:             e.player.HP,
 			WeaponID:       e.player.CurrentWeapon,
 			Ammo:           e.player.WeaponAmmo[e.player.CurrentWeapon],
-			Inventory:      append([]string(nil), e.player.Inventory...),
 			Coins:          e.player.Coins,
 			SpeedStacks:    e.player.SpeedStacks,
 			FireRateStacks: e.player.FireRateStacks,

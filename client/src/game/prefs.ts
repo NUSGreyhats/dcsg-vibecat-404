@@ -1,13 +1,13 @@
 import type { SplitData } from "../net/packet";
 
 /**
- * Tiny localStorage-backed bag for preferences and the PB record. Kept
- * separate from the game state because none of this is server-driven —
+ * Tiny localStorage-backed bag for preferences and per-player PB records.
+ * Kept separate from the game state because none of this is server-driven —
  * if storage is unavailable (private browsing) every getter no-ops and
  * the rest of the game doesn't notice.
  */
 
-const PB_KEY = "vibecat:pb";
+const PB_KEY_PREFIX = "vibecat:pb:";
 const TIMINGS_KEY = "vibecat:timings-visible";
 const PLAYER_ID_KEY = "vibecat:player-id";
 
@@ -32,8 +32,15 @@ function safeSet(key: string, value: string): void {
   }
 }
 
+function currentPBKey(): string | null {
+  const playerId = getCachedPlayerId();
+  return playerId ? `${PB_KEY_PREFIX}${playerId}` : null;
+}
+
 export function getStoredPB(): StoredPB | null {
-  const raw = safeGet(PB_KEY);
+  const key = currentPBKey();
+  if (!key) return null;
+  const raw = safeGet(key);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as StoredPB;
@@ -47,15 +54,17 @@ export function getStoredPB(): StoredPB | null {
 }
 
 /**
- * Record a finished run if it improves on the stored PB. Returns true
- * when the PB was updated. Splits are stored verbatim — the HUD reads
- * them back to compute per-room deltas.
+ * Record a finished run if it improves on the active player's stored PB.
+ * Returns true when the PB was updated. Splits are stored verbatim — the
+ * HUD reads them back to compute per-room deltas.
  */
 export function maybeRecordPB(totalMs: number, splits: SplitData[]): boolean {
+  const key = currentPBKey();
+  if (!key) return false;
   const current = getStoredPB();
   if (current && current.total_ms <= totalMs) return false;
   const next: StoredPB = { total_ms: totalMs, splits: splits.slice() };
-  safeSet(PB_KEY, JSON.stringify(next));
+  safeSet(key, JSON.stringify(next));
   return true;
 }
 
@@ -72,20 +81,13 @@ export function setTimingsVisible(visible: boolean): void {
   safeSet(TIMINGS_KEY, visible ? "1" : "0");
 }
 
-/**
- * The most recently authenticated player_id. Cached on a successful
- * /api/login so MainMenu can auto-auth on a fresh WS without forcing
- * the user back through the login form. Cleared on auth_failed so a
- * stale id doesn't trap the user in a loop.
- */
-export function getCachedPlayerId(): string | null {
-  const v = safeGet(PLAYER_ID_KEY);
-  return v && v.length > 0 ? v : null;
-}
-
 export function setCachedPlayerId(playerId: string): void {
   if (!playerId) return;
   safeSet(PLAYER_ID_KEY, playerId);
+}
+
+export function getCachedPlayerId(): string | null {
+  return safeGet(PLAYER_ID_KEY);
 }
 
 export function clearCachedPlayerId(): void {

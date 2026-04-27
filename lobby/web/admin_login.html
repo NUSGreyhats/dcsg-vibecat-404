@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VIBECAT 404 — Admin Login</title>
+<style>
+  :root {
+    --midnight: #0d1222;
+    --deep-navy: #1a2338;
+    --navy: #2b3d5c;
+    --mid-blue: #5c8fbf;
+    --bone: #f5f0e6;
+    --muted: #8a8679;
+    --accent: #ffdd33;
+    --danger: #ff5c5c;
+    --success: #66cc88;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--midnight);
+    color: var(--bone);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 14px;
+    padding: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  main {
+    max-width: 420px;
+    width: 100%;
+    background: var(--deep-navy);
+    border: 2px solid var(--mid-blue);
+    padding: 24px;
+  }
+  h1 {
+    margin: 0 0 16px;
+    font-size: 18px;
+    letter-spacing: 1px;
+    color: var(--accent);
+  }
+  p { color: var(--muted); margin: 0 0 12px; line-height: 1.5; }
+  label { display: block; margin: 12px 0 4px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  input[type="text"] {
+    width: 100%;
+    background: var(--midnight);
+    color: var(--bone);
+    border: 1px solid var(--mid-blue);
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 16px;
+    letter-spacing: 4px;
+    text-align: center;
+  }
+  input[type="text"]:focus { outline: none; border-color: var(--accent); }
+  button {
+    width: 100%;
+    margin-top: 12px;
+    background: transparent;
+    color: var(--mid-blue);
+    border: 1px solid var(--mid-blue);
+    padding: 10px;
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  button:hover { color: var(--accent); border-color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status { margin-top: 12px; font-size: 12px; min-height: 1.2em; }
+  .status.err { color: var(--danger); }
+  .status.ok { color: var(--success); }
+  .step { display: none; }
+  .step.active { display: block; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Admin login</h1>
+
+  <section class="step active" id="step-request">
+    <p>Press the button to send a one-time code to the admin Telegram chat.</p>
+    <button id="request-btn">Send code to Telegram</button>
+    <div class="status" id="request-status"></div>
+  </section>
+
+  <section class="step" id="step-verify">
+    <p>Code sent. Enter the 6-digit code from Telegram. Codes expire in 5 min.</p>
+    <label for="otp">Code</label>
+    <input id="otp" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code">
+    <button id="verify-btn">Verify</button>
+    <button id="resend-btn" style="margin-top:6px;">Resend</button>
+    <div class="status" id="verify-status"></div>
+  </section>
+</main>
+
+<script>
+  const stepRequest = document.getElementById('step-request');
+  const stepVerify = document.getElementById('step-verify');
+  const requestBtn = document.getElementById('request-btn');
+  const verifyBtn = document.getElementById('verify-btn');
+  const resendBtn = document.getElementById('resend-btn');
+  const otpInput = document.getElementById('otp');
+  const requestStatus = document.getElementById('request-status');
+  const verifyStatus = document.getElementById('verify-status');
+
+  function showStep(which) {
+    stepRequest.classList.toggle('active', which === 'request');
+    stepVerify.classList.toggle('active', which === 'verify');
+    if (which === 'verify') otpInput.focus();
+  }
+
+  function setStatus(el, msg, kind) {
+    el.textContent = msg || '';
+    el.className = 'status' + (kind ? ' ' + kind : '');
+  }
+
+  async function requestCode(initiator) {
+    initiator.disabled = true;
+    setStatus(requestStatus, 'Sending...', '');
+    setStatus(verifyStatus, '', '');
+    try {
+      const res = await fetch('/admin/login', { method: 'POST' });
+      if (res.status === 429) throw new Error('Rate limited. Try again later.');
+      if (res.status === 503) throw new Error('Admin is disabled.');
+      if (res.status === 502) throw new Error('Telegram send failed. Check bot config.');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      setStatus(requestStatus, '', '');
+      showStep('verify');
+      setStatus(verifyStatus, 'Code sent to Telegram.', 'ok');
+    } catch (err) {
+      setStatus(requestStatus, err.message, 'err');
+    } finally {
+      initiator.disabled = false;
+    }
+  }
+
+  requestBtn.addEventListener('click', () => requestCode(requestBtn));
+  resendBtn.addEventListener('click', () => requestCode(resendBtn));
+
+  async function verify() {
+    const otp = otpInput.value.trim();
+    if (!/^\d{6}$/.test(otp)) {
+      setStatus(verifyStatus, 'Code must be 6 digits.', 'err');
+      return;
+    }
+    verifyBtn.disabled = true;
+    setStatus(verifyStatus, 'Verifying...', '');
+    try {
+      const res = await fetch('/admin/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ otp }),
+      });
+      if (res.status === 401) {
+        const text = await res.text();
+        throw new Error(text || 'Invalid code.');
+      }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      window.location.href = '/admin/';
+    } catch (err) {
+      setStatus(verifyStatus, err.message, 'err');
+      otpInput.value = '';
+      otpInput.focus();
+    } finally {
+      verifyBtn.disabled = false;
+    }
+  }
+
+  verifyBtn.addEventListener('click', verify);
+  otpInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') verify();
+  });
+</script>
+</body>
+</html>

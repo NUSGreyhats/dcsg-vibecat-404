@@ -10,6 +10,19 @@ type Entry struct {
 	Splits      []Split `json:"splits"`
 	Seed        int64   `json:"seed"`
 	ReplayID    string  `json:"replay_id"`
+	SubmittedAt string  `json:"submitted_at"`
+	Current     bool    `json:"current_player,omitempty"`
+}
+
+// Page is a ranked slice of the public leaderboard plus enough metadata
+// for the browser to render pagination controls without guessing.
+type Page struct {
+	Entries []Entry `json:"entries"`
+	Page    int     `json:"page"`
+	Limit   int     `json:"limit"`
+	Total   int     `json:"total"`
+	HasPrev bool    `json:"has_prev"`
+	HasNext bool    `json:"has_next"`
 }
 
 // Split mirrors protocol.SplitData. See

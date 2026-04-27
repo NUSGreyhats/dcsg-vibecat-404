@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { getSync, resetSync } from "../net/runContext";
 import { RunOutcome } from "../../net/packet";
 import type { LeaderboardEntry, SplitData } from "../../net/packet";
+import { getConfig } from "../../net/config";
 import { formatTime } from "../ui/formatters";
 import {
   ACCENT_PRIMARY,
@@ -110,20 +111,35 @@ export class WinScreen extends Phaser.Scene {
 
     this.renderSplits(splits);
 
-    // Leaderboard (right column)
-    this.leaderboardHeader = this.add
-      .text(this.scale.width - 120, 220, "Leaderboard", HEADER_STYLE)
-      .setOrigin(1, 0);
-    this.add
-      .text(
-        this.scale.width - 120,
-        250,
-        "Rank  Name                 Time",
-        ROW_STYLE,
-      )
-      .setOrigin(1, 0);
+    // Right column: leaderboard table when enabled, booth CTA when not.
+    // The CTA path replaces the entire leaderboard pane (header + column
+    // titles + entries) with a centered call-to-action so deploys that
+    // record official runs in person have somewhere to redirect players.
+    const config = getConfig();
+    if (config.leaderboard_enabled) {
+      this.leaderboardHeader = this.add
+        .text(this.scale.width - 120, 220, "Leaderboard", HEADER_STYLE)
+        .setOrigin(1, 0);
+      this.add
+        .text(
+          this.scale.width - 120,
+          250,
+          "Rank  Name                 Time",
+          ROW_STYLE,
+        )
+        .setOrigin(1, 0);
 
-    this.renderLeaderboard(state.leaderboard ?? []);
+      this.renderLeaderboard(state.leaderboard ?? []);
+
+      // Live leaderboard updates.
+      getSync().state.on("leaderboard", this.onLeaderboard, this);
+      this.leaderboardListenerAttached = true;
+    } else {
+      const message =
+        config.leaderboard_disabled_message ??
+        "Please visit our booth to record an official attempt";
+      this.renderBoothCTA(message);
+    }
 
     this.playAgainButton = this.add
       .text(cx, this.scale.height - 70, "[ Play Again ]", BUTTON_TEXT_STYLE)
@@ -138,10 +154,25 @@ export class WinScreen extends Phaser.Scene {
     );
     this.playAgainButton.on("pointerdown", () => this.onPlayAgain());
 
-    // Live leaderboard updates.
-    getSync().state.on("leaderboard", this.onLeaderboard, this);
-
     this.events.on("shutdown", this.cleanup, this);
+  }
+
+  private renderBoothCTA(message: string): void {
+    // Roughly the same horizontal footprint as the leaderboard table
+    // (~360 px) so the right column doesn't feel empty. Right-aligned
+    // origin matches the leaderboard layout this is replacing.
+    const width = 360;
+    const x = this.scale.width - 120;
+    this.add
+      .text(x, 220, "Submit your run", HEADER_STYLE)
+      .setOrigin(1, 0);
+    this.add
+      .text(x, 280, message, {
+        ...ROW_STYLE,
+        wordWrap: { width, useAdvancedWrap: true },
+        align: "right",
+      })
+      .setOrigin(1, 0);
   }
 
   private renderSplits(splits: SplitData[]): void {
@@ -161,12 +192,13 @@ export class WinScreen extends Phaser.Scene {
     this.leaderboardTexts = [];
 
     const startY = 280;
-    const shown = entries.slice(0, 10);
+    const shown = dedupeLeaderboard(entries).slice(0, 10);
     for (let i = 0; i < shown.length; i++) {
       const e = shown[i];
+      const rank = i + 1;
       const name = (e.display_name ?? "").slice(0, 20).padEnd(20);
       const line =
-        `${String(e.rank).padEnd(5)}` +
+        `${String(rank).padEnd(5)}` +
         `${name} ` +
         `${formatTime(e.total_ms)}`;
       const txt = this.add
@@ -183,17 +215,22 @@ export class WinScreen extends Phaser.Scene {
   private onPlayAgain(): void {
     // Detach listeners BEFORE resetSync, otherwise cleanup() later would
     // hit a freshly-created sync and try to remove a listener that isn't there.
-    getSync().state.off("leaderboard", this.onLeaderboard, this);
+    if (this.leaderboardListenerAttached) {
+      getSync().state.off("leaderboard", this.onLeaderboard, this);
+      this.leaderboardListenerAttached = false;
+    }
     this.resetHandlersAttached = false;
     resetSync();
     this.scene.start("MainMenu");
   }
 
   private resetHandlersAttached = true;
+  private leaderboardListenerAttached = false;
 
   private cleanup(): void {
-    if (this.resetHandlersAttached) {
+    if (this.resetHandlersAttached && this.leaderboardListenerAttached) {
       getSync().state.off("leaderboard", this.onLeaderboard, this);
+      this.leaderboardListenerAttached = false;
     }
     for (const t of this.leaderboardTexts) t.destroy();
     this.leaderboardTexts = [];
@@ -202,6 +239,18 @@ export class WinScreen extends Phaser.Scene {
     this.playAgainButton?.destroy();
     this.playAgainButton = undefined;
   }
+}
+
+function dedupeLeaderboard(entries: LeaderboardEntry[]): LeaderboardEntry[] {
+  const seen = new Set<string>();
+  const out: LeaderboardEntry[] = [];
+  for (const entry of entries) {
+    const key = entry.display_name || entry.replay_id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+  }
+  return out;
 }
 
 export default WinScreen;

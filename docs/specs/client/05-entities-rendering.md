@@ -95,7 +95,7 @@ Phaser uses an integer depth to sort same-scene GameObjects. The layering below 
 | `-30`   | Tilemap layers (when the Tiled tilemap loads successfully).                 |
 | `0`     | Default — enemies, pickups, doors, bullets (they don't set explicit depth). |
 | `10`    | `Player` — **above tilemaps** so `room-X.json` tiles don't hide the avatar. |
-| `1000+` | HUD overlays (`GameHUD`, `InventoryMenu`, pause dim).                       |
+| `1000+` | HUD overlays (`GameHUD`, `ShopMenu`, pause dim).                            |
 
 `Player.ts`:
 

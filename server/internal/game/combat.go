@@ -69,7 +69,7 @@ func HandleShoot(p *PlayerState, r *RoomState, aimAngle float32, now time.Time) 
 	}
 	p.WeaponCooldown[wid] = now.Add(cooldown)
 
-	dmg := int16(float32(spec.Damage) * EffectiveDamageMult(p, now))
+	dmg := int16(float32(spec.Damage) * EffectiveDamageMult(p))
 
 	if wid == 3 {
 		// shotgun: 3 pellets in a ±10° spread.
@@ -107,27 +107,15 @@ func sameTickSwap(end time.Time, now time.Time) bool {
 	return diff == SwapCooldownMs*time.Millisecond
 }
 
-func nonZeroDamageMult(p *PlayerState, now time.Time) float32 {
-	if p.DamageMult > 0 && now.Before(p.DamageMultUntil) {
-		return p.DamageMult
-	}
-	return 1
+// EffectiveDamageMult is the permanent shop-stack multiplier: (1 + 0.1*stacks).
+// See features/shop.md.
+func EffectiveDamageMult(p *PlayerState) float32 {
+	return 1 + 0.1*float32(p.DamageStacks)
 }
 
-// EffectiveDamageMult composes the timed buff with the permanent shop
-// damage stacks: (1 + 0.1*stacks) * tempBuff. See features/shop.md.
-func EffectiveDamageMult(p *PlayerState, now time.Time) float32 {
-	return (1 + 0.1*float32(p.DamageStacks)) * nonZeroDamageMult(p, now)
-}
-
-// EffectiveSpeedMult composes the timed speed buff with the permanent
-// shop speed stacks: (1 + 0.1*stacks) * tempBuff.
-func EffectiveSpeedMult(p *PlayerState, now time.Time) float32 {
-	temp := float32(1)
-	if p.SpeedMult > 0 && now.Before(p.SpeedMultUntil) {
-		temp = p.SpeedMult
-	}
-	return (1 + 0.1*float32(p.SpeedStacks)) * temp
+// EffectiveSpeedMult is the permanent shop-stack multiplier: (1 + 0.1*stacks).
+func EffectiveSpeedMult(p *PlayerState) float32 {
+	return 1 + 0.1*float32(p.SpeedStacks)
 }
 
 

@@ -49,6 +49,38 @@
     border: 2px solid var(--mid-blue);
     padding: 16px;
   }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .pager {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  button {
+    background: transparent;
+    color: var(--bone);
+    border: 1px solid var(--mid-blue);
+    padding: 6px 10px;
+    font: inherit;
+    cursor: pointer;
+  }
+  button[aria-pressed="true"] {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled {
+    color: var(--muted);
+    border-color: var(--navy);
+    cursor: not-allowed;
+  }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -67,11 +99,21 @@
   }
   td.rank { color: var(--accent); width: 48px; }
   td.time { font-variant-numeric: tabular-nums; }
-  td.replay a {
-    color: var(--mid-blue);
-    text-decoration: none;
+  td.submitted { color: var(--muted); font-variant-numeric: tabular-nums; }
+  tr.current-player td {
+    background: rgba(255, 221, 51, 0.12);
+    border-color: rgba(255, 221, 51, 0.4);
   }
-  td.replay a:hover { color: var(--accent); }
+  .you {
+    color: var(--accent);
+    font-size: 12px;
+  }
+  .gap td {
+    color: var(--muted);
+    text-align: center;
+    font-size: 12px;
+    padding: 10px 8px;
+  }
   .empty {
     padding: 24px 8px;
     color: var(--muted);
@@ -91,20 +133,25 @@
   <nav>
     <a href="/">→ Play</a>
     &nbsp;·&nbsp;
-    <a href="/register">→ Register</a>
-    &nbsp;·&nbsp;
     <a href="/source.tar.gz" download>→ Source</a>
   </nav>
 </header>
 <main>
+  <div class="toolbar">
+    <button id="dedupe" type="button" aria-pressed="true">Deduplicate: on</button>
+    <div class="pager">
+      <button id="prev" type="button">Prev</button>
+      <span id="page-label">page 1</span>
+      <button id="next" type="button">Next</button>
+    </div>
+  </div>
   <table id="board">
     <thead>
       <tr>
         <th>#</th>
         <th>Name</th>
         <th>Time</th>
-        <th>Seed</th>
-        <th>Replay</th>
+        <th>Submitted (SGT)</th>
       </tr>
     </thead>
     <tbody id="rows"></tbody>
@@ -117,6 +164,29 @@
   const rowsEl = document.getElementById('rows');
   const emptyEl = document.getElementById('empty');
   const metaEl = document.getElementById('meta');
+  const dedupeBtn = document.getElementById('dedupe');
+  const prevBtn = document.getElementById('prev');
+  const nextBtn = document.getElementById('next');
+  const pageLabel = document.getElementById('page-label');
+  const params = new URLSearchParams(window.location.search);
+  const configuredLimit = clampInt(params.get('limit') || params.get('n'), 20, 1, 100);
+  let dedupe = true;
+  let page = clampInt(params.get('page'), 1, 1, 1000000);
+
+  function clampInt(raw, fallback, min, max) {
+    const parsed = Number.parseInt(raw ?? '', 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, parsed));
+  }
+
+  function cachedPlayerId() {
+    try {
+      const id = localStorage.getItem('vibecat:player-id') || '';
+      return /^[0-9a-f]{32}$/.test(id) ? id : '';
+    } catch {
+      return '';
+    }
+  }
 
   function fmtMs(ms) {
     const total = Math.max(0, ms | 0);
@@ -126,35 +196,76 @@
     return m + ':' + String(s).padStart(2, '0') + '.' + String(cs).padStart(2, '0');
   }
 
+  // submitted_at is the server-recorded completion timestamp; render
+  // in venue-local SGT so on-screen entries are immediately
+  // meaningful to spectators at the LAN deployment.
+  function fmtSubmittedAt(value) {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '—';
+    return new Intl.DateTimeFormat('en-SG', {
+      timeZone: 'Asia/Singapore',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(d);
+  }
+
   async function load() {
     try {
-      const res = await fetch('/api/leaderboard?limit=50');
+      const qs = new URLSearchParams({
+        limit: String(configuredLimit),
+        page: String(page),
+        dedupe: dedupe ? '1' : '0',
+      });
+      const playerId = cachedPlayerId();
+      if (playerId) qs.set('player_id', playerId);
+      const res = await fetch('/api/leaderboard?' + qs.toString(), { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const body = await res.json();
       const entries = body.entries || [];
+      const currentPlayer = body.current_player || null;
       rowsEl.innerHTML = '';
-      if (entries.length === 0) {
+      if (entries.length === 0 && !currentPlayer) {
         emptyEl.hidden = false;
       } else {
         emptyEl.hidden = true;
         for (const e of entries) {
-          const tr = document.createElement('tr');
-          tr.innerHTML = (
-            '<td class="rank">' + e.rank + '</td>' +
-            '<td>' + escape(e.display_name) + '</td>' +
-            '<td class="time">' + fmtMs(e.total_ms) + '</td>' +
-            '<td>' + e.seed + '</td>' +
-            '<td class="replay"><a href="/api/replay/' + encodeURIComponent(e.replay_id) + '" download>' +
-              shortId(e.replay_id) + '</a></td>'
-          );
-          rowsEl.appendChild(tr);
+          rowsEl.appendChild(renderRow(e));
+        }
+        if (currentPlayer) {
+          const gap = document.createElement('tr');
+          gap.className = 'gap';
+          gap.innerHTML = '<td colspan="4">your best visible run</td>';
+          rowsEl.appendChild(gap);
+          rowsEl.appendChild(renderRow(currentPlayer));
         }
       }
-      metaEl.textContent = entries.length + ' run' + (entries.length === 1 ? '' : 's') +
+      const shown = entries.length + (currentPlayer ? 1 : 0);
+      page = body.page || page;
+      prevBtn.disabled = !body.has_prev;
+      nextBtn.disabled = !body.has_next;
+      pageLabel.textContent = 'page ' + page + ' · ' + shown + ' shown · ' + (body.total || 0) + ' ranked';
+      syncPageURL();
+      metaEl.textContent = shown + ' run' + (shown === 1 ? '' : 's') +
         ' · refreshed ' + new Date().toLocaleTimeString();
     } catch (err) {
       metaEl.textContent = 'Error loading leaderboard: ' + err.message;
     }
+  }
+
+  function renderRow(e) {
+    const tr = document.createElement('tr');
+    if (e.current_player) tr.className = 'current-player';
+    tr.innerHTML = (
+      '<td class="rank">' + e.rank + '</td>' +
+      '<td>' + escape(e.display_name) + (e.current_player ? ' <span class="you">you</span>' : '') + '</td>' +
+      '<td class="time">' + fmtMs(e.total_ms) + '</td>' +
+      '<td class="submitted">' + escape(fmtSubmittedAt(e.submitted_at)) + '</td>'
+    );
+    return tr;
   }
 
   function escape(s) {
@@ -162,8 +273,32 @@
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     })[c]);
   }
-  function shortId(id) {
-    return String(id).slice(0, 8);
+  dedupeBtn.addEventListener('click', () => {
+    dedupe = !dedupe;
+    page = 1;
+    dedupeBtn.setAttribute('aria-pressed', dedupe ? 'true' : 'false');
+    dedupeBtn.textContent = 'Deduplicate: ' + (dedupe ? 'on' : 'off');
+    load();
+  });
+  prevBtn.addEventListener('click', () => {
+    if (page <= 1) return;
+    page -= 1;
+    load();
+  });
+  nextBtn.addEventListener('click', () => {
+    page += 1;
+    load();
+  });
+
+  function syncPageURL() {
+    const next = new URLSearchParams(window.location.search);
+    next.set('limit', String(configuredLimit));
+    if (page > 1) {
+      next.set('page', String(page));
+    } else {
+      next.delete('page');
+    }
+    history.replaceState(null, '', window.location.pathname + '?' + next.toString());
   }
 
   load();

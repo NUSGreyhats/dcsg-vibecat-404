@@ -137,6 +137,7 @@ export class Preloader extends Phaser.Scene {
     // -- Pickup icons --
     this.load.image("coin", "assets/coin.png");
     this.load.image("heart", "assets/heart.png");
+    this.load.image("ammo_pack", "assets/ammo_pack.png");
 
     // -- Splash --
     this.load.image("title", "assets/title.png");

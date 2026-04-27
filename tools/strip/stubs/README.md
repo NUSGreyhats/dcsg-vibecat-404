@@ -84,9 +84,21 @@ up for. The HTTP API surface (`POST /api/register`, `/api/login`,
 `/api/verify`) is plenty if you want to script registration against the
 live server.
 
-## Reporting a bug you found
+## Found a bug? Keep it.
 
-Submit through whatever channel was announced for the event. Include
-the file path and line number from this tarball — line numbers in the
-stripped source won't match the upstream repo, so quoting the stripped
-copy makes triage easier.
+The game is intentionally buggy. Protocol quirks, off-by-ones, races,
+unchecked state — every weird thing you find in here is in scope, and
+exploiting them is how you climb the leaderboard. Don't report ordinary
+bugs to us; they're the puzzle.
+
+The two things we *do* want to hear about:
+
+- **Infra problems** — the site is down, you can't register, the
+  leaderboard won't load, your run dropped because the server crashed.
+- **Unintended game-breakers** — an instant-solve that skips the run
+  entirely, or anything that breaks the leaderboard for everyone else.
+
+If you hit one of those, ping an organizer through whatever channel was
+announced for the event. Include the file path and line number from
+this tarball — line numbers won't match the upstream repo, so quoting
+the stripped copy makes triage easier.

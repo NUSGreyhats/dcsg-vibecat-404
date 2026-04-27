@@ -22,15 +22,13 @@ PlayerState {
 
 `Coins` is `int32`; integer-overflow on coins is **not** an intended bug class. Stack counters are `uint8` (coin cost rate-limits stack growth far below 255). The `ammo` shop item is a **one-shot consumable refill** — it does not increment a stack counter and has no `AmmoStacks` field.
 
-The existing `SpeedMult` / `SpeedMultUntil` / `DamageMult` / `DamageMultUntil` timed-buff fields (used by the inventory `speed_boost` consumable) are unchanged. Shop traits and temp buffs compose **multiplicatively** at read time — see the derivation table below. Shop traits add no new timer fields.
-
 Effective multipliers and caps are **derived**, not stored:
 
 | Trait      | Derivation                                                                              |
 | ---------- | --------------------------------------------------------------------------------------- |
-| Speed      | `(1.0 + 0.1 × SpeedStacks) × tempSpeedMult(p, now)` — composes with temp buff           |
+| Speed      | `(1.0 + 0.1 × SpeedStacks)`                                                              |
 | Fire rate  | cooldown divided by `(1.0 + 0.1 × FireRateStacks)`                                      |
-| Damage     | `(1.0 + 0.1 × DamageStacks) × tempDamageMult(p, now)` — composes with temp buff         |
+| Damage     | `(1.0 + 0.1 × DamageStacks)`                                                             |
 | Ammo       | `ammo` purchase refills every non-unlimited weapon to `WeaponSpec.AmmoMax` (static cap) |
 
 Stacks are reset to zero at run start (on death / new run). They persist across rooms within a run. There is no per-stack diminishing return in the initial design — keep the math linear and tune the per-stack delta if a single trait dominates.
@@ -62,7 +60,7 @@ var ShopCatalog = []ShopOffer{
 }
 ```
 
-Catalog is fixed at server startup; client mirrors the same IDs and costs. Dispatch is by `item_id uint8`, **not** by string name — this deliberately keeps the shop path off the `AllowedItems` string-keyed pipeline (which historically hosted BUG-09 / BUG-10).
+Catalog is fixed at server startup; client mirrors the same IDs and costs. Dispatch is by `item_id uint8`, not by string name.
 
 ### Coin drop policy
 
@@ -127,7 +125,7 @@ Stack growth is gated by coin supply, not by a cooldown. With costs of 10/15/20 
 
 ## Client interactions
 
-- **New scene `ShopMenu`** at `client/src/game/scenes/ShopMenu.ts` — modal overlay following the [`InventoryMenu`](../client/04-scenes.md) pattern: pause-on-launch, depth-stacked above `Game`, keyboard navigation, panel styling from [client/10-ui-components.md](../client/10-ui-components.md).
+- **`ShopMenu`** at `client/src/game/scenes/ShopMenu.ts` — modal overlay: pause-on-launch, depth-stacked above `Game`, keyboard navigation, panel styling from [client/10-ui-components.md](../client/10-ui-components.md).
 - **Open**: global "B" keybind in the `GameHUD` input layer (see [client/07-input-controls.md](../client/07-input-controls.md)). The shop is fully client-side until purchase — no `C2S_SHOP_OPEN` is sent.
 - **Catalog**: client mirrors `ShopCatalog` (same IDs, costs, display names). Items where `coins < cost` render greyed.
 - **Selection**: Enter → `sendShopPurchase(item_id)`. Server reply lands in the next `S2C_STATE`.
@@ -142,7 +140,7 @@ Stack growth is gated by coin supply, not by a cooldown. With costs of 10/15/20 
 - **`internal/game/state.go`** — append `Coins int32` and `SpeedStacks / FireRateStacks / DamageStacks uint8` to `PlayerState`. Zero all four in the per-run reset path (death / new run).
 - **`internal/game/pickups.go`** — add the constant `PickupCoin = 3` (recycled from the removed Speed boost type). Add `ExpiresAt time.Time` to `PickupState`. Change `applyPickup`'s signature to `applyPickup(p *PlayerState, pk *PickupState, claimedType uint8, now time.Time)` and switch on `claimedType` (see [BUG-12](#bug-12-pickup-type-confusion)). Add a `case PickupCoin: p.Coins++` arm.
 - **`internal/game/combat.go`** — at the point where an enemy's HP reaches zero in the damage path, register a new `PickupState{Type: PickupCoin, X, Y, EntityID: r.NextEntityID(), ExpiresAt: now.Add(30*time.Second)}` in `r.Pickups`.
-- **`internal/game/shop.go`** (new) — define `ShopOffer`, `ShopCatalog` (the slice from the data-model section), and `HandleShopPurchase(p *PlayerState, itemID uint8) (applied bool)`. Body: bounds-check `itemID` against `len(ShopCatalog)`, debit `p.Coins`, switch on `offer.ID` to increment the matching `*Stacks` counter. The `ammo` case walks `WeaponSpecs` and writes `p.WeaponAmmo[w] = spec.AmmoMax` for every non-unlimited weapon — a one-shot refill to the static cap. Do **not** route shop purchases through `AllowedItems` — that would put the shop on the same string-keyed dispatch path that historically hosted BUG-09 / BUG-10.
+- **`internal/game/shop.go`** — define `ShopOffer`, `ShopCatalog` (the slice from the data-model section), and `HandleShopPurchase(p *PlayerState, itemID uint8) (applied bool)`. Body: bounds-check `itemID` against `len(ShopCatalog)`, debit `p.Coins`, switch on `offer.ID` to increment the matching `*Stacks` counter. The `ammo` case walks `WeaponSpecs` and writes `p.WeaponAmmo[w] = spec.AmmoMax` for every non-unlimited weapon — a one-shot refill to the static cap.
 - **`internal/protocol/packets.go`** — extend `InteractPacket` with `ClaimedType uint8` (json tag `claimed_type`); add `ShopPurchasePacket` with one field `ItemID uint8` (json tag `item_id`); register `C2S_SHOP_PURCHASE` at type code `0x09`.
 - **C2S dispatcher** — register `C2S_SHOP_PURCHASE` → `HandleShopPurchase` next to the existing `C2S_INTERACT` registration.
 - **Tick loop** (in the same place the existing pickup pass runs) — for each `pk` in `r.Pickups`, if `!pk.Consumed && !pk.ExpiresAt.IsZero() && now.After(pk.ExpiresAt)`, set `pk.Consumed = true`. The existing snapshot diff drops consumed pickups.
@@ -150,23 +148,21 @@ Stack growth is gated by coin supply, not by a cooldown. With costs of 10/15/20 
 
 ### Trait reads (find every call site)
 
-Effective values are derived at the point of use — **don't cache on `PlayerState`**. Replace the existing single-multiplier reads at these call sites:
+Effective values are derived at the point of use — **don't cache on `PlayerState`**. The reads:
 
-| Read point                                                  | Replacement                                                          |
-| ----------------------------------------------------------- | -------------------------------------------------------------------- |
-| Movement integration (wherever `SpeedMult` is read today)   | `(1 + 0.1*float32(p.SpeedStacks)) * nonZeroSpeedMult(p, now)`        |
-| `HandleShoot` damage (`combat.go:44–80`)                    | `(1 + 0.1*float32(p.DamageStacks)) * nonZeroDamageMult(p, now)`      |
-| `HandleShoot` cooldown                                      | `cooldown / (1 + 0.1*float32(p.FireRateStacks))` (Duration math)     |
-
-`nonZero*Mult(p, now)` (the existing helper that returns `1.0` when the temp buff has expired) stays in place for the temp-buff side of the formula. The shop trait reads don't need expiry-checking.
+| Read point                                                  | Implementation                                                     |
+| ----------------------------------------------------------- | ------------------------------------------------------------------ |
+| Movement integration (`advancePlayer`)                      | `EffectiveSpeedMult(p)` → `(1 + 0.1*float32(p.SpeedStacks))`       |
+| `HandleShoot` damage (`combat.go`)                          | `EffectiveDamageMult(p)` → `(1 + 0.1*float32(p.DamageStacks))`     |
+| `HandleShoot` cooldown                                      | `cooldown / (1 + 0.1*float32(p.FireRateStacks))` (Duration math)   |
 
 ### Client
 
 - **`client/src/game/net/packet.ts`** — extend the `C2S_INTERACT` payload type with `claimed_type: number`. Add `C2S_SHOP_PURCHASE` to the `C2SType` union and a `sendShopPurchase(itemId: number)` helper. Update the `sendInteract` call to set `claimed_type` to the rendered pickup's type (the type stored client-side from the room load).
-- **`client/src/game/scenes/ShopMenu.ts`** (new) — clone `InventoryMenu.ts`. `create()` builds a 4-row list from a hardcoded catalog mirror, panel styling from [client/10-ui-components.md](../client/10-ui-components.md). `update()` reads `getSync().state.player.coins`; render rows where `cost > coins` greyed out. Input: ↑/↓ navigate, Enter → `sendShopPurchase(catalog[selected].id)`, Esc → close. Launch with `this.scene.launch('ShopMenu'); this.scene.pause('Game')`.
-- **`client/src/game/scenes/GameHUD.ts`** — add a coin-counter `Text` (top-right, gold). Bind "B" to launch `ShopMenu` and pause the `Game` scene.
+- **`client/src/game/scenes/ShopMenu.ts`** — `create()` builds a 4-row list from a hardcoded catalog mirror, panel styling from [client/10-ui-components.md](../client/10-ui-components.md). `update()` reads `getSync().state.player.coins`; render rows where `cost > coins` greyed out. Input: ↑/↓ navigate, Enter → `sendShopPurchase(catalog[selected].id)`, Esc → close. Launch with `this.scene.launch('ShopMenu'); this.scene.pause('Game')`.
+- **`client/src/game/scenes/GameHUD.ts`** — add a coin-counter `Text` (top-right, gold). Bind "B" to launch `ShopMenu` and pause the `Game` scene. Render an active-stacks readout in the bottom-right just above the weapon widget — a single text line in the form `SPD×n  ROF×n  DMG×n` listing only non-zero stacks (hidden entirely when all zero). Reads `speed_stacks` / `fire_rate_stacks` / `damage_stacks` from `PlayerSnapshot`.
 - **`client/src/game/scenes/Preloader.ts`** — register a `coin` sprite asset.
-- **`client/src/game/main.ts`** — register the new `ShopMenu` scene.
+- **`client/src/game/main.ts`** — register the `ShopMenu` scene.
 - **Coin pickup rendering** — coins are pickups, so they go through the existing pickup render path in [client/05-entities-rendering.md](../client/05-entities-rendering.md). Add a `coin` case wherever the renderer switches on pickup type.
 
 ### Replay
@@ -179,7 +175,7 @@ Implemented end-to-end:
 
 - Server: `ShopOffer` / `ShopCatalog` / `HandleShopPurchase` in `server/internal/game/shop.go`; coin pickup type and `applyPickup` claimed-type dispatch in `server/internal/game/pickups.go`; coin drop on death in `server/internal/game/combat.go` (`ResolveCollisions`); coin despawn pass in `server/internal/game/loop.go` (`stepTick`). `PickupState.ExpiresAt`, `PlayerState.Coins`, and the three `*Stacks` fields are declared in `server/internal/game/state.go`. Effective-multiplier helpers are in `combat.go` (`EffectiveDamageMult`, `EffectiveSpeedMult`, plus the inline fire-rate divisor in `HandleShoot`).
 - Protocol: `InteractPacket.ClaimedType`, `ShopPurchasePacket`, and `C2SShopPurchase = 0x09` in `server/internal/protocol/packets.go` and `envelope.go`. `PlayerSnapshot` carries `coins / speed_stacks / fire_rate_stacks / damage_stacks`.
-- Client: `client/src/game/scenes/ShopMenu.ts` (modal), HUD coin counter and "B" keybind in `GameHUD.ts`, scene registered in `main.ts`. Coin sprite in `Preloader.ts`.
+- Client: `client/src/game/scenes/ShopMenu.ts` (modal), HUD coin counter, active-stacks readout, and "B" keybind in `GameHUD.ts`, scene registered in `main.ts`. Coin sprite in `Preloader.ts`.
 
 Cross-doc appends made when this feature landed (record kept here so the spec history stays readable):
 
@@ -248,8 +244,7 @@ A `C2S_SHOP_OPEN` / `S2C_SHOP_STATE` pair is **not** introduced — the shop UI 
 ## Cross-references
 
 - [features/pickups.md](pickups.md) — `applyPickup` lives there; BUG-05 stacks with BUG-12; Coin (Type 3) added to its pickup-types table.
-- [features/inventory-items.md](inventory-items.md) — confirms shop dispatch is intentionally *not* routed through `AllowedItems`.
-- [features/combat-weapons.md](combat-weapons.md) — damage and fire-rate buff multipliers consumed by the shoot pipeline; `nonZero*Mult` helper pattern.
+- [features/combat-weapons.md](combat-weapons.md) — damage and fire-rate stack multipliers consumed by the shoot pipeline.
 - [features/mob-ai.md](mob-ai.md) — enemy death is the coin drop trigger.
 - [foundations/02-protocol.md](../foundations/02-protocol.md) — `InteractPacket.ClaimedType` field and `C2S_SHOP_PURCHASE` row.
 - [foundations/06-game-state-conventions.md](../foundations/06-game-state-conventions.md) — `Coins` and the four `*Stacks` fields on `PlayerState`.

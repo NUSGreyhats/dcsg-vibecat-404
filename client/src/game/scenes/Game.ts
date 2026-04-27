@@ -5,6 +5,7 @@ import {
   ROOM_WIDTH,
   ROOM_HEIGHT,
   INPUT_SEND_INTERVAL_MS,
+  HOLD_FIRE_RATE_MULT,
 } from "../constants";
 import { Player } from "../entities/Player";
 import { Enemy } from "../entities/Enemy";
@@ -65,6 +66,10 @@ export class Game extends Phaser.Scene {
   controls!: Controls;
   inputSendAcc = 0;
   private nextShootAt = 0;
+  /** True when the fire button has been up at some point since the last
+   *  shot we emitted. Held continuations get a longer local throttle so
+   *  spam-clicking keeps a small edge over hold-to-fire (issue #62). */
+  private shootReleasedSinceLastShot = true;
   private requestedPickupIds = new Set<number>();
   private requestedDoorIds = new Set<number>();
   /** Read by fx.isHitstopped — entity ticks halt while non-zero. */
@@ -152,11 +157,15 @@ export class Game extends Phaser.Scene {
         if ((sp.ammo ?? 0) > 0) {
           const angle = this.controls.aimAngle(this.player.x, this.player.y);
           sync.sendShoot(angle);
+          const rateMult = this.shootReleasedSinceLastShot
+            ? 1
+            : HOLD_FIRE_RATE_MULT;
+          this.shootReleasedSinceLastShot = false;
           this.player.triggerShootAnim();
           const id = weaponFromServerId(sp.weapon_id);
           const baseCd = WEAPON_STATS[id].cooldownMs;
           const stacks = sp.fire_rate_stacks ?? 0;
-          this.nextShootAt = now + baseCd / (1 + 0.1 * stacks);
+          this.nextShootAt = now + baseCd / rateMult / (1 + 0.1 * stacks);
 
           // Muzzle flash + camera shake fire on every shot. The
           // nextShootAt gate above already throttles this — no
@@ -173,8 +182,11 @@ export class Game extends Phaser.Scene {
         }
       }
     } else {
-      // Release resets the gate so the next click fires instantly.
+      // Release resets the gate so the next click fires instantly, and
+      // marks the next shot as a fresh click so the local throttle uses
+      // the full weapon rate instead of the hold-fire multiplier.
       this.nextShootAt = 0;
+      this.shootReleasedSinceLastShot = true;
     }
 
     const slot = this.controls.weaponSwitchPressed();
@@ -205,11 +217,6 @@ export class Game extends Phaser.Scene {
       }
     }
 
-    if (this.controls.inventoryPressed()) {
-      this.scene.launch("InventoryMenu");
-      this.scene.pause();
-    }
-
     if (this.controls.shopPressed()) {
       this.scene.launch("ShopMenu");
       this.scene.pause();
@@ -230,6 +237,7 @@ export class Game extends Phaser.Scene {
       const newHp = payload.player.hp;
       if (this.prevPlayerHp >= 0 && newHp < this.prevPlayerHp) {
         triggerHitstop(this, 60);
+        this.game.events.emit("playerDamaged");
       }
       this.prevPlayerHp = newHp;
       this.player.applySnapshot(payload.player);
@@ -357,6 +365,7 @@ export class Game extends Phaser.Scene {
     // door's collision/proximity behaviour is driven from the server's
     // unlockedDoors set — this is purely visual.
     this.wallsLayer?.putTileAt(unlockedGid, tileX, tileY, true);
+    this.game.events.emit("doorUnlockedToast", getSync().state.currentRoom ?? 1);
   }
 
   private onEntityDied(entityId: number): void {
@@ -394,9 +403,14 @@ export class Game extends Phaser.Scene {
         color = HP_GREEN;
         break;
       case AMMO: {
-        const weaponId = getSync().state.player?.weapon_id ?? 0;
+        const player = getSync().state.player;
+        const weaponId = player?.weapon_id ?? 0;
         const weapon = WEAPON_STATS[weaponFromServerId(weaponId)];
-        text = `+20 ${weapon.displayName} ammo`;
+        const currentAmmo = player?.ammo ?? 0;
+        const gained = Math.max(0, Math.min(20, weapon.ammoMax - currentAmmo));
+        text = gained > 0
+          ? `+${gained} ${weapon.displayName} ammo`
+          : `${weapon.displayName} ammo full`;
         color = BONE_WHITE;
         break;
       }
@@ -462,7 +476,7 @@ export class Game extends Phaser.Scene {
 
   /**
    * Tear down every overlay scene that may be sitting on top of the
-   * gameplay (HUD, pause menu, inventory) before launching the WinScreen.
+   * gameplay (HUD, pause menu) before launching the WinScreen.
    * Without stopping PauseMenu, a player who dies mid-pause sees the
    * pause modal layered over the run-failed screen.
    */
@@ -470,7 +484,6 @@ export class Game extends Phaser.Scene {
     // Stop PauseMenu first while the Game + GameHUD cameras are still
     // live so its blur post-FX teardown finds something to remove.
     this.scene.stop("PauseMenu");
-    this.scene.stop("InventoryMenu");
     this.scene.stop("GameHUD");
     this.scene.start("WinScreen", { outcome });
   }

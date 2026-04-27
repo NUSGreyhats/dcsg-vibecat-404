@@ -19,6 +19,12 @@ const HP_BAR_HEIGHT = 4;
 const HP_BAR_OFFSET_Y = -22;
 const DEFAULT_SIZE = 32;
 const HP_BAR_BG = 0x220a0a;
+// Tween length and color for the on-damage hurt flash. The tween
+// recolours the sprite via setTintFill (rather than setTint) so the
+// pixel art reads as a solid silhouette for the duration — matches the
+// existing enemy-hit hitstop in feel.
+const HURT_FLASH_MS = 140;
+const HURT_FLASH_TINT = BLOOD_RED;
 // Below this lerp-delta the player is considered stationary and plays
 // the idle anim instead of walk.
 const MOVE_EPSILON = 0.4;
@@ -128,8 +134,10 @@ export class Player extends Phaser.GameObjects.Container {
     this.targetX = snap.x;
     this.targetY = snap.y;
     if (snap.hp !== this.lastHp) {
+      const tookDamage = snap.hp < this.lastHp;
       this.lastHp = snap.hp;
       this.drawHpBar(snap.hp);
+      if (tookDamage) this.flashHurt();
     }
     if (typeof snap.weapon_id === "number") {
       const next = weaponFromServerId(snap.weapon_id);
@@ -145,6 +153,26 @@ export class Player extends Phaser.GameObjects.Container {
     if (this.useSnapshotAim && typeof snap.aim_angle === "number") {
       this.aimAngle = snap.aim_angle;
     }
+  }
+
+  /**
+   * Brief red silhouette tween fired whenever a snapshot reports an HP
+   * decrease. setTintFill turns every non-transparent pixel a flat
+   * BLOOD_RED so the player reads as "hit" even against the busy pixel
+   * art. The tween clears the tint at the end so subsequent snapshots
+   * don't paint over it.
+   */
+  private flashHurt(): void {
+    if (!this.scene || !this.sprite.active) return;
+    this.sprite.setTintFill(HURT_FLASH_TINT);
+    this.scene.tweens.addCounter({
+      from: 1,
+      to: 0,
+      duration: HURT_FLASH_MS,
+      onComplete: () => {
+        if (this.sprite.active) this.sprite.clearTint();
+      },
+    });
   }
 
   /**

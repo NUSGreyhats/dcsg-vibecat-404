@@ -32,15 +32,47 @@ export class GameState extends Phaser.Events.EventEmitter {
   splits: SplitData[] = [];
   leaderboard: LeaderboardEntry[] = [];
   lastError?: GameStateError;
+  /**
+   * server_now − client_now in ms, sampled from the most recent source we
+   * have (S2C envelope `server_ts`, or HTTP `Date` header via
+   * setServerTime). Positive = server clock is ahead of the client clock.
+   *
+   * Diagnostic only — the client must NOT subtract this from outgoing
+   * envelope `ts` (per docs/specs/client/02-net-sync.md:100-101, the
+   * stock client sends raw Date.now() so exploiting BUG-02 requires a
+   * custom client). UI uses this to warn the user when their clock has
+   * drifted past the ±2s server window.
+   */
+  serverOffsetMs?: number;
 
   constructor() {
     super();
   }
 
   /**
+   * Record a server-time observation. Called from envelope.apply() with
+   * each S2C envelope's server_ts, and from the HTTP login flow with the
+   * response's Date header (coarse but available before WS auth, so
+   * MainMenu can warn the user before AUTH is even attempted).
+   */
+  setServerTime(serverNowMs: number, clientNowMs: number = Date.now()): void {
+    if (!Number.isFinite(serverNowMs) || serverNowMs <= 0) {
+      return;
+    }
+    this.serverOffsetMs = serverNowMs - clientNowMs;
+    this.emit("serverTime", this.serverOffsetMs);
+  }
+
+  /**
    * Apply a server envelope. Mutates state and emits the appropriate event.
    */
   apply(envelope: S2CEnvelope): void {
+    // Track the server's wallclock on every inbound packet. Cheap, and
+    // the latest sample is the freshest; later UI consumers read it via
+    // serverOffsetMs.
+    if (typeof envelope.server_ts === "number") {
+      this.setServerTime(envelope.server_ts);
+    }
     switch (envelope.type) {
       case S2CType.AUTH_OK: {
         const data = envelope.data as { display_name: string };
@@ -49,10 +81,21 @@ export class GameState extends Phaser.Events.EventEmitter {
         break;
       }
       case S2CType.RUN_STARTED: {
-        const data = envelope.data as { seed: number; room: RoomData };
+        const data = envelope.data as {
+          seed: number;
+          room: RoomData;
+          display_name?: string;
+        };
         this.seed = data.seed;
         this.roomData = data.room;
         this.currentRoom = data.room.room_index;
+        // Spectator catchup: AUTH_OK is player-only, so the name only
+        // arrives here. The server tags every RUN_STARTED so a spectator
+        // who deep-linked /spectate/:id without ?name= still gets the
+        // display name without a separate /api/live fetch.
+        if (data.display_name) {
+          this.displayName = data.display_name;
+        }
         this.runStarted = true;
         this.runFinished = false;
         this.runOutcome = undefined;
@@ -99,6 +142,10 @@ export class GameState extends Phaser.Events.EventEmitter {
             kills: 0,
           });
         }
+        // ROOM_LOAD is emitted before the next STATE tick, so mirror the
+        // authoritative split time into elapsedMs immediately. The HUD's
+        // left timer and right split row then agree on the transition frame.
+        this.elapsedMs = data.split_ms;
         this.currentRoom = data.room_index;
         this.roomData = data.room;
         this.entities = [];
@@ -146,6 +193,7 @@ export class GameState extends Phaser.Events.EventEmitter {
         this.runFinished = true;
         this.runOutcome = outcome;
         this.totalMs = data.total_ms;
+        this.elapsedMs = data.total_ms;
         this.rank = data.rank;
         this.splits = data.splits;
         this.emit(

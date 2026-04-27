@@ -1,9 +1,11 @@
 import { GameStateSync } from "./GameStateSync";
 import { SpectatorSync } from "./SpectatorSync";
+import { ReplaySync } from "./ReplaySync";
 import type { GameState } from "./GameState";
 
 let sync: GameStateSync | undefined;
 let spectatorSync: SpectatorSync | undefined;
+let replaySync: ReplaySync | undefined;
 
 // activeState is the GameState that scenes shared between player and
 // spectator (currently just GameHUD) should read from. Set by the boot
@@ -28,6 +30,16 @@ export function getSpectatorSync(): SpectatorSync {
 export function resetSpectatorSync(): void {
   spectatorSync?.close();
   spectatorSync = undefined;
+}
+
+export function getReplaySync(): ReplaySync {
+  if (!replaySync) replaySync = new ReplaySync();
+  return replaySync;
+}
+
+export function resetReplaySync(): void {
+  replaySync?.close();
+  replaySync = undefined;
 }
 
 export function setActiveState(state: GameState): void {

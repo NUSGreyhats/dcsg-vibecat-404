@@ -68,10 +68,15 @@ type RunState struct {
 	Seed         int64
 	MobRNG       *rand.Rand
 	CurrentRoom  uint8
-	ElapsedMs    int64
-	Splits       []protocol.SplitData
-	InputLog     []InputRecord
-	RunsUsed     uint8
+	// TimeAdjustmentMs is the cumulative room-clear bonus/penalty already
+	// applied to the run clock. currentElapsed adds it to wall-clock elapsed
+	// so STATE.elapsed_ms, ROOM_LOAD.split_ms, and final total_ms share one
+	// authoritative timer.
+	TimeAdjustmentMs int64
+	ElapsedMs        int64
+	Splits           []protocol.SplitData
+	InputLog         []InputRecord
+	RunsUsed         uint8
 }
 
 type PlayerState struct {
@@ -84,13 +89,6 @@ type PlayerState struct {
 	WeaponAmmo      map[uint8]int
 	SwapCooldownEnd time.Time
 	DamageTaken     int32
-	Inventory       []string
-
-	SpeedMultUntil  time.Time
-	SpeedMult       float32
-	DamageMultUntil time.Time
-	DamageMult      float32
-	ShieldUntil     time.Time
 
 	// Shop traits — permanent stackable buffs purchased from features/shop.md.
 	// Reset on death / new run. Effective multipliers are derived at read
@@ -118,9 +116,6 @@ func NewPlayerState() *PlayerState {
 		UnlockedWeapons: []uint8{1, 2, 3},
 		WeaponCooldown:  map[uint8]time.Time{},
 		WeaponAmmo:      map[uint8]int{},
-		Inventory:       []string{},
-		SpeedMult:       1,
-		DamageMult:      1,
 	}
 	for id, spec := range WeaponSpecs {
 		p.WeaponAmmo[id] = spec.AmmoStart

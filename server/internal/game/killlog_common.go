@@ -46,8 +46,13 @@ func ComputeRoomBonus(log []KillRecord) int64 {
 		return 0
 	}
 	duration := log[len(log)-1].Timestamp.Sub(log[0].Timestamp)
+	// Preserve BUG-11's negative-duration payload, but don't penalize normal
+	// clears that happen to take longer than the fast-clear threshold.
+	if duration < 0 {
+		return int64(duration/time.Millisecond) - 500
+	}
 	if duration < 2*time.Second {
 		return -500
 	}
-	return int64(duration/time.Millisecond) - 500
+	return 0
 }

@@ -45,14 +45,6 @@ PlayerState {
     WeaponAmmo      map[uint8]int
     SwapCooldownEnd time.Time
     DamageTaken     int32
-    Inventory       []string            // item names, relevant for BUG-10
-
-    // Timed buffs (inventory consumables).
-    SpeedMult       float32
-    SpeedMultUntil  time.Time
-    DamageMult      float32
-    DamageMultUntil time.Time
-    ShieldUntil     time.Time
 
     // Shop traits — owned by features/shop.md. Permanent stackable buffs;
     // reset on death / new run. Effective multipliers are derived at read
@@ -68,7 +60,6 @@ PlayerState {
 Field notes:
 
 - **`HP, MaxHP int16`** — range −32768..32767. No overflow guard on `+=`/`-=`. See [../features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max](../features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max). Checked against `<= 0` in the per-tick **player-death pass** (see [05-server-runtime.md#player-death-pass](./05-server-runtime.md#player-death-pass)); signed comparison is load-bearing so a BUG-08 wrap-to-negative trips the check.
-- **`Inventory []string`** — stores item names; per-string length validated with `len()` (byte count) capped at 16. See [../features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass](../features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass).
 - **`WeaponCooldown map[uint8]time.Time`** — per-weapon next-allowed-fire timestamp. Shared `time.Now()` within a tick enables [BUG-04](../features/combat-weapons.md#bug-04-swap-cancel) and [BUG-07](../features/combat-weapons.md#bug-07-damage-batch-overflow).
 - **`Coins`, `SpeedStacks`, `FireRateStacks`, `DamageStacks`** — owned by [../features/shop.md](../features/shop.md). All four are zeroed on run end / new run via `NewPlayerState()` — there is no in-place reset path because a failed run tears down the engine. `Coins` is `int32` (overflow is not an intended bug class); stacks are `uint8` (coin cost rate-limits stack growth far below 255).
 
@@ -182,7 +173,6 @@ Current `server/main.go` uses a single `gameState` struct with a flat field list
 None own their body here — this file defines the types the bugs depend on. Full bug bodies live in:
 
 - [BUG-08](../features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max) — `HP, MaxHP int16`.
-- [BUG-10](../features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass) — `Inventory []string`.
 - [BUG-11](./05-server-runtime.md#bug-11-kill-log-append-race) — `RoomState.KillLog`.
 - [BUG-04](../features/combat-weapons.md#bug-04-swap-cancel) / [BUG-07](../features/combat-weapons.md#bug-07-damage-batch-overflow) — `WeaponCooldown` same-tick behavior.
 

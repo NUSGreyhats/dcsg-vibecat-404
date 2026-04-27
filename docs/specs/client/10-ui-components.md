@@ -113,7 +113,7 @@ Size ladder (all monospace except where the "display" row is a baked PNG):
 | ------------------- | -------------- | ------------------------------------------------------------------ |
 | **Logo (baked)**    | 1920×1080 PNG  | Splash screen hero — positioned top-right of MainMenu              |
 | **Title**           | 48 px          | "Run Complete" on WinScreen                                        |
-| **Heading**         | 28 px          | "Inventory", `[ Start Run ]`, `[ Play Again ]`                     |
+| **Heading**         | 28 px          | "Shop", `[ Start Run ]`, `[ Play Again ]`                          |
 | **Subtitle**        | 26 px          | "Total time: …" on WinScreen                                       |
 | **Section header**  | 22 px          | "Rank: #X"                                                         |
 | **Body emphasis**   | 20 px          | HUD timer, HUD room indicator, selected item                       |
@@ -228,10 +228,10 @@ Every reusable UI unit in the game. Each entry: purpose, visual states (using th
 
   | State        | Color                       | Example                                           |
   | ------------ | --------------------------- | ------------------------------------------------- |
-  | Idle         | Text muted `#8a8679`        | "Connecting..."                                   |
-  | In progress  | Text muted                  | "Authenticating...", "Starting run..."            |
-  | Success      | Success `#8de77a`           | "Connected. Enter a player ID and press Start."   |
-  | Warning      | Warning `#f5c03a`           | "Still connecting — hang on."                     |
+  | Idle         | Text muted `#8a8679`        | "Enter credentials to play."                      |
+  | In progress  | Text muted                  | "Connecting to game server...", "Authenticating...", "Starting run..." |
+  | Success      | Success `#8de77a`           | Queue/login success states                         |
+  | Warning      | Warning `#f5c03a`           | "In queue: 1st in line · <1 min wait"             |
   | Error        | Error `#c4303b` (Blood red) | "Could not connect to the game server."           |
 
 **Placement:** `.setOrigin(0, 0)` left-aligned, `.setOrigin(0.5)` centered, `.setOrigin(1, 0)` right-aligned, `.setOrigin(1, 0.5)` right+vcenter (weapon line).
@@ -374,36 +374,36 @@ Files: `Preloader.ts`, `GameHUD.ts`, `Player.ts`, `Enemy.ts`.
 
 ### 9. Modal panel
 
-**Purpose:** foreground a decision (inventory, shop, pause, future confirm dialogs).
+**Purpose:** foreground a decision (shop, pause, future confirm dialogs).
 
 **Structure:**
 
 1. **Dim layer** — full-screen rectangle, Panel dim (`#0d1222` α 0.55), depth 1000.
-2. **Panel** — centered rectangle, size per content (480 × 360 for inventory), fill Panel fill (`#1a2338` α 0.95), 2 px Panel stroke (Mid blue), depth 1001.
+2. **Panel** — centered rectangle, size per content (560 × 380 for the current shop layout), fill Panel fill (`#1a2338` α 0.95), 2 px Panel stroke (Mid blue), depth 1001.
 3. **Title** — 28 px Tracer yellow `#ffdd33`, centered at panel top.
 4. **Hint line** — 14 px Text muted, centered at panel bottom, lists shortcut keys.
 5. **Content area** — per modal.
 
 **Interaction model:** `scene.pause()` underneath, `scene.launch()` on top. Modal owns its own keyboard (does NOT share `Controls`).
 
-**Close actions:** Esc, modal's toggle key (e.g. `I` for inventory), or Enter after a selection. `scene.resume("Game"); scene.stop();`.
+**Close actions:** Esc, modal's toggle key (e.g. `B` for shop), or Enter after a selection. `scene.resume("Game"); scene.stop();`.
 
-**Implementation:** `InventoryMenu.ts` is the canonical reference. `ShopMenu.ts` and `PauseMenu.ts` follow the same pattern.
+**Implementation:** `ShopMenu.ts` is the canonical reference. `PauseMenu.ts` follows the same pattern.
 
 ### 10. Selectable list (vertical)
 
-**Purpose:** modal content — inventory rows, shop catalog rows, future settings.
+**Purpose:** modal content — shop catalog rows, future settings.
 
 **States:**
-- **Default row:** `  item_name` (2-space prefix), Bone white.
-- **Selected row:** `> item_name`, Tracer yellow `#ffdd33`.
+- **Default row:** `  label` (2-space prefix), Bone white.
+- **Selected row:** `> label`, Tracer yellow `#ffdd33`.
 - **Empty state:** `"(empty)"`, Text dim `#5a564c`.
 
 **Interactions:** Up/Down with modular wrap (`(sel + delta + len) % len`). Enter activates. Esc cancels.
 
 **Layout:** 20 px monospace, 28 px row height, centered horizontally, starts at `cy - 70`.
 
-**Implementation:** `InventoryMenu.renderItems()`.
+**Implementation:** `ShopMenu.renderRows()`.
 
 ### 11. Two-column summary (splits + leaderboard)
 
@@ -500,20 +500,21 @@ Centered column of title text + input + button + status. Plain `#0d1222` Midnigh
 └────────────────────────────────────────────────────────┘
 ```
 
-### Game + InventoryMenu (modal)
+### Game + ShopMenu (modal)
 
 ```
 ┌────────────────────────────────────────────────────────┐
 │  (dim — Midnight α 0.55 — gameplay showing through)    │
 │         ┌──────────────────────────────────┐           │
-│         │          Inventory               │ ← Tracer yellow header
+│         │             Shop                 │ ← Tracer yellow header
 │         │                                  │
-│         │       health_potion              │
-│         │     > speed_boost                │ ← Tracer yellow selection
-│         │       shield                     │
+│         │       Ammo       $5              │
+│         │     > Speed      $10  (x1)       │ ← Tracer yellow selection
+│         │       Fire Rate  $15              │
+│         │       Damage     $20              │
 │         │                                  │
-│         │  [Up/Down] select  [Enter] use   │
-│         │  [Esc/I] close                   │ ← Text muted hint
+│         │  [Up/Down] select [Enter] buy    │
+│         │  [Esc/B] close                   │ ← Text muted hint
 │         └──────────────────────────────────┘
 └────────────────────────────────────────────────────────┘
 ```
@@ -543,7 +544,7 @@ Current state is kiosk-at-DEF-CON; baseline decencies:
 
 - **Color-blind friendly HP:** the bar color alone isn't enough — the `HP 78/100` numeric sits next to it. Keep both.
 - **High-contrast text:** Bone white / Tracer yellow on Midnight all clear contrast ≥ 10:1.
-- **Keyboard navigation:** `MainMenu` accepts Enter. `InventoryMenu` is keyboard-only. `WinScreen`'s button is click-only — future improvement.
+- **Keyboard navigation:** `MainMenu` accepts Enter. `ShopMenu` is keyboard-only. `WinScreen`'s button is click-only — future improvement.
 - **Motion:** pickup bob (900 ms yoyo), enemy death tween (180 ms), no long-running flashes.
 - **Font size floor:** 12 px debug badge; everything actionable ≥ 16 px.
 - **Audio cues:** none currently. When audio ships, pair every interactive feedback (hover / select / damage) with a short chiptune sfx.
@@ -577,7 +578,7 @@ Audit of what's authored vs. wired. Priority ordered.
 1. Export `art/title.png` → `client/public/assets/title.png`. Register in `Preloader.preload()` as `this.load.image("title", "assets/title.png")`.
 2. Update `MainMenu.create()` to render `scene.add.image(cx, cy, "title").setDisplaySize(w, h).setDepth(-10)` behind existing MainMenu GameObjects; move the input/button/status to the bottom-left per the target layout above. Remove the in-scene "DEFCON / Dungeon Speedrun" text.
 3. Export `art/enemy.png` + `enemy.json` → `client/public/assets/`. Register with `this.load.atlas("enemy", "assets/enemy.png", "assets/enemy.json")`. `Enemy.ts` already reads the atlas key and tints per type — no entity-code change needed.
-4. Re-tint all inline hexes in `MainMenu.ts`, `GameHUD.ts`, `InventoryMenu.ts`, `WinScreen.ts`, `Preloader.ts`, `Game.ts`, `roomLayout.ts` to the palette above. Mechanical replace.
+4. Re-tint all inline hexes in `MainMenu.ts`, `GameHUD.ts`, `ShopMenu.ts`, `WinScreen.ts`, `Preloader.ts`, `Game.ts`, `roomLayout.ts` to the palette above. Mechanical replace.
 
 **P1 (subsequent PR):**
 
