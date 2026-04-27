@@ -159,7 +159,7 @@
           nameCell +
           '<td>' + fmtMs(e.total_ms) + '</td>' +
           '<td><a href="/admin/replay/' + encodeURIComponent(e.replay_id) +
-            '" download style="color:var(--mid-blue)">' + shortId(e.replay_id) + '</a></td>' +
+            '/view" style="color:var(--mid-blue)">' + shortId(e.replay_id) + '</a></td>' +
           '<td>' + escape(e.submitted_at) + '</td>' +
           '<td class="actions">' + flagBtn +
             '<button class="del" data-action="delete" data-id="' + escape(e.replay_id) + '">delete</button></td>'
