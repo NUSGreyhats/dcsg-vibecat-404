@@ -12,7 +12,8 @@ Separate service (Repo B) that manages FIFO turn-taking in production, serves th
 | `/api/queue/join`              | POST   | `{ player_id, password }` → `{ position, est_wait_ms, admitted }`. Returns `503` when `QUEUE_ENABLED` is unset. `est_wait_ms = max(0, position-1) * AVG_TURN_MS`, so the front of the line and admitted callers report `0`. Per-IP rate-limited (1 s cooldown, mirroring `/api/login`) **before** bcrypt verification — see issue #71 #4. |
 | `/api/queue/status/:player_id` | GET    | `{ position, est_wait_ms, admitted }`. `position == 0 && admitted` ⇒ allowlisted; client should open the WS. |
 | `/api/queue/:player_id`        | DELETE | `{ password }` — leave queue. Same per-IP rate-limit as `/api/queue/join`. |
-| `/api/leaderboard`             | GET    | Rankings from `game.db`                                 |
+| `/api/leaderboard`             | GET    | Rankings from `game.db`. Returns `503 leaderboard disabled` when `LEADERBOARD_ENABLED=false`. |
+| `/api/config`                  | GET    | Public client-facing feature flags: `{ leaderboard_enabled, queue_enabled, leaderboard_disabled_message? }`. The win screen reads this once at boot to decide whether to render the leaderboard pane or the booth CTA. `leaderboard_disabled_message` is omitted when leaderboard is enabled. |
 | `/api/live`                    | GET    | JSON list of currently-playing games. See [Live spectating](#live-spectating). |
 | `/spectate`                    | GET    | HTML selector page: lists live games, links into viewer. |
 | `/spectate/:run_id`            | GET    | HTML viewer page that hosts the client in spectator mode. `run_id` is the public per-run handle returned on `/api/live`; `player_id` is intentionally not exposed on this surface (issue #71 #1). |
@@ -20,6 +21,29 @@ Separate service (Repo B) that manages FIFO turn-taking in production, serves th
 | `/api/health`                  | GET    | Service health                                          |
 
 See [03-identity-auth.md](./03-identity-auth.md) for the registration / verification semantics shared with this service.
+
+### Disabled-leaderboard deployments
+
+When the deployment sets `LEADERBOARD_ENABLED=false`, the lobby skips
+opening `game.db` (no `completed_runs` schema is created on a fresh
+volume) and returns `503 leaderboard disabled` from every route that
+reads or writes leaderboard / replay state:
+
+- Public: `/leaderboard`, `/api/leaderboard`.
+- Admin: `/admin/leaderboard.json`, `/admin/leaderboard/flag`,
+  `/admin/leaderboard/unflag`, `/admin/leaderboard/:id` (DELETE),
+  `/admin/replay/:id`, `/admin/replay/:id/meta`,
+  `/admin/replay/:id/ticket`, `/admin/winners.csv`.
+
+`/api/config` continues to serve and advertises
+`leaderboard_enabled: false` plus a `leaderboard_disabled_message`
+(configured via `LEADERBOARD_DISABLED_MESSAGE`, default
+`"Please visit our booth to record an official attempt"`). Admin auth
+is independent of this flag — the panel index, queue, settings, and
+source-tarball routes still work; only the leaderboard / replay /
+winners surfaces go dark. The game server's `/ws/replay` route is
+omitted in the same posture (404 rather than 503), see
+[08-leaderboard-replay.md](./08-leaderboard-replay.md#deployment-toggle).
 
 ## Admin panel (auth-protected)
 

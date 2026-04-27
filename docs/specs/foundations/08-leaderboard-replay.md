@@ -4,6 +4,33 @@
 
 Server-authoritative leaderboard + tamper-proof replay verification. Every completed run stores its full `InputLog`; the replay engine can re-run `(seed, InputLog)` and must produce the same final time. The leaderboard is the anticheat backstop that makes all the intentional bugs safe to ship — a "cheat" only counts if it reproduces from replay.
 
+## Deployment toggle
+
+`LEADERBOARD_ENABLED` (default `true`) gates this entire pipeline. When
+set to `false`:
+
+- **Game server** does not open `game.db`, does not start the
+  leaderboard goroutine, and passes `nil` submit callbacks into the
+  engine. Completed runs therefore produce no database row and no
+  `S2C_LEADERBOARD` broadcast when the leaderboard is disabled. The
+  `/ws/replay` route is not registered (404 on upgrade rather than
+  503).
+- **Lobby** does not open `game.db`, does not run admin schema
+  bootstrap, and returns `503 leaderboard disabled` on every public
+  and admin route that reads `completed_runs` / `flagged_runs`. See
+  the enumeration in [04-lobby.md](./04-lobby.md#disabled-leaderboard-deployments).
+- **Client** reads `/api/config` once at boot. When
+  `leaderboard_enabled: false`, the win screen replaces the right-hand
+  leaderboard pane with a configurable booth CTA whose text comes from
+  `leaderboard_disabled_message` (env var
+  `LEADERBOARD_DISABLED_MESSAGE`, default `"Please visit our booth to
+  record an official attempt"`).
+
+This posture targets event deployments that record official attempts in
+person, training environments without prizes, and any deploy where
+collecting `InputLog` blobs is not desirable. `LEADERBOARD_ENABLED=true`
+keeps the original behavior described below.
+
 ## `CompletedRun`
 
 ```go

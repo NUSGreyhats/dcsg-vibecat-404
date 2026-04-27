@@ -71,12 +71,21 @@ func main() {
 	} else {
 		log.Printf("WS origin allowlist: %s", strings.Join(wsAllowedOrigins, ", "))
 	}
+	// LEADERBOARD_ENABLED gates the entire submission + replay pipeline.
+	// Default true preserves existing behavior; "false" skips opening
+	// game.db, starting the leaderboard goroutine, and registering
+	// /ws/replay. Spec: docs/specs/foundations/08-leaderboard-replay.md.
+	leaderboardEnabled := !strings.EqualFold(os.Getenv("LEADERBOARD_ENABLED"), "false")
 
-	db, err := leaderboard.OpenDB(dbPath)
-	if err != nil {
-		log.Fatalf("open db: %v", err)
+	var db *sql.DB
+	if leaderboardEnabled {
+		var err error
+		db, err = leaderboard.OpenDB(dbPath)
+		if err != nil {
+			log.Fatalf("open db: %v", err)
+		}
+		defer db.Close()
 	}
-	defer db.Close()
 
 	identityDB, err := identity.OpenDB(identityDBPath)
 	if err != nil {
@@ -96,16 +105,22 @@ func main() {
 	case auth.ModeIdentity:
 		log.Printf("auth mode: identity (db=%s)", identityDBPath)
 	}
-	if len(adminSecret) >= 16 {
-		log.Printf("replay viewer: enabled (global=%d per_ip=%d)", replayGlobal, replayPerIP)
+	if !leaderboardEnabled {
+		log.Printf("leaderboard: disabled (LEADERBOARD_ENABLED=false)")
+	} else if len(adminSecret) >= 16 {
+		log.Printf("leaderboard: enabled; replay viewer: enabled (global=%d per_ip=%d)", replayGlobal, replayPerIP)
 	} else {
-		log.Printf("replay viewer: disabled (ADMIN_SESSION_SECRET unset; /ws/replay returns 503)")
+		log.Printf("leaderboard: enabled; replay viewer: disabled (ADMIN_SESSION_SECRET unset; /ws/replay returns 503)")
 	}
 
-	lbSvc := leaderboard.NewService(db)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	lbSvc.Start(ctx)
+
+	var lbSvc *leaderboard.Service
+	if leaderboardEnabled {
+		lbSvc = leaderboard.NewService(db)
+		lbSvc.Start(ctx)
+	}
 
 	// Live-games registry — engines push a Summary every tick; the
 	// /internal/live-games endpoint serves the aggregated snapshot to
@@ -140,9 +155,15 @@ func main() {
 	mux.HandleFunc("/ws/spectate", func(w http.ResponseWriter, r *http.Request) {
 		handleSpectateWS(ctx, w, r, engineReg, specCaps, wsAllowedOrigins)
 	})
-	mux.HandleFunc("/ws/replay", func(w http.ResponseWriter, r *http.Request) {
-		handleReplayWS(ctx, w, r, db, adminSecret, replayCaps, wsAllowedOrigins)
-	})
+	if leaderboardEnabled {
+		// /ws/replay is only useful when there are recorded runs to play
+		// back. With LEADERBOARD_ENABLED=false the route is omitted
+		// entirely so the upgrade returns 404 (rather than 503), making
+		// it obvious the feature is gone rather than misconfigured.
+		mux.HandleFunc("/ws/replay", func(w http.ResponseWriter, r *http.Request) {
+			handleReplayWS(ctx, w, r, db, adminSecret, replayCaps, wsAllowedOrigins)
+		})
+	}
 	mux.HandleFunc("/internal/slot-status", func(w http.ResponseWriter, r *http.Request) {
 		if !gateInternal(w, r, internalSecret) {
 			return
@@ -264,21 +285,30 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 	inCh := make(chan []byte, game.InChBuf)
 	outCh := make(chan protocol.S2CEnvelope, game.OutChBuf)
 
-	engine := game.NewEngine(inCh, outCh, lb.Submit, authCheck)
-	engine.SubmitAndRefresh = lb.SubmitAndRefresh
-	engine.RegisterLeaderboard = func(playerID string) {
-		lb.Register(playerID, outCh)
-		entries := lb.Top(leaderboard.TopBroadcastN)
-		if entries == nil {
-			return
-		}
-		select {
-		case outCh <- protocol.NewS2C(
-			protocol.S2CLeaderboard,
-			0,
-			protocol.LeaderboardData{Entries: entries},
-		):
-		default:
+	// lb is nil when LEADERBOARD_ENABLED=false. The engine's submit /
+	// register callbacks are all nil-checked (see loop.go), so leaving
+	// these fields unset cleanly turns the leaderboard pipeline off.
+	var submit func(*leaderboard.CompletedRun) bool
+	if lb != nil {
+		submit = lb.Submit
+	}
+	engine := game.NewEngine(inCh, outCh, submit, authCheck)
+	if lb != nil {
+		engine.SubmitAndRefresh = lb.SubmitAndRefresh
+		engine.RegisterLeaderboard = func(playerID string) {
+			lb.Register(playerID, outCh)
+			entries := lb.Top(leaderboard.TopBroadcastN)
+			if entries == nil {
+				return
+			}
+			select {
+			case outCh <- protocol.NewS2C(
+				protocol.S2CLeaderboard,
+				0,
+				protocol.LeaderboardData{Entries: entries},
+			):
+			default:
+			}
 		}
 	}
 	engine.Live = liveReg
@@ -301,8 +331,9 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 		// identity), but live-games / spectator routing is keyed by
 		// the public run_id minted in initRun (issue #71 #1). Use each
 		// accordingly so liveReg doesn't end up with a stale player_id
-		// key after this PR's run_id switch.
-		if engine.PlayerID != "" {
+		// key after this PR's run_id switch. lb may be nil under
+		// LEADERBOARD_ENABLED=false — guard accordingly.
+		if engine.PlayerID != "" && lb != nil {
 			lb.Unregister(engine.PlayerID)
 		}
 		if rid := engine.RunID(); rid != "" {

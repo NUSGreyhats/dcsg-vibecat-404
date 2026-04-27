@@ -67,11 +67,16 @@ type RunState struct {
 	RunStartTime time.Time
 	Seed         int64
 	MobRNG       *rand.Rand
-	CurrentRoom  uint8
-	ElapsedMs    int64
-	Splits       []protocol.SplitData
-	InputLog     []InputRecord
-	RunsUsed     uint8
+	CurrentRoom uint8
+	// TimeAdjustmentMs is the cumulative room-clear bonus/penalty already
+	// applied to the run clock. currentElapsed adds it to wall-clock elapsed
+	// so STATE.elapsed_ms, ROOM_LOAD.split_ms, and final total_ms share one
+	// authoritative timer.
+	TimeAdjustmentMs int64
+	ElapsedMs        int64
+	Splits           []protocol.SplitData
+	InputLog         []InputRecord
+	RunsUsed         uint8
 
 	// inputBytes tracks the cumulative size of accepted packet Data
 	// payloads in InputLog. Used to enforce MaxInputLogBytes so a flood

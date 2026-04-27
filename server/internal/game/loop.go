@@ -893,9 +893,16 @@ func (e *Engine) tryEnterDoor(doorID uint32, now time.Time) {
 }
 
 func (e *Engine) transitionToRoom(nextRoom uint8, now time.Time) {
-	// Split time for the room we're leaving.
+	// Split time for the room we're leaving. Apply the room bonus to the
+	// run clock before emitting ROOM_LOAD so the live HUD timer (STATE) and
+	// split row (ROOM_LOAD.split_ms) stay on the same timeline.
+	elapsed := e.currentElapsed(now)
 	bonus := ComputeRoomBonus(e.room.KillLog)
-	elapsed := e.currentElapsed(now) + bonus
+	if bonus != 0 {
+		e.run.TimeAdjustmentMs += bonus
+		elapsed += bonus
+	}
+	e.run.ElapsedMs = elapsed
 	e.run.Splits = append(e.run.Splits, protocol.SplitData{
 		RoomIndex: e.run.CurrentRoom,
 		TimeMs:    elapsed,
@@ -991,7 +998,7 @@ func (e *Engine) updateElapsed(now time.Time) {
 }
 
 func (e *Engine) currentElapsed(now time.Time) int64 {
-	return now.Sub(e.run.RunStartTime).Milliseconds()
+	return now.Sub(e.run.RunStartTime).Milliseconds() + e.run.TimeAdjustmentMs
 }
 
 // finishRun transitions the run to a terminal status and emits

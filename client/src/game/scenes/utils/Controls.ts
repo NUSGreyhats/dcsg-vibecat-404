@@ -68,6 +68,11 @@ export function createControls(scene: Phaser.Scene): Controls {
   };
 
   const justDown = Phaser.Input.Keyboard.JustDown;
+  // If the scene was entered via a mouse click (e.g. the MainMenu START
+  // button), Phaser's active pointer can still be down on the first gameplay
+  // frame. Do not treat that carried-over click as a shot; require one
+  // release before live fire is armed.
+  let suppressShootUntilRelease = scene.input.activePointer.leftButtonDown();
 
   return {
     movement(): MovementInput {
@@ -92,7 +97,12 @@ export function createControls(scene: Phaser.Scene): Controls {
       return Math.atan2(worldY - pivotY, worldX - pivotX);
     },
     shootHeld(): boolean {
-      return scene.input.activePointer.leftButtonDown();
+      const down = scene.input.activePointer.leftButtonDown();
+      if (suppressShootUntilRelease) {
+        if (!down) suppressShootUntilRelease = false;
+        return false;
+      }
+      return down;
     },
     inventoryPressed(): boolean {
       return justDown(keys.inventory);

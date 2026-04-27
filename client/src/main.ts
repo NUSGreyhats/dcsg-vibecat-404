@@ -1,6 +1,13 @@
 import { startGame } from "./game/main";
+import { loadConfig } from "./net/config";
 
-startGame("game-container");
+// Fetch /api/config before the Phaser game spins up so scenes can
+// synchronously branch on feature flags (notably the leaderboard
+// toggle on WinScreen). loadConfig() never throws — on failure it
+// keeps the safe default {leaderboard_enabled:true, queue_enabled:false}.
+loadConfig().finally(() => {
+  startGame("game-container");
+});
 
 const app = document.getElementById("app");
 const fullscreenToggle = document.getElementById("fullscreen-toggle");

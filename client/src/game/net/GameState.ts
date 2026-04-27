@@ -142,6 +142,10 @@ export class GameState extends Phaser.Events.EventEmitter {
             kills: 0,
           });
         }
+        // ROOM_LOAD is emitted before the next STATE tick, so mirror the
+        // authoritative split time into elapsedMs immediately. The HUD's
+        // left timer and right split row then agree on the transition frame.
+        this.elapsedMs = data.split_ms;
         this.currentRoom = data.room_index;
         this.roomData = data.room;
         this.entities = [];
@@ -178,6 +182,7 @@ export class GameState extends Phaser.Events.EventEmitter {
         this.runFinished = true;
         this.runOutcome = outcome;
         this.totalMs = data.total_ms;
+        this.elapsedMs = data.total_ms;
         this.rank = data.rank;
         this.splits = data.splits;
         this.emit(
