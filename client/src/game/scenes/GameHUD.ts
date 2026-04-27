@@ -22,6 +22,7 @@ import {
   HP_GREEN,
   HP_RED,
   HUD_TEXT_STYLE,
+  MASK_RED,
   MIDNIGHT,
   STROKE_THICKNESS_HUD,
   SUCCESS,
@@ -58,6 +59,8 @@ const PANEL_PAD_X = 8;
 const PANEL_PAD_Y = 4;
 const PANEL_ALPHA = 0.45;
 const TOAST_Y = 74;
+const HURT_FLASH_ALPHA = 0.16;
+const HURT_FLASH_MS = 150;
 
 // Hold-Space-to-restart hotkey. Player holds the space bar continuously
 // for HOLD_RESTART_MS to abandon the current run and bounce back to the
@@ -87,6 +90,7 @@ export class GameHUD extends Phaser.Scene {
   private splitsRows: Phaser.GameObjects.Text[] = [];
   private splitsDeltas: Phaser.GameObjects.Text[] = [];
   private currentWeaponKey?: string;
+  private hurtFlash?: Phaser.GameObjects.Rectangle;
   private toastBg?: Phaser.GameObjects.Rectangle;
   private toastText?: Phaser.GameObjects.Text;
   // Once the run finishes the timer latches at the server's authoritative
@@ -188,6 +192,12 @@ export class GameHUD extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD_BG);
 
+    this.hurtFlash = this.add
+      .rectangle(0, 0, w, h, MASK_RED, 0)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_BG - 1);
+
     const state = getActiveState();
     state.on("runComplete", this.onRunComplete, this);
 
@@ -209,6 +219,7 @@ export class GameHUD extends Phaser.Scene {
       this.onTimingsVisibilityChanged,
       this,
     );
+    this.game.events.on("playerDamaged", this.onPlayerDamaged, this);
     this.game.events.on("doorUnlockedToast", this.onDoorUnlockedToast, this);
 
     this.applyTimingsVisibility();
@@ -614,8 +625,20 @@ export class GameHUD extends Phaser.Scene {
     this.scene.start("MainMenu");
   }
 
-  private onDoorUnlockedToast(): void {
-    this.showToast("LEVEL CLEAR - DOOR UNLOCKED");
+  private onPlayerDamaged(): void {
+    if (!this.hurtFlash) return;
+    this.tweens.killTweensOf(this.hurtFlash);
+    this.hurtFlash.setAlpha(HURT_FLASH_ALPHA);
+    this.tweens.add({
+      targets: this.hurtFlash,
+      alpha: 0,
+      duration: HURT_FLASH_MS,
+      ease: "Cubic.easeOut",
+    });
+  }
+
+  private onDoorUnlockedToast(roomIndex: number): void {
+    this.showToast(`LEVEL ${roomIndex} CLEAR`);
   }
 
   private showToast(message: string): void {
@@ -678,6 +701,7 @@ export class GameHUD extends Phaser.Scene {
       this.onTimingsVisibilityChanged,
       this,
     );
+    this.game.events.off("playerDamaged", this.onPlayerDamaged, this);
     this.game.events.off("doorUnlockedToast", this.onDoorUnlockedToast, this);
 
     if (this.spaceKey) {
@@ -705,8 +729,10 @@ export class GameHUD extends Phaser.Scene {
     this.weaponText?.destroy();
     this.weaponIcon?.destroy();
     this.weaponPanel?.destroy();
+    if (this.hurtFlash) this.tweens.killTweensOf(this.hurtFlash);
     if (this.toastText) this.tweens.killTweensOf(this.toastText);
     if (this.toastBg) this.tweens.killTweensOf(this.toastBg);
+    this.hurtFlash?.destroy();
     this.toastText?.destroy();
     this.toastBg?.destroy();
     this.splitsHeader?.destroy();
@@ -728,6 +754,7 @@ export class GameHUD extends Phaser.Scene {
     this.splitsPanel = undefined;
     this.currentWeaponKey = undefined;
     this.latchedTotalMs = undefined;
+    this.hurtFlash = undefined;
     this.toastText = undefined;
     this.toastBg = undefined;
   }
