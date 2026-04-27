@@ -69,10 +69,16 @@ export class MainMenu extends Phaser.Scene {
   private usernameInput?: HTMLInputElement;
   private passwordInput?: HTMLInputElement;
   private statusText?: Phaser.GameObjects.Text;
+  private clockSkewText?: Phaser.GameObjects.Text;
   private startButton?: HTMLButtonElement;
   private submitting = false;
   private resizeHandlers: Array<() => void> = [];
   private sponsorLogoEls: HTMLImageElement[] = [];
+
+  // Threshold (ms) above which a clock skew warning is shown. The server
+  // window is ±2s; we warn at ±1.5s so the banner appears before the
+  // user actually trips ts_out_of_window.
+  private static readonly CLOCK_SKEW_WARN_MS = 1500;
 
   private static readonly PANEL_WIDTH = 460;
   private static readonly PANEL_HEIGHT = 200;
@@ -204,14 +210,48 @@ export class MainMenu extends Phaser.Scene {
 
     this.drawSponsorsPanel(panelX, sponsorTop);
 
+    // Clock-skew warning. Hidden until we have a server-time sample
+    // (HTTP Date header from /api/login, or any S2C envelope). Sits
+    // directly under the login panel so it's the first thing the user
+    // notices when their clock is off — see issue #46.
+    this.clockSkewText = this.add
+      .text(contentX, panelY + 172, "", {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_SMALL,
+        color: hex(WARNING),
+        wordWrap: { width: MainMenu.INPUT_WIDTH },
+      })
+      .setVisible(false);
+
     const sync = getSync();
     sync.state.on("authOk", this.onAuthOk, this);
     sync.state.on("runStarted", this.onRunStarted, this);
     sync.state.on("error", this.onError, this);
+    sync.state.on("serverTime", this.refreshClockSkewBanner, this);
+    // Render once on entry in case a prior /api/login already populated
+    // serverOffsetMs before this scene mounted.
+    this.refreshClockSkewBanner();
 
     this.events.on("shutdown", this.cleanup, this);
 
     setTimeout(() => this.usernameInput?.focus(), 50);
+  }
+
+  private refreshClockSkewBanner(): void {
+    const t = this.clockSkewText;
+    if (!t) return;
+    const offset = getSync().state.serverOffsetMs;
+    if (offset === undefined || Math.abs(offset) < MainMenu.CLOCK_SKEW_WARN_MS) {
+      t.setVisible(false);
+      return;
+    }
+    const seconds = (offset / 1000).toFixed(1);
+    const direction = offset > 0 ? "behind" : "ahead of";
+    t.setText(
+      `⚠ Your clock is ~${Math.abs(Number(seconds))}s ${direction} the server. ` +
+        `Sync your system clock (NTP) — otherwise the server will reject your input mid-run.`,
+    );
+    t.setVisible(true);
   }
 
   /**
@@ -521,6 +561,18 @@ export class MainMenu extends Phaser.Scene {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
+      // Capture the HTTP Date header as a coarse server-time observation
+      // before the WS opens. 1-second resolution + RTT slop, but good
+      // enough to detect a multi-second clock drift and warn the user
+      // before C2S_AUTH would be rejected by the ±2s ts window.
+      const dateHeader = res.headers.get("Date");
+      if (dateHeader) {
+        const serverNow = Date.parse(dateHeader);
+        if (!Number.isNaN(serverNow)) {
+          getSync().state.setServerTime(serverNow);
+          this.refreshClockSkewBanner();
+        }
+      }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as {
           error?: string;
@@ -857,6 +909,7 @@ export class MainMenu extends Phaser.Scene {
     sync.state.off("authOk", this.onAuthOk, this);
     sync.state.off("runStarted", this.onRunStarted, this);
     sync.state.off("error", this.onError, this);
+    sync.state.off("serverTime", this.refreshClockSkewBanner, this);
 
     for (const fn of this.resizeHandlers) {
       window.removeEventListener("resize", fn);
