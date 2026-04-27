@@ -3,6 +3,7 @@ import { getSync } from "../net/runContext";
 import { CONTROL_BINDINGS } from "./utils/Controls";
 import {
   clearCachedPlayerId,
+  getCachedPlayerId,
   setCachedPlayerId,
 } from "../prefs";
 import { WS_URL } from "../constants";
@@ -72,17 +73,11 @@ export class MainMenu extends Phaser.Scene {
   private statusText?: Phaser.GameObjects.Text;
   private startButton?: HTMLButtonElement;
   private submitting = false;
-  // Authentication completed; player is in the queued state and a Space
-  // or Enter press should fire START_RUN. Used for the normal fresh-login
-  // flow; cached relogin uses the fullscreen ready prompt instead.
-  private queued = false;
   private promptAfterAuth = false;
   private resizeHandlers: Array<() => void> = [];
   private sponsorLogoEls: HTMLImageElement[] = [];
   private sponsorHoverRects: Phaser.GameObjects.Rectangle[] = [];
   private controlsTexts: Phaser.GameObjects.Text[] = [];
-  private spaceKey?: Phaser.Input.Keyboard.Key;
-  private enterKey?: Phaser.Input.Keyboard.Key;
 
   private static readonly PANEL_WIDTH = 460;
   private static readonly PANEL_HEIGHT = 200;
@@ -257,18 +252,15 @@ export class MainMenu extends Phaser.Scene {
     sync.state.on("runStarted", this.onRunStarted, this);
     sync.state.on("error", this.onError, this);
 
-    const kb = this.input.keyboard;
-    if (kb) {
-      this.spaceKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-      this.enterKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
-      this.spaceKey.on("down", this.onQueueKey, this);
-      this.enterKey.on("down", this.onQueueKey, this);
-    }
-
     this.events.on("shutdown", this.cleanup, this);
     this.events.on("resume", this.onResume, this);
 
-    setTimeout(() => this.usernameInput?.focus(), 50);
+    const cachedId = getCachedPlayerId();
+    if (cachedId) {
+      void this.resumeCachedSession(cachedId);
+    } else {
+      setTimeout(() => this.usernameInput?.focus(), 50);
+    }
   }
 
   /**
@@ -459,6 +451,23 @@ export class MainMenu extends Phaser.Scene {
       this.statusText?.setColor(hex(ERROR));
       return false;
     }
+  }
+
+  private async resumeCachedSession(playerId: string): Promise<void> {
+    this.hideLoginForm();
+    this.statusText?.setText("Resuming session...");
+    this.statusText?.setColor(hex(TEXT_MUTED));
+    this.submitting = true;
+    this.promptAfterAuth = true;
+
+    if (!(await this.connectForAuth())) {
+      this.submitting = false;
+      this.promptAfterAuth = false;
+      this.showLoginForm();
+      return;
+    }
+
+    getSync().sendAuth(playerId);
   }
 
   private hideLoginForm(): void {
@@ -760,7 +769,7 @@ export class MainMenu extends Phaser.Scene {
       // login + queue admission; pre-auth sockets can go idle behind the
       // queue and leave the client stuck with an unsent AUTH packet.
       setCachedPlayerId(body.player_id);
-      this.promptAfterAuth = true;
+      this.promptAfterAuth = !viaQueue;
       getSync().sendAuth(body.player_id);
     } catch (err) {
       console.error("[MainMenu] login failed", err);
@@ -768,39 +777,6 @@ export class MainMenu extends Phaser.Scene {
       this.statusText?.setColor(hex(ERROR));
       this.submitting = false;
     }
-  }
-
-  /**
-   * Space/Enter while in the queued state confirms the start. Fires
-   * START_RUN and waits for S2C_RUN_STARTED. Press while not queued is
-   * a no-op so the keys don't interfere with the login form.
-   */
-  private onQueueKey(): void {
-    if (!this.queued || this.submitting) return;
-    if (!this.connected) return;
-    const ae = document.activeElement;
-    if (ae && (ae === this.usernameInput || ae === this.passwordInput)) return;
-    this.startQueuedRun();
-  }
-
-  private startQueuedRun(): void {
-    this.submitting = true;
-    this.queued = false;
-    this.statusText?.setText("Starting run...");
-    this.statusText?.setColor(hex(TEXT_MUTED));
-    getSync().sendStartRun();
-  }
-
-  /**
-   * Fresh auth has succeeded but no run is running yet. Keep the queued
-   * confirmation state so the player explicitly starts the run.
-   */
-  private enterQueuedState(): void {
-    this.submitting = false;
-    this.queued = true;
-    this.hideLoginForm();
-    this.statusText?.setText("Press [ Space ] or [ Enter ] to play.");
-    this.statusText?.setColor(hex(SUCCESS));
   }
 
   /**
@@ -1059,7 +1035,10 @@ export class MainMenu extends Phaser.Scene {
       return;
     }
 
-    this.enterQueuedState();
+    this.statusText?.setText("Starting run...");
+    this.statusText?.setColor(hex(TEXT_MUTED));
+    this.submitting = true;
+    getSync().sendStartRun();
   }
 
   private onRunStarted(): void {
@@ -1078,7 +1057,6 @@ export class MainMenu extends Phaser.Scene {
     this.statusText?.setText(`Error: ${err.message}`);
     this.statusText?.setColor(hex(ERROR));
     this.submitting = false;
-    this.queued = false;
     this.promptAfterAuth = false;
   }
 
@@ -1088,15 +1066,6 @@ export class MainMenu extends Phaser.Scene {
     sync.state.off("runStarted", this.onRunStarted, this);
     sync.state.off("error", this.onError, this);
     this.events.off("resume", this.onResume, this);
-    if (this.spaceKey) {
-      this.spaceKey.off("down", this.onQueueKey, this);
-      this.spaceKey = undefined;
-    }
-    if (this.enterKey) {
-      this.enterKey.off("down", this.onQueueKey, this);
-      this.enterKey = undefined;
-    }
-
     for (const fn of this.resizeHandlers) {
       window.removeEventListener("resize", fn);
       this.scale.off("resize", fn);
@@ -1124,6 +1093,7 @@ export class MainMenu extends Phaser.Scene {
     // the next mount and silently swallow the first onStart click.
     // Reset to the fresh-instance defaults.
     this.submitting = false;
+    this.promptAfterAuth = false;
   }
 }
 
