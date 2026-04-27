@@ -27,7 +27,7 @@ import {
 } from "../fx";
 import { maybeRecordPB } from "../prefs";
 import { spawnPickupToast } from "../ui/PickupToast";
-import { BONE_WHITE, COIN_GOLD, HP_GREEN } from "../ui/tokens";
+import { BLOOD_RED, BONE_WHITE, COIN_GOLD, DEPTH_FX, HP_GREEN } from "../ui/tokens";
 import { WEAPON_STATS, weaponFromServerId } from "../weapons";
 import { RunOutcome as RunOutcomeValue } from "../../net/packet";
 import { createControls, type Controls } from "./utils/Controls";
@@ -82,6 +82,9 @@ export class Game extends Phaser.Scene {
   /** GameState captured at create() so cleanup detaches from the same
    *  instance, even after resetSync() swaps in a new sync/state. */
   private boundState?: GameState;
+  /** Red arrow rendered each tick from the player toward the nearest
+   *  unlocked door — appears when the room is cleared. */
+  private exitArrow?: Phaser.GameObjects.Graphics;
 
   constructor() {
     super({ key: "Game" });
@@ -112,6 +115,8 @@ export class Game extends Phaser.Scene {
     this.player = new Player(this, px, py);
     this.add.existing(this.player);
 
+    this.exitArrow = this.add.graphics().setDepth(DEPTH_FX).setVisible(false);
+
     this.boundState = sync.state;
     sync.state.on("state", this.onServerState, this);
     sync.state.on("roomLoad", this.onRoomLoad, this);
@@ -134,7 +139,58 @@ export class Game extends Phaser.Scene {
     for (const e of this.enemies.values()) e.tick(dt);
     for (const b of this.projectiles.values()) b.tick(dt);
 
+    this.updateExitArrow();
     this.handleInput(delta);
+  }
+
+  /**
+   * Draws a red arrow from the player toward the nearest unlocked door.
+   * The server populates `unlockedDoors` only after the room is cleared,
+   * so the arrow only appears once the level is done.
+   */
+  private updateExitArrow(): void {
+    const g = this.exitArrow;
+    if (!g || !this.player) return;
+    const unlocked = getSync().state.unlockedDoors;
+    if (unlocked.size === 0) {
+      g.setVisible(false);
+      return;
+    }
+    let bestDoor: DoorRef | undefined;
+    let bestDist = Infinity;
+    for (const [id, door] of this.doors) {
+      if (!unlocked.has(id)) continue;
+      const dx = door.x - this.player.x;
+      const dy = door.y - this.player.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestDist) {
+        bestDist = d2;
+        bestDoor = door;
+      }
+    }
+    if (!bestDoor) {
+      g.setVisible(false);
+      return;
+    }
+    const angle = Math.atan2(
+      bestDoor.y - this.player.y,
+      bestDoor.x - this.player.x,
+    );
+    const startOffset = 28;
+    const length = 36;
+    const headSize = 10;
+    const sx = this.player.x + Math.cos(angle) * startOffset;
+    const sy = this.player.y + Math.sin(angle) * startOffset;
+    const ex = sx + Math.cos(angle) * length;
+    const ey = sy + Math.sin(angle) * length;
+    g.clear();
+    g.setVisible(true);
+    g.lineStyle(4, BLOOD_RED, 1);
+    g.lineBetween(sx, sy, ex, ey);
+    const headA = angle + Math.PI - Math.PI / 6;
+    const headB = angle + Math.PI + Math.PI / 6;
+    g.lineBetween(ex, ey, ex + Math.cos(headA) * headSize, ey + Math.sin(headA) * headSize);
+    g.lineBetween(ex, ey, ex + Math.cos(headB) * headSize, ey + Math.sin(headB) * headSize);
   }
 
   private handleInput(delta: number): void {
@@ -561,6 +617,9 @@ export class Game extends Phaser.Scene {
     // Doors are tilemap tiles; the layer was destroyed via backgroundObjs above.
     this.doors.clear();
     this.wallsLayer = undefined;
+
+    this.exitArrow?.destroy();
+    this.exitArrow = undefined;
 
     this.player?.destroy();
     this.player = undefined;
