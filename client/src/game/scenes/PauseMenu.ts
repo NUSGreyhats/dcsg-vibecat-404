@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { resetSync } from "../net/runContext";
+import { CONTROL_BINDINGS } from "./utils/Controls";
 import {
   clearCachedPlayerId,
   isTimingsVisible,
@@ -26,20 +27,9 @@ import {
 type Page = "main" | "controls";
 
 type MainItem = {
-  key: "resume" | "toggleTimings" | "controls" | "restart" | "logout";
+  key: "resume" | "toggleTimings" | "controls" | "shop" | "restart" | "logout";
   label(): string;
 };
-
-// Single source of truth for the controls page. Mirrors the bindings
-// in scenes/utils/Controls.ts — keep in sync if a key is added there.
-const CONTROL_BINDINGS: ReadonlyArray<readonly [string, string]> = [
-  ["Move", "W A S D / Arrows"],
-  ["Aim", "Mouse"],
-  ["Shoot", "Left mouse button"],
-  ["Switch weapon", "1 / 2 / 3"],
-  ["Shop", "B"],
-  ["Menu", "Esc"],
-];
 
 const PANEL_WIDTH = 480;
 const PANEL_HEIGHT = 440;
@@ -97,6 +87,7 @@ export class PauseMenu extends Phaser.Scene {
           isTimingsVisible() ? "Hide Timings" : "Show Timings",
       },
       { key: "controls", label: () => "Controls" },
+      { key: "shop", label: () => "Shop" },
       { key: "restart", label: () => "Restart Run" },
       { key: "logout", label: () => "Log Out" },
     ];
@@ -116,10 +107,10 @@ export class PauseMenu extends Phaser.Scene {
 
     const kb = this.input.keyboard!;
     this.keys = {
-      up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
-      down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
-      enter: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER),
-      esc: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
+      up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP, false),
+      down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN, false),
+      enter: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER, false),
+      esc: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC, false),
     };
     this.keys.up.on("down", () => this.move(-1));
     this.keys.down.on("down", () => this.move(1));
@@ -263,6 +254,11 @@ export class PauseMenu extends Phaser.Scene {
       case "controls":
         this.page = "controls";
         this.renderPage();
+        return;
+      case "shop":
+        this.removeCanvasBlur();
+        this.scene.launch("ShopMenu");
+        this.scene.stop();
         return;
       case "restart":
         this.restart();

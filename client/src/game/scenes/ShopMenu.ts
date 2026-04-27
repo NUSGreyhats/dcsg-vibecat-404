@@ -65,9 +65,14 @@ export class ShopMenu extends Phaser.Scene {
     esc: Phaser.Input.Keyboard.Key;
     b: Phaser.Input.Keyboard.Key;
   };
+  private returnTo = "Game";
 
   constructor() {
     super({ key: "ShopMenu" });
+  }
+
+  init(data?: { returnTo?: string }): void {
+    this.returnTo = data?.returnTo ?? "Game";
   }
 
   create(): void {
@@ -119,11 +124,11 @@ export class ShopMenu extends Phaser.Scene {
 
     const kb = this.input.keyboard!;
     this.keys = {
-      up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
-      down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
-      enter: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER),
-      esc: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
-      b: kb.addKey(Phaser.Input.Keyboard.KeyCodes.B),
+      up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP, false),
+      down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN, false),
+      enter: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER, false),
+      esc: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC, false),
+      b: kb.addKey(Phaser.Input.Keyboard.KeyCodes.B, false),
     };
 
     this.keys.up.on("down", () => this.move(-1));
@@ -211,7 +216,7 @@ export class ShopMenu extends Phaser.Scene {
   }
 
   private close(): void {
-    this.scene.resume("Game");
+    this.scene.resume(this.returnTo);
     this.scene.stop();
   }
 

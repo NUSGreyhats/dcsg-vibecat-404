@@ -19,11 +19,11 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/greyhats/defcon-game/pkg/identity"
+	"github.com/greyhats/defcon-game/pkg/replayauth"
 	"github.com/greyhats/defcon-game/server/internal/auth"
 	"github.com/greyhats/defcon-game/server/internal/game"
 	"github.com/greyhats/defcon-game/server/internal/leaderboard"
 	"github.com/greyhats/defcon-game/server/internal/protocol"
-	"github.com/greyhats/defcon-game/pkg/replayauth"
 	"github.com/greyhats/defcon-game/server/internal/replay"
 	"github.com/greyhats/defcon-game/server/internal/spectator"
 )
@@ -160,7 +160,7 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
-	// Identity HTTP endpoints, /register, /api/leaderboard, and /api/replay/:id
+	// Identity HTTP endpoints, /api/leaderboard, and /api/replay/:id
 	// all live on the lobby service. The game server still imports
 	// pkg/identity for WS-time Lookup in authCheck above and writes to
 	// game.db via the leaderboard goroutine started below.
@@ -246,14 +246,32 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 	inCh := make(chan []byte, game.InChBuf)
 	outCh := make(chan protocol.S2CEnvelope, game.OutChBuf)
 
-	// lb is nil when LEADERBOARD_ENABLED=false. Engine guards on
-	// e.Submit != nil before submitting (see loop.go), so a nil
-	// callback safely turns the leaderboard pipeline off.
+	// lb is nil when LEADERBOARD_ENABLED=false. The engine's submit /
+	// register callbacks are all nil-checked (see loop.go), so leaving
+	// these fields unset cleanly turns the leaderboard pipeline off.
 	var submit func(*leaderboard.CompletedRun) bool
 	if lb != nil {
 		submit = lb.Submit
 	}
 	engine := game.NewEngine(inCh, outCh, submit, authCheck)
+	if lb != nil {
+		engine.SubmitAndRefresh = lb.SubmitAndRefresh
+		engine.RegisterLeaderboard = func(playerID string) {
+			lb.Register(playerID, outCh)
+			entries := lb.Top(leaderboard.TopBroadcastN)
+			if entries == nil {
+				return
+			}
+			select {
+			case outCh <- protocol.NewS2C(
+				protocol.S2CLeaderboard,
+				0,
+				protocol.LeaderboardData{Entries: entries},
+			):
+			default:
+			}
+		}
+	}
 	engine.Live = liveReg
 	engine.Engines = engineReg
 
@@ -270,6 +288,13 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 
 		engine.Run(connCtx)
 
+		if engine.PlayerID != "" {
+			if lb != nil {
+				lb.Unregister(engine.PlayerID)
+			}
+			liveReg.Remove(engine.PlayerID)
+		}
+
 		// Engine has emitted any final messages (notably RUN_COMPLETE on
 		// death). Close outCh so the writer drains the buffer instead of
 		// being killed mid-flush by conn.Close, then wait briefly for it
@@ -280,13 +305,6 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 		case <-time.After(500 * time.Millisecond):
 		}
 		conn.Close(websocket.StatusNormalClosure, "bye")
-
-		if engine.PlayerID != "" {
-			if lb != nil {
-				lb.Unregister(engine.PlayerID)
-			}
-			liveReg.Remove(engine.PlayerID)
-		}
 	}()
 }
 

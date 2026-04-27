@@ -181,7 +181,6 @@ func main() {
 
 	mux := http.NewServeMux()
 	identitySvc.Register(mux)
-	mux.HandleFunc("/register", serveRegisterPage)
 	mux.HandleFunc("/leaderboard", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -409,7 +408,7 @@ func main() {
 
 	// /source.tar.gz streams the stripped tarball baked into the image
 	// at build time by the strip stage in lobby/Dockerfile (linked from
-	// the nav bar of /register, /leaderboard, /spectate, /admin/, so no
+	// the nav bar of /leaderboard, /spectate, /admin/, so no
 	// dedicated landing page). Players download once and browse the
 	// tree locally; no per-file HTTP traversal, no index.html
 	// collisions with the stripped client/index.html, no surprise SPA
