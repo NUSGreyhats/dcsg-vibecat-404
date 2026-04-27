@@ -61,6 +61,15 @@ func validPlayerID(s string) bool {
 	return playerIDPattern.MatchString(s)
 }
 
+func containsReplay(entries []leaderboard.Entry, replayID string) bool {
+	for _, entry := range entries {
+		if entry.ReplayID == replayID {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
@@ -202,27 +211,65 @@ func main() {
 			http.Error(w, "leaderboard disabled", http.StatusServiceUnavailable)
 			return
 		}
-		limit := 10
+		limit := 20
 		if v := r.URL.Query().Get("limit"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
 				limit = n
+			}
+		}
+		pageNum := 1
+		if v := r.URL.Query().Get("page"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				pageNum = n
 			}
 		}
 		dedupe := true
 		if v := r.URL.Query().Get("dedupe"); v == "0" || v == "false" {
 			dedupe = false
 		}
-		entries, err := leaderboard.TopRuns(gameDB, limit, dedupe)
+		playerID := r.URL.Query().Get("player_id")
+		if !validPlayerID(playerID) {
+			playerID = ""
+		}
+		page, err := leaderboard.PageRuns(gameDB, limit, pageNum, dedupe, playerID)
 		if err != nil {
 			log.Printf("leaderboard: top: %v", err)
 			http.Error(w, "leaderboard unavailable", http.StatusInternalServerError)
 			return
 		}
-		if entries == nil {
-			entries = []leaderboard.Entry{}
+		if page.Entries == nil {
+			page.Entries = []leaderboard.Entry{}
+		}
+		var currentPlayer *leaderboard.Entry
+		if playerID != "" {
+			entry, err := leaderboard.PlayerBestRun(gameDB, playerID, dedupe)
+			if err != nil && !errors.Is(err, leaderboard.ErrNotFound) {
+				log.Printf("leaderboard: player %s: %v", playerID, err)
+				http.Error(w, "leaderboard unavailable", http.StatusInternalServerError)
+				return
+			}
+			if err == nil && pageNum == 1 && entry.Rank > limit && !containsReplay(page.Entries, entry.ReplayID) {
+				currentPlayer = entry
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"entries": entries})
+		_ = json.NewEncoder(w).Encode(struct {
+			Entries       []leaderboard.Entry `json:"entries"`
+			CurrentPlayer *leaderboard.Entry  `json:"current_player,omitempty"`
+			Page          int                 `json:"page"`
+			Limit         int                 `json:"limit"`
+			Total         int                 `json:"total"`
+			HasPrev       bool                `json:"has_prev"`
+			HasNext       bool                `json:"has_next"`
+		}{
+			Entries:       page.Entries,
+			CurrentPlayer: currentPlayer,
+			Page:          page.Page,
+			Limit:         page.Limit,
+			Total:         page.Total,
+			HasPrev:       page.HasPrev,
+			HasNext:       page.HasNext,
+		})
 	})
 	mux.HandleFunc("/spectate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
