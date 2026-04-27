@@ -3,15 +3,16 @@ package leaderboard
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"sync"
 
 	"github.com/greyhats/defcon-game/server/internal/protocol"
 )
 
-// topBroadcastN is the number of leaderboard entries broadcast on
+// TopBroadcastN is the number of leaderboard entries broadcast on
 // S2C_LEADERBOARD. Lobby serves the full list via HTTP.
-const topBroadcastN = 10
+const TopBroadcastN = 10
 
 // Service owns game.db and the leaderboard goroutine. All inserts funnel
 // through Submit → inCh → run().
@@ -19,16 +20,27 @@ const topBroadcastN = 10
 // See docs/specs/foundations/08-leaderboard-replay.md.
 type Service struct {
 	db       *sql.DB
-	inCh     chan *CompletedRun
+	inCh     chan submitReq
 	mu       sync.RWMutex
 	outChans map[string]chan<- protocol.S2CEnvelope
+}
+
+type submitReq struct {
+	run    *CompletedRun
+	result chan SubmitResult
+}
+
+type SubmitResult struct {
+	Entries []protocol.LeaderboardEntry
+	Rank    int
+	Err     error
 }
 
 // NewService constructs a Service around an already-opened DB.
 func NewService(db *sql.DB) *Service {
 	return &Service{
 		db:       db,
-		inCh:     make(chan *CompletedRun, 128),
+		inCh:     make(chan submitReq, 128),
 		outChans: make(map[string]chan<- protocol.S2CEnvelope),
 	}
 }
@@ -42,11 +54,24 @@ func (s *Service) Start(ctx context.Context) {
 // if the channel is full.
 func (s *Service) Submit(run *CompletedRun) bool {
 	select {
-	case s.inCh <- run:
+	case s.inCh <- submitReq{run: run}:
 		return true
 	default:
 		return false
 	}
+}
+
+// SubmitAndRefresh inserts run, refreshes the broadcast top list, and returns
+// the submitted run's rank. It is still serialized through the leaderboard
+// goroutine, so DB ownership stays identical to Submit.
+func (s *Service) SubmitAndRefresh(run *CompletedRun) SubmitResult {
+	result := make(chan SubmitResult, 1)
+	select {
+	case s.inCh <- submitReq{run: run, result: result}:
+	default:
+		return SubmitResult{Err: fmt.Errorf("leaderboard: submit queue full")}
+	}
+	return <-result
 }
 
 // Register adds a player's broadcast channel. The player gameLoop sends
@@ -83,25 +108,40 @@ func (s *Service) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case run, ok := <-s.inCh:
+		case req, ok := <-s.inCh:
 			if !ok {
 				return
 			}
-			if run == nil {
-				continue
+			result := s.handleSubmit(req.run)
+			if req.result != nil {
+				req.result <- result
 			}
-			if err := InsertRun(s.db, run); err != nil {
-				log.Printf("leaderboard: insert run %s: %v", run.ReplayID, err)
-				continue
+			if result.Err == nil {
+				s.broadcast(result.Entries)
 			}
-			entries, err := TopRuns(s.db, topBroadcastN)
-			if err != nil {
-				log.Printf("leaderboard: refresh top: %v", err)
-				continue
-			}
-			s.broadcast(entries)
 		}
 	}
+}
+
+func (s *Service) handleSubmit(run *CompletedRun) SubmitResult {
+	if run == nil {
+		return SubmitResult{Err: fmt.Errorf("leaderboard: nil run")}
+	}
+	if err := InsertRun(s.db, run); err != nil {
+		log.Printf("leaderboard: insert run %s: %v", run.ReplayID, err)
+		return SubmitResult{Err: err}
+	}
+	entries, err := TopRuns(s.db, TopBroadcastN)
+	if err != nil {
+		log.Printf("leaderboard: refresh top: %v", err)
+		return SubmitResult{Err: err}
+	}
+	rank, err := RankOfRun(s.db, run.ReplayID)
+	if err != nil {
+		log.Printf("leaderboard: rank run %s: %v", run.ReplayID, err)
+		return SubmitResult{Err: err}
+	}
+	return SubmitResult{Entries: entries, Rank: rank}
 }
 
 // broadcast sends an S2C_LEADERBOARD envelope to every registered outCh,
