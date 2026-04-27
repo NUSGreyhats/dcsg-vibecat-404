@@ -599,12 +599,9 @@ func handleReplayWS(parent context.Context, w http.ResponseWriter, r *http.Reque
 		}
 	}()
 
-	// Player goroutine: drives the engine; closes player.OutCh on exit.
-	playerDone := make(chan struct{})
-	go func() {
-		defer close(playerDone)
-		player.Run(connCtx)
-	}()
+	// Player goroutine: drives the engine; closes player.OutCh on exit,
+	// which the writer below uses as its termination signal.
+	go player.Run(connCtx)
 
 	// Writer: drain player.OutCh → WS. Owns the cleanup (cap release,
 	// WS close, ctx cancel). When player.OutCh closes, we wait briefly
@@ -626,7 +623,6 @@ func handleReplayWS(parent context.Context, w http.ResponseWriter, r *http.Reque
 					case <-time.After(game.SpectatorCatchupGrace):
 					case <-connCtx.Done():
 					}
-					_ = playerDone
 					return
 				}
 				raw, err := json.Marshal(env)

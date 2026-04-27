@@ -242,7 +242,7 @@ All three new endpoints sit under `/admin/replay/...` and are gated by the exist
 
 `input_log` and `checksum` are **not** returned by `/meta` — those stay on the `/admin/replay/:id` JSON download so a typo in admin-panel JS can't accidentally exfiltrate input logs into the browser DOM of every page that fetches the metadata.
 
-`/admin/replay/:id/meta` and `/admin/replay/:id/ticket` both call `leaderboard.GetReplay` and respect its `ErrNotFound` (404) and `ErrChecksumMismatch` (500 with `REPLAY_INTEGRITY_FAILED`) outcomes.
+`/admin/replay/:id/meta` calls `leaderboard.GetReplayMeta` and only maps `ErrNotFound` to 404; it does **not** verify the replay checksum (the metadata projection is read-only display fodder, not the integrity-bearing payload). `/admin/replay/:id/ticket` and the raw `/admin/replay/:id` JSON download call `leaderboard.GetReplay`, enforce checksum verification, and therefore can return either `ErrNotFound` (404) or `ErrChecksumMismatch` (500 with `REPLAY_INTEGRITY_FAILED`).
 
 ### Caps and configuration
 
@@ -266,6 +266,6 @@ This is acceptable because BUG-11 is bounded and the visual difference (a corrup
 - [05-server-runtime.md](./05-server-runtime.md) — `completedRunCh`, leaderboard goroutine.
 - [06-game-state-conventions.md](./06-game-state-conventions.md) — `InputLog`, `Splits`, `Seed`.
 - [07-determinism-seeding.md](./07-determinism-seeding.md) — RNG consumption invariant replay depends on.
-- [04-lobby.md](./04-lobby.md) — public `/api/leaderboard` endpoint + admin-only `/admin/replay/:replay_id` + new public `/api/replay/:id/meta`.
+- [04-lobby.md](./04-lobby.md) — public `/api/leaderboard` endpoint + admin-only `/admin/replay/:replay_id`, `/admin/replay/:id/meta`, and `/admin/replay/:id/ticket`.
 - [../client/11-replay-viewer.md](../client/11-replay-viewer.md) — replay viewer client (third Phaser bundle).
 - [../features/shop.md](../features/shop.md) — coin drops, BUG-12 `claimed_type` reproducibility.

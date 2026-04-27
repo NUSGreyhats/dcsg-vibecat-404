@@ -158,6 +158,20 @@ func (p *Player) runOnce(parent context.Context) bool {
 	p.paused = false
 	p.restart = false
 
+	// Drain any commands queued before this run started. Without this, a
+	// Restart triggered while pause/set_speed commands were still buffered
+	// would carry the stale state into the fresh play-through (e.g. the
+	// new run starts paused or at last run's speed). Every play-through
+	// starts at 1.0× and unpaused; the user must re-issue intent.
+drainCmds:
+	for {
+		select {
+		case <-p.cmdCh:
+		default:
+			break drainCmds
+		}
+	}
+
 	inCh := make(chan []byte, game.InChBuf)
 	outCh := make(chan protocol.S2CEnvelope, game.OutChBuf)
 	p.activeInCh = inCh
