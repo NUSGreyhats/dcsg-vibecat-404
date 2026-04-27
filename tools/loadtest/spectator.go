@@ -42,7 +42,9 @@ func runSpectator(ctx context.Context, cfg config, m *metrics, playerID string) 
 	for {
 		_, raw, err := conn.Read(ctx)
 		if err != nil {
-			m.disconnects.Add(1)
+			if !isExpectedClose(ctx, err) {
+				m.disconnects.Add(1)
+			}
 			return
 		}
 		m.bytesReceived.Add(int64(len(raw)))
@@ -66,7 +68,6 @@ func runSpectator(ctx context.Context, cfg config, m *metrics, playerID string) 
 			}
 		case s2cRunComplete:
 			m.runComplete.Add(1)
-			m.otherRecv.Add(1)
 		default:
 			m.otherRecv.Add(1)
 		}

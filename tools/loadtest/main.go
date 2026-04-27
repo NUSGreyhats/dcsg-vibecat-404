@@ -25,16 +25,16 @@ import (
 )
 
 type config struct {
-	serverURL          string
-	players            int
-	spectatorsPerGame  int
-	rampDuration       time.Duration
-	testDuration       time.Duration
-	inputHz            int
-	noShoot            bool
-	playerIDPrefix     string
-	reportInterval     time.Duration
-	spectatorStartLag  time.Duration
+	serverURL         string
+	players           int
+	spectatorsPerGame int
+	rampDuration      time.Duration
+	testDuration      time.Duration
+	inputHz           int
+	noShoot           bool
+	playerIDPrefix    string
+	reportInterval    time.Duration
+	spectatorStartLag time.Duration
 }
 
 func parseFlags() config {
@@ -90,14 +90,21 @@ func main() {
 		stride = cfg.rampDuration / time.Duration(cfg.players)
 	}
 
+rampLoop:
 	for i, pid := range playerIDs {
-		select {
-		case <-deadline.Done():
-			break
-		default:
+		if delay := time.Duration(i) * stride; delay > 0 {
+			select {
+			case <-deadline.Done():
+				break rampLoop
+			case <-time.After(delay):
+			}
+		} else {
+			select {
+			case <-deadline.Done():
+				break rampLoop
+			default:
+			}
 		}
-		launch := time.After(time.Duration(i) * stride)
-		<-launch
 		pid := pid
 		wg.Add(1)
 		go func() {

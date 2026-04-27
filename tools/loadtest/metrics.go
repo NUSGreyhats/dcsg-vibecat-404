@@ -51,35 +51,35 @@ func (m *metrics) recordReject(reason string) {
 type snapshot struct {
 	t time.Time
 
-	connAttempts, connOK, connFail int64
-	authFail, dialFail, httpReject int64
+	connAttempts, connOK, connFail  int64
+	authFail, dialFail, httpReject  int64
 	stateRecv, otherRecv, errorRecv int64
 	runComplete, disconnects        int64
 	bytesReceived                   int64
 
-	playerGapP50, playerGapP95, playerGapP99       float64
+	playerGapP50, playerGapP95, playerGapP99          float64
 	spectatorGapP50, spectatorGapP95, spectatorGapP99 float64
-	playerGapSamples, spectatorGapSamples          int
+	playerGapSamples, spectatorGapSamples             int
 
 	rejectReasons map[string]int64
 }
 
 func (m *metrics) snapshot() snapshot {
 	s := snapshot{
-		t:               time.Now(),
-		connAttempts:    m.connAttempts.Load(),
-		connOK:          m.connOK.Load(),
-		connFail:        m.connFail.Load(),
-		authFail:        m.authFail.Load(),
-		dialFail:        m.dialFail.Load(),
-		httpReject:      m.httpReject.Load(),
-		stateRecv:       m.stateRecv.Load(),
-		otherRecv:       m.otherRecv.Load(),
-		errorRecv:       m.errorRecv.Load(),
-		runComplete:     m.runComplete.Load(),
-		disconnects:     m.disconnects.Load(),
-		bytesReceived:   m.bytesReceived.Load(),
-		rejectReasons:   map[string]int64{},
+		t:             time.Now(),
+		connAttempts:  m.connAttempts.Load(),
+		connOK:        m.connOK.Load(),
+		connFail:      m.connFail.Load(),
+		authFail:      m.authFail.Load(),
+		dialFail:      m.dialFail.Load(),
+		httpReject:    m.httpReject.Load(),
+		stateRecv:     m.stateRecv.Load(),
+		otherRecv:     m.otherRecv.Load(),
+		errorRecv:     m.errorRecv.Load(),
+		runComplete:   m.runComplete.Load(),
+		disconnects:   m.disconnects.Load(),
+		bytesReceived: m.bytesReceived.Load(),
+		rejectReasons: map[string]int64{},
 	}
 	pSamples := m.playerGap.snapshot()
 	sSamples := m.spectatorGap.snapshot()

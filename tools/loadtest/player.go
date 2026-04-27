@@ -117,7 +117,9 @@ func readPlayerLoop(ctx context.Context, conn *websocket.Conn, m *metrics) {
 	for {
 		_, raw, err := conn.Read(ctx)
 		if err != nil {
-			m.disconnects.Add(1)
+			if !isExpectedClose(ctx, err) {
+				m.disconnects.Add(1)
+			}
 			return
 		}
 		m.bytesReceived.Add(int64(len(raw)))
@@ -141,11 +143,27 @@ func readPlayerLoop(ctx context.Context, conn *websocket.Conn, m *metrics) {
 			}
 		case s2cRunComplete:
 			m.runComplete.Add(1)
-			m.otherRecv.Add(1)
 		default:
 			m.otherRecv.Add(1)
 		}
 	}
+}
+
+// isExpectedClose returns true when a WS read error reflects normal
+// teardown — context cancellation, the test deadline expiring, or a
+// clean close from the peer — rather than an unexpected disconnect.
+func isExpectedClose(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	switch websocket.CloseStatus(err) {
+	case websocket.StatusNormalClosure, websocket.StatusGoingAway:
+		return true
+	}
+	return false
 }
 
 func writeC2S(ctx context.Context, conn *websocket.Conn, typ uint8, seq uint32, data any) error {
