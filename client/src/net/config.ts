@@ -2,7 +2,7 @@
 // Fetched once at boot (see main.ts) so scenes can synchronously read
 // feature flags without waiting on a network round-trip mid-render.
 //
-// Spec: docs/specs/foundations/04-lobby.md (#api-config).
+// Spec: docs/specs/foundations/04-lobby.md.
 
 export type ClientConfig = {
   leaderboard_enabled: boolean;
