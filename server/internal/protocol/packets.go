@@ -66,6 +66,12 @@ type DoorDef struct {
 	Y          float32 `json:"y"`
 	TargetRoom uint8   `json:"target_room"`
 	Locked     bool    `json:"locked"`
+	// Tile coords + unlocked-variant GID let the client swap the tile
+	// sprite on the Walls tilemap layer when the room clears, without a
+	// separate Door GameObject.
+	TileX       int `json:"tile_x"`
+	TileY       int `json:"tile_y"`
+	UnlockedGID int `json:"unlocked_gid"`
 }
 
 type RoomData struct {
@@ -177,6 +183,13 @@ type ErrorData struct {
 
 type DoorUnlockedData struct {
 	DoorID uint32 `json:"door_id"`
+	// Tile coords + unlocked GID so the client can swap the rendered
+	// tile on the Walls tilemap layer. Same fields as DoorDef — kept
+	// here too so a late-joining spectator (or a client that missed the
+	// initial RoomData) can reconcile from this single message alone.
+	TileX       int `json:"tile_x"`
+	TileY       int `json:"tile_y"`
+	UnlockedGID int `json:"unlocked_gid"`
 }
 
 type EntityDiedData struct {

@@ -7,8 +7,8 @@ const (
 	TickDuration      = 50 * time.Millisecond
 	RoomWidth         = 1280
 	RoomHeight        = 768
-	FinalRoom   uint8 = 11
-	BossRoom    uint8 = 11
+	FinalRoom   uint8 = 10
+	BossRoom    uint8 = 10
 
 	SwapCooldownMs = 400
 

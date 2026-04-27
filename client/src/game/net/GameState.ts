@@ -156,9 +156,20 @@ export class GameState extends Phaser.Events.EventEmitter {
         break;
       }
       case S2CType.DOOR_UNLOCKED: {
-        const data = envelope.data as { door_id: number };
+        const data = envelope.data as {
+          door_id: number;
+          tile_x: number;
+          tile_y: number;
+          unlocked_gid: number;
+        };
         this.unlockedDoors.add(data.door_id);
-        this.emit("doorUnlocked", data.door_id);
+        this.emit(
+          "doorUnlocked",
+          data.door_id,
+          data.tile_x,
+          data.tile_y,
+          data.unlocked_gid,
+        );
         break;
       }
       case S2CType.ENTITY_DIED: {

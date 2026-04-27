@@ -11,11 +11,11 @@ import { Player } from "../entities/Player";
 import { Enemy } from "../entities/Enemy";
 import { Bullet } from "../entities/Bullet";
 import { Pickup } from "../entities/Pickup";
-import { Door } from "../entities/Door";
 import {
   paintRoomBackground,
   buildRoom,
   type BuiltRoom,
+  type DoorRef,
 } from "../world/roomLayout";
 import {
   cameraShake,
@@ -27,7 +27,7 @@ import {
 } from "../fx";
 import { maybeRecordPB } from "../prefs";
 import { spawnPickupToast } from "../ui/PickupToast";
-import { BONE_WHITE, COIN_GOLD, HP_GREEN } from "../ui/tokens";
+import { BLOOD_RED, BONE_WHITE, COIN_GOLD, DEPTH_FX, HP_GREEN } from "../ui/tokens";
 import { WEAPON_STATS, weaponFromServerId } from "../weapons";
 import { RunOutcome as RunOutcomeValue } from "../../net/packet";
 import { createControls, type Controls } from "./utils/Controls";
@@ -58,8 +58,11 @@ export class Game extends Phaser.Scene {
   enemies: Map<number, Enemy> = new Map();
   projectiles: Map<number, Bullet> = new Map();
   pickups: Map<number, Pickup> = new Map();
-  doors: Map<number, Door> = new Map();
+  doors: Map<number, DoorRef> = new Map();
   backgroundObjs: Phaser.GameObjects.GameObject[] = [];
+  /** Walls tile layer for the current room, when the room has a tilemap.
+   *  Used to swap door tile sprites on S2C_DOOR_UNLOCKED. */
+  private wallsLayer?: Phaser.Tilemaps.TilemapLayer;
   controls!: Controls;
   inputSendAcc = 0;
   private nextShootAt = 0;
@@ -79,6 +82,9 @@ export class Game extends Phaser.Scene {
   /** GameState captured at create() so cleanup detaches from the same
    *  instance, even after resetSync() swaps in a new sync/state. */
   private boundState?: GameState;
+  /** Red arrow rendered each tick from the player toward the nearest
+   *  unlocked door — appears when the room is cleared. */
+  private exitArrow?: Phaser.GameObjects.Graphics;
 
   constructor() {
     super({ key: "Game" });
@@ -96,7 +102,9 @@ export class Game extends Phaser.Scene {
       return;
     }
 
-    this.backgroundObjs = paintRoomBackground(this, roomData);
+    const painted = paintRoomBackground(this, roomData);
+    this.backgroundObjs = painted.created;
+    this.wallsLayer = painted.wallsLayer;
     const built = buildRoom(this, roomData);
     this.enemies = built.enemies;
     this.pickups = built.pickups;
@@ -106,6 +114,8 @@ export class Game extends Phaser.Scene {
     const py = sync.state.player?.y ?? ROOM_HEIGHT - 100;
     this.player = new Player(this, px, py);
     this.add.existing(this.player);
+
+    this.exitArrow = this.add.graphics().setDepth(DEPTH_FX).setVisible(false);
 
     this.boundState = sync.state;
     sync.state.on("state", this.onServerState, this);
@@ -129,7 +139,79 @@ export class Game extends Phaser.Scene {
     for (const e of this.enemies.values()) e.tick(dt);
     for (const b of this.projectiles.values()) b.tick(dt);
 
+    this.updateExitArrow();
     this.handleInput(delta);
+  }
+
+  /**
+   * Draws a red arrow from the player toward the nearest unlocked door.
+   * The server populates `unlockedDoors` only after the room is cleared,
+   * so the arrow only appears once the level is done.
+   */
+  /**
+   * Server-confirmed shot fx. Fires once per new player-owned projectile
+   * we see, so muzzle flash and camera shake never play for shots the
+   * server rejected (out-of-window timestamps, ammo races, etc).
+   */
+  private playerProjectileSpawned(snap: ProjSnapshot): void {
+    if (!this.player) return;
+    const sp = getSync().state.player;
+    if (!sp) return;
+    const id = weaponFromServerId(sp.weapon_id);
+    const fx = WEAPON_FX[id];
+    const barrelLen = 22;
+    const bx = this.player.x + Math.cos(snap.angle) * barrelLen;
+    const by = this.player.y + Math.sin(snap.angle) * barrelLen;
+    spawnMuzzleFlash(this, bx, by, snap.angle, {
+      length: fx.muzzleLength,
+      thickness: fx.muzzleThickness,
+    });
+    cameraShake(this, fx.shakeMs, fx.shakeIntensity);
+  }
+
+  private updateExitArrow(): void {
+    const g = this.exitArrow;
+    if (!g || !this.player) return;
+    const unlocked = getSync().state.unlockedDoors;
+    if (unlocked.size === 0) {
+      g.setVisible(false);
+      return;
+    }
+    let bestDoor: DoorRef | undefined;
+    let bestDist = Infinity;
+    for (const [id, door] of this.doors) {
+      if (!unlocked.has(id)) continue;
+      const dx = door.x - this.player.x;
+      const dy = door.y - this.player.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestDist) {
+        bestDist = d2;
+        bestDoor = door;
+      }
+    }
+    if (!bestDoor) {
+      g.setVisible(false);
+      return;
+    }
+    const angle = Math.atan2(
+      bestDoor.y - this.player.y,
+      bestDoor.x - this.player.x,
+    );
+    const startOffset = 28;
+    const length = 36;
+    const headSize = 10;
+    const sx = this.player.x + Math.cos(angle) * startOffset;
+    const sy = this.player.y + Math.sin(angle) * startOffset;
+    const ex = sx + Math.cos(angle) * length;
+    const ey = sy + Math.sin(angle) * length;
+    g.clear();
+    g.setVisible(true);
+    g.lineStyle(4, BLOOD_RED, 1);
+    g.lineBetween(sx, sy, ex, ey);
+    const headA = angle + Math.PI - Math.PI / 6;
+    const headB = angle + Math.PI + Math.PI / 6;
+    g.lineBetween(ex, ey, ex + Math.cos(headA) * headSize, ey + Math.sin(headA) * headSize);
+    g.lineBetween(ex, ey, ex + Math.cos(headB) * headSize, ey + Math.sin(headB) * headSize);
   }
 
   private handleInput(delta: number): void {
@@ -162,18 +244,10 @@ export class Game extends Phaser.Scene {
           const stacks = sp.fire_rate_stacks ?? 0;
           this.nextShootAt = now + baseCd / rateMult / (1 + 0.1 * stacks);
 
-          // Muzzle flash + camera shake fire on every shot. The
-          // nextShootAt gate above already throttles this — no
-          // separate fx cooldown needed.
-          const fx = WEAPON_FX[id];
-          const barrelLen = 22;
-          const bx = this.player.x + Math.cos(angle) * barrelLen;
-          const by = this.player.y + Math.sin(angle) * barrelLen;
-          spawnMuzzleFlash(this, bx, by, angle, {
-            length: fx.muzzleLength,
-            thickness: fx.muzzleThickness,
-          });
-          cameraShake(this, fx.shakeMs, fx.shakeIntensity);
+          // Muzzle flash + camera shake fire when the server confirms
+          // the shot — see playerProjectileSpawned() below. Firing them
+          // locally would mislead the player on rejected packets (out
+          // of window, ammo race, etc).
         }
       }
     } else {
@@ -196,10 +270,15 @@ export class Game extends Phaser.Scene {
         sync.sendInteract(nearest.id, nearest.type);
       }
 
+      // Door radius: door center sits at the top wall (y≈16); the
+      // player can only get to ~y=44 before the wall blocks them, so a
+      // tight 28-px radius required pixel-perfect horizontal alignment.
+      // 56 px (≈1.75 tiles) gives ~36 px of horizontal slack while still
+      // requiring the player to walk up to the wall.
       const doorId = this.nearestUnlockedDoorId(
         this.player.x,
         this.player.y,
-        28,
+        56,
       );
       if (doorId !== null && !this.requestedDoorIds.has(doorId)) {
         this.requestedDoorIds.add(doorId);
@@ -258,6 +337,7 @@ export class Game extends Phaser.Scene {
         bullet = new Bullet(this, p);
         this.add.existing(bullet);
         this.projectiles.set(p.proj_id, bullet);
+        if (p.owner === 0) this.playerProjectileSpawned(p);
       }
       bullet.applySnapshot(p);
     }
@@ -320,13 +400,17 @@ export class Game extends Phaser.Scene {
     this.projectiles.clear();
     for (const p of this.pickups.values()) p.destroy();
     this.pickups.clear();
-    for (const d of this.doors.values()) d.destroy();
+    // Doors are tile entries on the Walls tilemap layer (torn down with
+    // the rest of the tilemap below) — just clear the lookup map.
     this.doors.clear();
+    this.wallsLayer = undefined;
     this.requestedPickupIds.clear();
     this.requestedDoorIds.clear();
 
     // Rebuild with the new room data.
-    this.backgroundObjs = paintRoomBackground(this, room);
+    const painted = paintRoomBackground(this, room);
+    this.backgroundObjs = painted.created;
+    this.wallsLayer = painted.wallsLayer;
     const built: BuiltRoom = buildRoom(this, room);
     this.enemies = built.enemies;
     this.pickups = built.pickups;
@@ -341,8 +425,16 @@ export class Game extends Phaser.Scene {
     }
   }
 
-  private onDoorUnlocked(doorId: number): void {
-    this.doors.get(doorId)?.setUnlocked(true);
+  private onDoorUnlocked(
+    _doorId: number,
+    tileX: number,
+    tileY: number,
+    unlockedGid: number,
+  ): void {
+    // Swap the locked-door tile sprite for its unlocked variant. The
+    // door's collision/proximity behaviour is driven from the server's
+    // unlockedDoors set — this is purely visual.
+    this.wallsLayer?.putTileAt(unlockedGid, tileX, tileY, true);
     this.game.events.emit("doorUnlockedToast", getSync().state.currentRoom ?? 1);
   }
 
@@ -536,8 +628,12 @@ export class Game extends Phaser.Scene {
     this.projectiles.clear();
     for (const p of this.pickups.values()) p.destroy();
     this.pickups.clear();
-    for (const d of this.doors.values()) d.destroy();
+    // Doors are tilemap tiles; the layer was destroyed via backgroundObjs above.
     this.doors.clear();
+    this.wallsLayer = undefined;
+
+    this.exitArrow?.destroy();
+    this.exitArrow = undefined;
 
     this.player?.destroy();
     this.player = undefined;

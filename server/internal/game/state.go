@@ -159,10 +159,12 @@ type PickupState struct {
 }
 
 type DoorState struct {
-	DoorID     uint32
-	X, Y       float32
-	TargetRoom uint8
-	Unlocked   bool
+	DoorID       uint32
+	X, Y         float32
+	TargetRoom   uint8
+	Unlocked     bool
+	TileX, TileY int
+	UnlockedGID  int
 }
 
 type RoomState struct {

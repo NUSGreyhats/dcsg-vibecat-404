@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<tileset version="1.10" tiledversion="1.12.1" name="defcon_tileset" tilewidth="32" tileheight="32" tilecount="132" columns="12">
+<tileset version="1.10" tiledversion="1.11.2" name="defcon_tileset" tilewidth="32" tileheight="32" tilecount="228" columns="12">
  <editorsettings>
   <export target="defcon_tileset.tsj" format="json"/>
  </editorsettings>
- <image source="tilemap.png" width="384" height="352"/>
+ <image source="tilemap.png" width="384" height="608"/>
  <tile id="0" type="ground">
   <properties>
    <property name="collides" type="bool" value="false"/>
@@ -177,6 +177,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="25" type="hole">
@@ -184,6 +185,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="26" type="hole">
@@ -191,6 +193,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="27" type="hole">
@@ -198,6 +201,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="28" type="hole">
@@ -205,6 +209,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="29" type="hole">
@@ -212,6 +217,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="30" type="hole">
@@ -219,6 +225,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="31" type="hole">
@@ -226,6 +233,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="32" type="hole">
@@ -233,6 +241,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="33" type="hole">
@@ -240,6 +249,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="34" type="hole">
@@ -247,6 +257,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="35" type="hole">
@@ -254,6 +265,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="36" type="hole">
@@ -261,6 +273,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="37" type="hole">
@@ -268,6 +281,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="38" type="hole">
@@ -275,6 +289,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="39" type="hole">
@@ -282,6 +297,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="40" type="hole">
@@ -289,6 +305,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="41" type="hole">
@@ -296,6 +313,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="42" type="hole">
@@ -303,6 +321,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="43" type="hole">
@@ -310,6 +329,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="44" type="hole">
@@ -317,6 +337,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="45" type="hole">
@@ -324,6 +345,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="46" type="hole">
@@ -331,6 +353,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="47" type="hole">
@@ -338,6 +361,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="48" type="hole">
@@ -345,6 +369,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="49" type="hole">
@@ -352,6 +377,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="50" type="hole">
@@ -359,6 +385,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="51" type="hole">
@@ -366,6 +393,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="52" type="hole">
@@ -373,6 +401,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="53" type="hole">
@@ -380,6 +409,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="54" type="hole">
@@ -387,6 +417,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="55" type="hole">
@@ -394,6 +425,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="56" type="hole">
@@ -401,6 +433,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="57" type="hole">
@@ -408,6 +441,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="58" type="hole">
@@ -415,6 +449,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="59" type="hole">
@@ -422,6 +457,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="60" type="hole">
@@ -429,6 +465,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="61" type="hole">
@@ -436,6 +473,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="62" type="hole">
@@ -443,6 +481,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="63" type="hole">
@@ -450,6 +489,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="64" type="hole">
@@ -457,6 +497,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="65" type="hole">
@@ -464,6 +505,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="66" type="hole">
@@ -471,6 +513,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="67" type="hole">
@@ -478,6 +521,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="68" type="hole">
@@ -485,6 +529,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="69" type="hole">
@@ -492,6 +537,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="70" type="hole">
@@ -499,6 +545,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="71" type="hole">
@@ -506,6 +553,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="false"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="72" type="wall">
@@ -513,6 +561,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="true"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="73" type="wall">
@@ -520,6 +569,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="true"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="74" type="wall">
@@ -527,6 +577,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="true"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="75" type="wall">
@@ -534,6 +585,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="true"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="76" type="wall">
@@ -541,6 +593,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="true"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="77" type="wall">
@@ -548,6 +601,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="true"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="78" type="wall">
@@ -555,6 +609,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="true"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="79" type="wall">
@@ -562,6 +617,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="true"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="80" type="wall">
@@ -569,6 +625,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="true"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="81" type="wall">
@@ -576,6 +633,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="true"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="82" type="wall">
@@ -583,6 +641,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="true"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="83" type="wall">
@@ -590,6 +649,7 @@
    <property name="collides" type="bool" value="true"/>
    <property name="collidesObjects" type="bool" value="true"/>
    <property name="collidesPlayer" type="bool" value="true"/>
+   <property name="water" type="bool" value="true"/>
   </properties>
  </tile>
  <tile id="84" type="wall">

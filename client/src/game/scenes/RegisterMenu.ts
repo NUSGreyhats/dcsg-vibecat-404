@@ -234,7 +234,7 @@ export class RegisterMenu extends Phaser.Scene {
     input.type = opts.type ?? "text";
     input.maxLength = opts.maxLength;
     input.placeholder = opts.placeholder;
-    input.autocomplete = opts.autocomplete;
+    input.autocomplete = opts.autocomplete as AutoFill;
     input.spellcheck = false;
     Object.assign(input.style, {
       position: "absolute",

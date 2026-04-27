@@ -7,15 +7,21 @@ import (
 	"github.com/greyhats/defcon-game/server/internal/protocol"
 )
 
-// RoomTemplate is the static definition of a room's contents, consumed by
-// LoadRoom to produce concrete RoomState + the protocol.RoomData shipped to
-// the client.
+// RoomTemplate is the static definition of a room's contents, consumed
+// by LoadRoom to produce concrete RoomState + the protocol.RoomData
+// shipped to the client. Everything else lives in the tilemap:
+//
+//   - Initial enemies + reinforcement waves: object-layer markers
+//     (parseTilemapEnemiesAndWaves).
+//   - Pickups: Health/Ammo point objects (parseTilemapPickups).
+//   - Doors:   locked-door tiles on the Walls layer
+//     (parseTilemapDoors). TargetRoom is always
+//     `currentRoom + 1` (linear progression).
+//
+// At this point the template is just a tilemap pointer; if there's no
+// other per-room scalar to add, this type can collapse to a string map.
 type RoomTemplate struct {
 	TilemapID string
-	Enemies   []EnemySpawnDef
-	Waves     []WaveDef
-	Pickups   []PickupSpawnDef
-	Doors     []DoorDef
 }
 
 // EnemySpawnDef is the base (pre-RNG-offset) spawn position for an enemy.
@@ -49,10 +55,17 @@ type PickupSpawnDef struct {
 // DoorDef is a static door placement. Doors always ship to the client as
 // Locked: true; the S2C_DOOR_UNLOCKED broadcast flips the client's view
 // once the server's unlock pass fires.
+//
+// Doors are derived from locked-door tiles on the Walls layer (see
+// parseTilemapDoors). The tile coords + UnlockedGID let the client swap
+// the rendered sprite at unlock time without relying on a separate Door
+// GameObject.
 type DoorDef struct {
-	DoorID     uint32
-	X, Y       float32
-	TargetRoom uint8
+	DoorID      uint32
+	X, Y        float32
+	TargetRoom  uint8
+	TileX, TileY int
+	UnlockedGID int
 }
 
 // HandleEnterDoor validates that a door exists in the current room and is
@@ -71,17 +84,18 @@ func HandleEnterDoor(p *PlayerState, r *RoomState, doorID uint32) (nextRoom uint
 }
 
 // UnlockDoorsIfClear flips every door to Unlocked when AllEnemiesDead is
-// true. Returns the slice of door IDs that transitioned from locked→unlocked
-// this call so the caller can emit S2C_DOOR_UNLOCKED broadcasts.
-func UnlockDoorsIfClear(r *RoomState) []uint32 {
+// true. Returns pointers to the doors that transitioned from
+// locked→unlocked this call so the caller can emit S2C_DOOR_UNLOCKED
+// broadcasts carrying the tile coords + unlocked GID for sprite swap.
+func UnlockDoorsIfClear(r *RoomState) []*DoorState {
 	if !r.AllEnemiesDead {
 		return nil
 	}
-	var transitioned []uint32
+	var transitioned []*DoorState
 	for _, d := range r.Doors {
 		if !d.Unlocked {
 			d.Unlocked = true
-			transitioned = append(transitioned, d.DoorID)
+			transitioned = append(transitioned, d)
 		}
 	}
 	return transitioned
@@ -108,9 +122,13 @@ func CheckAllEnemiesDead(r *RoomState) {
 // are spawned in ascending EntityID order; waves are pre-seeded after all
 // initial enemies, in wave-slot order.
 //
+// `enemies` and `waves` are the room's initial enemy spawns and
+// reinforcement waves (production callers pass TilemapEnemies /
+// TilemapWaves; tests pass hand-built slices).
+//
 // Returns a protocol.RoomData suitable for S2C_RUN_STARTED or S2C_ROOM_LOAD.
 // Doors always ship as Locked: true — the unlock is a separate broadcast.
-func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, now time.Time) protocol.RoomData {
+func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, enemies []EnemySpawnDef, waves []WaveDef, now time.Time) protocol.RoomData {
 	// Reset collections for the new room.
 	r.Enemies = map[uint32]*EnemyState{}
 	r.Pickups = map[uint32]*PickupState{}
@@ -123,10 +141,10 @@ func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, now time.Time) p
 	r.PendingWaves = r.PendingWaves[:0]
 	r.NextEnemyID = WaveEntityIDBase + uint32(r.RoomIndex)*WaveEntityIDStep
 
-	// Spawn enemies in ascending EntityID order to preserve the RNG
-	// consumption invariant.
-	ordered := make([]EnemySpawnDef, len(tmpl.Enemies))
-	copy(ordered, tmpl.Enemies)
+	// Sort ascending by EntityID before SpawnEnemy so RNG consumption
+	// stays deterministic across replays.
+	ordered := make([]EnemySpawnDef, len(enemies))
+	copy(ordered, enemies)
 	sortEnemySpawnsByID(ordered)
 
 	enemyOut := make([]protocol.EnemySpawn, 0, len(ordered))
@@ -143,10 +161,13 @@ func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, now time.Time) p
 	}
 
 	r.InitialPop = len(ordered)
-	seedWaves(r, rng, tmpl.Waves)
+	seedWaves(r, rng, waves)
 
-	pickupOut := make([]protocol.PickupSpawn, 0, len(tmpl.Pickups))
-	for _, def := range tmpl.Pickups {
+	// Pickups are authored exclusively in the tilemap (Health/Ammo
+	// point objects on the object layer). See parseTilemapPickups.
+	pickups := TilemapPickups(r.RoomIndex)
+	pickupOut := make([]protocol.PickupSpawn, 0, len(pickups))
+	for _, def := range pickups {
 		r.Pickups[def.EntityID] = &PickupState{
 			EntityID: def.EntityID,
 			Type:     def.Type,
@@ -161,21 +182,31 @@ func LoadRoom(r *RoomState, rng *rand.Rand, tmpl *RoomTemplate, now time.Time) p
 		})
 	}
 
-	doorOut := make([]protocol.DoorDef, 0, len(tmpl.Doors))
-	for _, def := range tmpl.Doors {
+	// Doors come from locked-door tiles on the Walls layer (see
+	// parseTilemapDoors). The tile coords + UnlockedGID travel with each
+	// DoorDef so the client can swap the tile sprite at unlock time.
+	doors := TilemapDoors(r.RoomIndex)
+	doorOut := make([]protocol.DoorDef, 0, len(doors))
+	for _, def := range doors {
 		r.Doors[def.DoorID] = &DoorState{
-			DoorID:     def.DoorID,
-			X:          def.X,
-			Y:          def.Y,
-			TargetRoom: def.TargetRoom,
-			Unlocked:   false,
+			DoorID:      def.DoorID,
+			X:           def.X,
+			Y:           def.Y,
+			TargetRoom:  def.TargetRoom,
+			Unlocked:    false,
+			TileX:       def.TileX,
+			TileY:       def.TileY,
+			UnlockedGID: def.UnlockedGID,
 		}
 		doorOut = append(doorOut, protocol.DoorDef{
-			DoorID:     def.DoorID,
-			X:          def.X,
-			Y:          def.Y,
-			TargetRoom: def.TargetRoom,
-			Locked:     true,
+			DoorID:      def.DoorID,
+			X:           def.X,
+			Y:           def.Y,
+			TargetRoom:  def.TargetRoom,
+			Locked:      true,
+			TileX:       def.TileX,
+			TileY:       def.TileY,
+			UnlockedGID: def.UnlockedGID,
 		})
 	}
 

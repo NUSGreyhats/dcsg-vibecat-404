@@ -32,26 +32,24 @@ func TestLoadRoomRNGConsumptionInvariant(t *testing.T) {
 		t.Fatalf("test assumes WaveTriggers=[0.66,0.33]; update the golden first if tuning")
 	}
 
-	tmpl := &RoomTemplate{
-		TilemapID: "test",
-		Enemies: []EnemySpawnDef{
-			// Deliberately out-of-order — LoadRoom must sort ascending
-			// by EntityID before seeding.
-			{EntityID: 2, Type: EnemyGrunt, X: 400, Y: 300},
-			{EntityID: 1, Type: EnemyGrunt, X: 500, Y: 300},
-		},
-		Waves: []WaveDef{
-			{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 600, Y: 300}}},
-			{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 700, Y: 300}}},
-			{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 800, Y: 300}}},
-		},
+	tmpl := &RoomTemplate{TilemapID: "test"}
+	// Deliberately out-of-order — LoadRoom must sort ascending by
+	// EntityID before seeding.
+	enemies := []EnemySpawnDef{
+		{EntityID: 2, Type: EnemyGrunt, X: 400, Y: 300},
+		{EntityID: 1, Type: EnemyGrunt, X: 500, Y: 300},
+	}
+	waves := []WaveDef{
+		{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 600, Y: 300}}},
+		{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 700, Y: 300}}},
+		{Mobs: []WaveMobDef{{Type: EnemyGrunt, X: 800, Y: 300}}},
 	}
 
 	const seed = int64(42)
 	rng := rand.New(rand.NewSource(seed))
 	r := NewRoomState(0) // room 0 = no wall grid; positions pass through clean
 	now := time.Unix(1_700_000_000, 0)
-	_ = LoadRoom(r, rng, tmpl, now)
+	_ = LoadRoom(r, rng, tmpl, enemies, waves, now)
 
 	// Post-condition: skip rule honored.
 	if len(r.PendingWaves) != 1 {
@@ -163,6 +161,74 @@ func TestAdvanceWavesArmAndFire(t *testing.T) {
 	spawned = AdvanceWaves(r, future.Add(time.Second))
 	if len(spawned) != 0 {
 		t.Fatal("fired wave should not spawn again")
+	}
+}
+
+// TestAdvanceWavesLaterWaveWaitsForEarlierToFire is the regression for the
+// "waves 1 and 2 spawn at the same time" bug: during wave 0's arm-delay
+// window the player can keep killing enemies, and livingCount drops past
+// wave 1's threshold while wave 0's reinforcements are still pending. The
+// fix gates wave 1's arm on wave 0 having fired, so its threshold is only
+// checked after wave 0's mobs are on the field.
+func TestAdvanceWavesLaterWaveWaitsForEarlierToFire(t *testing.T) {
+	r := NewRoomState(0)
+	r.InitialPop = 6
+	for i := uint32(1); i <= 6; i++ {
+		r.Enemies[i] = &EnemyState{EntityID: i, HP: 1, AIState: AIPatrol}
+	}
+	r.PendingWaves = []PendingWave{
+		{TriggerRemaining: 3, ArmDelayJitter: 0, Mobs: []PrecomputedMob{{
+			Type: EnemyGrunt,
+			Seed: MobSeed{SpawnX: 200, SpawnY: 200},
+		}}},
+		{TriggerRemaining: 1, ArmDelayJitter: 0, Mobs: []PrecomputedMob{{
+			Type: EnemyGrunt,
+			Seed: MobSeed{SpawnX: 300, SpawnY: 200},
+		}}},
+	}
+
+	now := time.Unix(1_700_000_000, 0)
+
+	// Drop living to 3 → wave 0 arms, wave 1 must NOT arm yet (its earlier
+	// wave hasn't fired).
+	for _, id := range []uint32{4, 5, 6} {
+		r.Enemies[id].AIState = AIDead
+	}
+	if spawned := AdvanceWaves(r, now); len(spawned) != 0 {
+		t.Fatalf("no wave should fire on the arm tick; got %v", spawned)
+	}
+	if !r.PendingWaves[0].Armed {
+		t.Fatal("wave 0 should arm at living = trigger 0")
+	}
+	if r.PendingWaves[1].Armed {
+		t.Fatal("wave 1 must not arm while wave 0 is still pending — its threshold isn't meaningful yet")
+	}
+
+	// Player keeps killing during wave 0's arm-delay window — living drops
+	// to 0, comfortably under wave 1's trigger. Wave 1 still must not arm.
+	for _, id := range []uint32{1, 2, 3} {
+		r.Enemies[id].AIState = AIDead
+	}
+	if spawned := AdvanceWaves(r, now.Add(500*time.Millisecond)); len(spawned) != 0 {
+		t.Fatalf("no wave should fire before FireAt; got %v", spawned)
+	}
+	if r.PendingWaves[1].Armed {
+		t.Fatal("wave 1 must not arm before wave 0 fires, even with living = 0")
+	}
+
+	// Wave 0 fires when its FireAt elapses. Wave 1 must not fire on the
+	// same tick — the arm gate keeps it pending until next tick at
+	// earliest, and even then it needs its own arm-delay before firing.
+	fire := now.Add(time.Duration(WaveArmDelayMs+10) * time.Millisecond)
+	spawned := AdvanceWaves(r, fire)
+	if len(spawned) != 1 {
+		t.Fatalf("expected wave 0 to fire alone; spawned %d this tick", len(spawned))
+	}
+	if !r.PendingWaves[0].Fired {
+		t.Fatal("wave 0 should be marked fired")
+	}
+	if r.PendingWaves[1].Fired {
+		t.Fatal("wave 1 must not fire on the same tick as wave 0")
 	}
 }
 

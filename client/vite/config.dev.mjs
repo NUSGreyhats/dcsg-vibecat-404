@@ -1,15 +1,14 @@
 import { defineConfig } from 'vite';
 
-// Game server expected at :8080 in dev. Override with GAME_SERVER if you
-// need to point Vite at a different host/port.
+// Game server (WebSocket gameplay) on :8080; lobby (identity HTTP +
+// leaderboard + admin) on :3001. By default everything proxies to the
+// game server, which works when you run it with DEV_MOUNT_IDENTITY=1
+// (mounts /api/login etc. on :8080) — single-binary dev. Set
+// LOBBY_SERVER to point identity/leaderboard/admin routes at a real
+// lobby instead.
 const gameServer = process.env.GAME_SERVER ?? 'http://localhost:8080';
 const gameServerWs = gameServer.replace(/^http/, 'ws');
-
-// Lobby service expected at :3001 in dev. It owns the non-WS HTTP surface:
-// /api/register, /api/verify, /api/login, queue endpoints, leaderboard,
-// replay HTTP endpoints, and the /leaderboard page. Override with
-// LOBBY_SERVER if running the lobby on a non-default port.
-const lobbyServer = process.env.LOBBY_SERVER ?? 'http://localhost:3001';
+const lobbyServer = process.env.LOBBY_SERVER ?? gameServer;
 
 export default defineConfig({
     base: './',
@@ -35,13 +34,15 @@ export default defineConfig({
         proxy: {
             // /ws covers /ws, /ws/spectate, /ws/replay because Vite's
             // default match is a path prefix. The WS upgrade carries
-            // query strings (replay_id, ticket) verbatim.
+            // query strings (replay_id, ticket) verbatim. Everything HTTP
+            // — identity, leaderboard, replay, /register page, admin —
+            // is on the lobby service.
             '/ws': { target: gameServerWs, ws: true, changeOrigin: true },
-            // The lobby owns all /api/* HTTP routes in dev, including auth,
-            // queue, leaderboard, and replay endpoints.
             '/api': { target: lobbyServer, changeOrigin: true },
-            // The leaderboard page itself is also lobby-only.
+            '/register': { target: lobbyServer, changeOrigin: true },
             '/leaderboard': { target: lobbyServer, changeOrigin: true },
+            '/spectate': { target: lobbyServer, changeOrigin: true },
+            '/admin': { target: lobbyServer, changeOrigin: true },
         },
     }
 });

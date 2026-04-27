@@ -83,7 +83,6 @@ export class MainMenu extends Phaser.Scene {
   private loginTexts: Phaser.GameObjects.Text[] = [];
   private readyTexts: Phaser.GameObjects.GameObject[] = [];
   private readyEnterKey?: Phaser.Input.Keyboard.Key;
-  private readyPlayerName = "";
   private readyActive = false;
 
   // Threshold (ms) above which a clock skew warning is shown. The server
@@ -575,7 +574,6 @@ export class MainMenu extends Phaser.Scene {
     this.hideLoginForm();
     this.clearReadyView();
     this.readyActive = true;
-    this.readyPlayerName = displayName;
 
     const { panelY, contentX, inputWidth } = this.getPanelLayout();
     const buttonY = panelY + 43;
@@ -1011,9 +1009,8 @@ export class MainMenu extends Phaser.Scene {
       // with `true` when the player went through the queue (waited
       // and was admitted, or admitted on first try) and `false` when
       // the queue is disabled in this deployment.
-      let viaQueue: boolean;
       try {
-        viaQueue = await this.waitForQueueAdmission(body.player_id, password);
+        await this.waitForQueueAdmission(body.player_id, password);
       } catch (err) {
         console.error("[MainMenu] queue: failed", err);
         this.setStatus(err instanceof Error ? err.message : "Queue error", ERROR);
@@ -1231,7 +1228,6 @@ export class MainMenu extends Phaser.Scene {
     // the next mount and silently swallow the first onStart click.
     // Reset to the fresh-instance defaults.
     this.submitting = false;
-    this.readyPlayerName = "";
     this.readyActive = false;
   }
 }

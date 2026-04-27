@@ -5,11 +5,11 @@ import { Player } from "../entities/Player";
 import { Enemy } from "../entities/Enemy";
 import { Bullet } from "../entities/Bullet";
 import { Pickup } from "../entities/Pickup";
-import { Door } from "../entities/Door";
 import {
   paintRoomBackground,
   buildRoom,
   type BuiltRoom,
+  type DoorRef,
 } from "../world/roomLayout";
 import type {
   RoomData,
@@ -49,8 +49,9 @@ export class SpectateGame extends Phaser.Scene {
   enemies: Map<number, Enemy> = new Map();
   projectiles: Map<number, Bullet> = new Map();
   pickups: Map<number, Pickup> = new Map();
-  doors: Map<number, Door> = new Map();
+  doors: Map<number, DoorRef> = new Map();
   backgroundObjs: Phaser.GameObjects.GameObject[] = [];
+  private wallsLayer?: Phaser.Tilemaps.TilemapLayer;
   private displayName = "";
 
   constructor() {
@@ -72,7 +73,9 @@ export class SpectateGame extends Phaser.Scene {
       return;
     }
 
-    this.backgroundObjs = paintRoomBackground(this, roomData);
+    const painted = paintRoomBackground(this, roomData);
+    this.backgroundObjs = painted.created;
+    this.wallsLayer = painted.wallsLayer;
     const built = buildRoom(this, roomData);
     this.enemies = built.enemies;
     this.pickups = built.pickups;
@@ -213,10 +216,12 @@ export class SpectateGame extends Phaser.Scene {
     this.projectiles.clear();
     for (const p of this.pickups.values()) p.destroy();
     this.pickups.clear();
-    for (const d of this.doors.values()) d.destroy();
     this.doors.clear();
+    this.wallsLayer = undefined;
 
-    this.backgroundObjs = paintRoomBackground(this, room);
+    const painted = paintRoomBackground(this, room);
+    this.backgroundObjs = painted.created;
+    this.wallsLayer = painted.wallsLayer;
     const built: BuiltRoom = buildRoom(this, room);
     this.enemies = built.enemies;
     this.pickups = built.pickups;
@@ -230,8 +235,13 @@ export class SpectateGame extends Phaser.Scene {
     }
   }
 
-  private onDoorUnlocked(doorId: number): void {
-    this.doors.get(doorId)?.setUnlocked(true);
+  private onDoorUnlocked(
+    _doorId: number,
+    tileX: number,
+    tileY: number,
+    unlockedGid: number,
+  ): void {
+    this.wallsLayer?.putTileAt(unlockedGid, tileX, tileY, true);
   }
 
   private onEntityDied(entityId: number): void {
@@ -287,8 +297,8 @@ export class SpectateGame extends Phaser.Scene {
     this.projectiles.clear();
     for (const p of this.pickups.values()) p.destroy();
     this.pickups.clear();
-    for (const d of this.doors.values()) d.destroy();
     this.doors.clear();
+    this.wallsLayer = undefined;
 
     this.player?.destroy();
     this.player = undefined;
