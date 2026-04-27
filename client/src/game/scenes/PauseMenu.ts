@@ -26,7 +26,7 @@ import {
 type Page = "main" | "controls";
 
 type MainItem = {
-  key: "resume" | "toggleTimings" | "controls" | "restart" | "logout";
+  key: "resume" | "toggleTimings" | "controls" | "shop" | "restart" | "logout";
   label(): string;
 };
 
@@ -98,6 +98,7 @@ export class PauseMenu extends Phaser.Scene {
           isTimingsVisible() ? "Hide Timings" : "Show Timings",
       },
       { key: "controls", label: () => "Controls" },
+      { key: "shop", label: () => "Shop" },
       { key: "restart", label: () => "Restart Run" },
       { key: "logout", label: () => "Log Out" },
     ];
@@ -264,6 +265,11 @@ export class PauseMenu extends Phaser.Scene {
       case "controls":
         this.page = "controls";
         this.renderPage();
+        return;
+      case "shop":
+        this.removeCanvasBlur();
+        this.scene.launch("ShopMenu");
+        this.scene.stop();
         return;
       case "restart":
         this.restart();

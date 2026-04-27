@@ -56,9 +56,14 @@ export class ShopMenu extends Phaser.Scene {
     esc: Phaser.Input.Keyboard.Key;
     b: Phaser.Input.Keyboard.Key;
   };
+  private returnTo = "Game";
 
   constructor() {
     super({ key: "ShopMenu" });
+  }
+
+  init(data?: { returnTo?: string }): void {
+    this.returnTo = data?.returnTo ?? "Game";
   }
 
   create(): void {
@@ -189,7 +194,7 @@ export class ShopMenu extends Phaser.Scene {
   }
 
   private close(): void {
-    this.scene.resume("Game");
+    this.scene.resume(this.returnTo);
     this.scene.stop();
   }
 
