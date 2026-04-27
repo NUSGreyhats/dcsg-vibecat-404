@@ -227,6 +227,7 @@ export class Game extends Phaser.Scene {
       const newHp = payload.player.hp;
       if (this.prevPlayerHp >= 0 && newHp < this.prevPlayerHp) {
         triggerHitstop(this, 60);
+        this.game.events.emit("playerDamaged");
       }
       this.prevPlayerHp = newHp;
       this.player.applySnapshot(payload.player);
@@ -342,6 +343,7 @@ export class Game extends Phaser.Scene {
 
   private onDoorUnlocked(doorId: number): void {
     this.doors.get(doorId)?.setUnlocked(true);
+    this.game.events.emit("doorUnlockedToast", getSync().state.currentRoom ?? 1);
   }
 
   private onEntityDied(entityId: number): void {

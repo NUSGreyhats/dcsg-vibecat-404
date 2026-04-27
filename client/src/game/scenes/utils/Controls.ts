@@ -2,6 +2,15 @@ import Phaser from "phaser";
 
 export type MovementInput = { dx: number; dy: number };
 
+export const CONTROL_BINDINGS: ReadonlyArray<readonly [string, string]> = [
+  ["Move", "W A S D / Arrows"],
+  ["Aim", "Mouse"],
+  ["Shoot", "Left mouse button"],
+  ["Switch", "1 / 2 / 3"],
+  ["Shop", "B"],
+  ["Menu", "Esc"],
+];
+
 export type Controls = {
   movement(): MovementInput;
   aimAngle(pivotX: number, pivotY: number): number;
@@ -48,19 +57,19 @@ export function createControls(scene: Phaser.Scene): Controls {
   }
 
   const keys: KeyMap = {
-    w: kb.addKey(Phaser.Input.Keyboard.KeyCodes.W),
-    a: kb.addKey(Phaser.Input.Keyboard.KeyCodes.A),
-    s: kb.addKey(Phaser.Input.Keyboard.KeyCodes.S),
-    d: kb.addKey(Phaser.Input.Keyboard.KeyCodes.D),
-    up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
-    down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
-    left: kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
-    right: kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
-    shop: kb.addKey(Phaser.Input.Keyboard.KeyCodes.B),
-    pause: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
-    one: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
-    two: kb.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
-    three: kb.addKey(Phaser.Input.Keyboard.KeyCodes.THREE),
+    w: kb.addKey(Phaser.Input.Keyboard.KeyCodes.W, false),
+    a: kb.addKey(Phaser.Input.Keyboard.KeyCodes.A, false),
+    s: kb.addKey(Phaser.Input.Keyboard.KeyCodes.S, false),
+    d: kb.addKey(Phaser.Input.Keyboard.KeyCodes.D, false),
+    up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP, false),
+    down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN, false),
+    left: kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT, false),
+    right: kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT, false),
+    shop: kb.addKey(Phaser.Input.Keyboard.KeyCodes.B, false),
+    pause: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC, false),
+    one: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ONE, false),
+    two: kb.addKey(Phaser.Input.Keyboard.KeyCodes.TWO, false),
+    three: kb.addKey(Phaser.Input.Keyboard.KeyCodes.THREE, false),
   };
 
   const justDown = Phaser.Input.Keyboard.JustDown;

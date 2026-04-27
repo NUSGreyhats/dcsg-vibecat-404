@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { getActiveState } from "../net/runContext";
+import { getActiveState, resetSync } from "../net/runContext";
 import { PLAYER_MAX_HEALTH, ROOM_COUNT } from "../constants";
 import { getStoredPB, isTimingsVisible } from "../prefs";
 import type { SplitData } from "../../net/packet";
@@ -13,6 +13,7 @@ import {
   DEPTH_HUD_FILL,
   ERROR,
   FONT_FAMILY,
+  FONT_SIZE_BODY_EM,
   FONT_SIZE_CAPTION,
   FONT_SIZE_MICRO,
   FONT_SIZE_SMALL,
@@ -21,8 +22,11 @@ import {
   HP_GREEN,
   HP_RED,
   HUD_TEXT_STYLE,
+  MASK_RED,
   MIDNIGHT,
+  STROKE_THICKNESS_HUD,
   SUCCESS,
+  TEXT_SECONDARY,
   TEXT_MUTED,
   TEXT_PRIMARY,
   TEXT_STROKE,
@@ -54,6 +58,18 @@ const WEAPON_ICON_FRAME = "0";
 const PANEL_PAD_X = 8;
 const PANEL_PAD_Y = 4;
 const PANEL_ALPHA = 0.45;
+const TOAST_Y = 74;
+const HURT_FLASH_ALPHA = 0.16;
+const HURT_FLASH_MS = 150;
+
+// Hold-Space-to-restart hotkey. Player holds the space bar continuously
+// for HOLD_RESTART_MS to abandon the current run and bounce back to the
+// MainMenu queue. The progress widget appears after a short grace so a
+// stray tap doesn't flash anything on screen.
+const HOLD_RESTART_MS = 3000;
+const HOLD_FEEDBACK_GRACE_MS = 250;
+const HOLD_BAR_WIDTH = 240;
+const HOLD_BAR_HEIGHT = 8;
 
 /**
  * Heads-up display overlay. Launched alongside the Game scene. Reads state
@@ -76,6 +92,9 @@ export class GameHUD extends Phaser.Scene {
   private splitsRows: Phaser.GameObjects.Text[] = [];
   private splitsDeltas: Phaser.GameObjects.Text[] = [];
   private currentWeaponKey?: string;
+  private hurtFlash?: Phaser.GameObjects.Rectangle;
+  private toastBg?: Phaser.GameObjects.Rectangle;
+  private toastText?: Phaser.GameObjects.Text;
   // Once the run finishes the timer latches at the server's authoritative
   // total so it doesn't keep ticking past the final split.
   private latchedTotalMs?: number;
@@ -86,6 +105,18 @@ export class GameHUD extends Phaser.Scene {
   // weapon, and room counter ignore this — toggling Hide Timings doesn't
   // strip out information you'd want to keep visible mid-run.
   private timingsVisible = true;
+  // Hold-Space-to-restart state. holdStartedAt is undefined when the key
+  // isn't held; set on keydown and cleared on keyup or after the restart
+  // fires.
+  private spaceKey?: Phaser.Input.Keyboard.Key;
+  private holdStartedAt?: number;
+  private holdRestartFired = false;
+  private holdLabel?: Phaser.GameObjects.Text;
+  private holdBarBg?: Phaser.GameObjects.Rectangle;
+  private holdBarFill?: Phaser.GameObjects.Rectangle;
+  // Persistent leaderboard pop-out link. Lives under the timer in the
+  // top-left HUD stack.
+  private leaderboardLink?: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: "GameHUD" });
@@ -163,6 +194,12 @@ export class GameHUD extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD_BG);
 
+    this.hurtFlash = this.add
+      .rectangle(0, 0, w, h, MASK_RED, 0)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_BG - 1);
+
     // Active shop trait stacks — sits just above the weapon widget. Hidden
     // until at least one stack is owned so the HUD stays clean early-run.
     this.powerupText = this.add
@@ -186,6 +223,16 @@ export class GameHUD extends Phaser.Scene {
     const state = getActiveState();
     state.on("runComplete", this.onRunComplete, this);
 
+    this.buildHoldRestartWidget();
+    this.buildLeaderboardLink();
+
+    const kb = this.input.keyboard;
+    if (kb) {
+      this.spaceKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE, false);
+      this.spaceKey.on("down", this.onSpaceDown, this);
+      this.spaceKey.on("up", this.onSpaceUp, this);
+    }
+
     this.events.on("shutdown", this.cleanup, this);
     // The PauseMenu emits this on the cross-scene game registry so the HUD
     // can react to a toggle without needing a back-pointer.
@@ -194,11 +241,15 @@ export class GameHUD extends Phaser.Scene {
       this.onTimingsVisibilityChanged,
       this,
     );
+    this.game.events.on("playerDamaged", this.onPlayerDamaged, this);
+    this.game.events.on("doorUnlockedToast", this.onDoorUnlockedToast, this);
 
     this.applyTimingsVisibility();
   }
 
   update(): void {
+    this.updateHoldRestart();
+
     const state = getActiveState();
 
     if (this.timeText) {
@@ -477,6 +528,222 @@ export class GameHUD extends Phaser.Scene {
     this.latchedTotalMs = totalMs;
   }
 
+  /**
+   * Hold-Space-to-restart UI lives bottom-center, just above the HP bar.
+   * Hidden by default — only fades in once the player has held SPACE
+   * past the grace period.
+   */
+  private buildHoldRestartWidget(): void {
+    const cx = this.scale.width / 2;
+    const baseY = this.scale.height - 60;
+
+    this.holdLabel = this.add
+      .text(cx, baseY - 14, "HOLD [ SPACE ] TO RESTART", {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_CAPTION,
+        color: hex(BONE_WHITE),
+        stroke: hex(TEXT_STROKE),
+        strokeThickness: 2,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_FILL)
+      .setVisible(false);
+
+    this.holdBarBg = this.add
+      .rectangle(cx, baseY, HOLD_BAR_WIDTH, HOLD_BAR_HEIGHT, MIDNIGHT, 0.7)
+      .setOrigin(0.5)
+      .setStrokeStyle(1, BONE_WHITE, 0.8)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_BG)
+      .setVisible(false);
+
+    this.holdBarFill = this.add
+      .rectangle(
+        cx - HOLD_BAR_WIDTH / 2 + 1,
+        baseY,
+        0,
+        HOLD_BAR_HEIGHT - 2,
+        ACCENT_PRIMARY,
+        1,
+      )
+      .setOrigin(0, 0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_FILL)
+      .setVisible(false);
+  }
+
+  /**
+   * Persistent leaderboard pop-out link, anchored under the timer in the
+   * top-left HUD stack.
+   */
+  private buildLeaderboardLink(): void {
+    const timerW = this.timeText?.displayWidth ?? 0;
+    const timerPanelW = this.timePanel?.displayWidth ?? 0;
+    const x = GUTTER_MEDIUM + Math.max(timerW, timerPanelW) + 14;
+    const link = this.add
+      .text(
+        x,
+        10,
+        "Leaderboard ↗",
+        {
+          fontFamily: FONT_FAMILY,
+          fontSize: FONT_SIZE_CAPTION,
+          color: hex(ACCENT_PRIMARY),
+          stroke: hex(TEXT_STROKE),
+          strokeThickness: 2,
+        },
+      )
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_FILL)
+      .setInteractive({ useHandCursor: true });
+    link.on("pointerover", () => link.setColor(hex(TEXT_PRIMARY)));
+    link.on("pointerout", () => link.setColor(hex(ACCENT_PRIMARY)));
+    link.on("pointerdown", () => {
+      window.open("/leaderboard", "_blank", "noopener,noreferrer");
+    });
+    this.leaderboardLink = link;
+  }
+
+  private onSpaceDown(): void {
+    if (this.holdRestartFired) return;
+    if (this.holdStartedAt !== undefined) return;
+    this.holdStartedAt = this.time.now;
+  }
+
+  private onSpaceUp(): void {
+    this.holdStartedAt = undefined;
+    this.holdRestartFired = false;
+    this.hideHoldFeedback();
+  }
+
+  private updateHoldRestart(): void {
+    if (this.holdRestartFired) return;
+    if (this.holdStartedAt === undefined) {
+      this.hideHoldFeedback();
+      return;
+    }
+    const elapsed = this.time.now - this.holdStartedAt;
+    if (elapsed < HOLD_FEEDBACK_GRACE_MS) {
+      this.hideHoldFeedback();
+      return;
+    }
+    if (elapsed >= HOLD_RESTART_MS) {
+      this.holdRestartFired = true;
+      this.hideHoldFeedback();
+      this.fireRestart();
+      return;
+    }
+    const ratio = Phaser.Math.Clamp(elapsed / HOLD_RESTART_MS, 0, 1);
+    this.showHoldFeedback(ratio);
+  }
+
+  private showHoldFeedback(ratio: number): void {
+    this.holdLabel?.setVisible(true);
+    this.holdBarBg?.setVisible(true);
+    if (this.holdBarFill) {
+      this.holdBarFill.setVisible(true);
+      this.holdBarFill.width = Math.max(0, (HOLD_BAR_WIDTH - 2) * ratio);
+    }
+  }
+
+  private hideHoldFeedback(): void {
+    this.holdLabel?.setVisible(false);
+    this.holdBarBg?.setVisible(false);
+    if (this.holdBarFill) {
+      this.holdBarFill.setVisible(false);
+      this.holdBarFill.width = 0;
+    }
+  }
+
+  /**
+   * Tear down every game scene and bounce to MainMenu, mirroring the
+   * Pause-menu Restart Run path. Closes the WS via resetSync so the
+   * server drops the run state — the new run will go through the queue
+   * (Space/Enter on MainMenu) before launching.
+   */
+  private fireRestart(): void {
+    // Mirrors PauseMenu.restart — stops every overlay so MainMenu loads
+    // clean. Don't this.scene.stop() self before starting MainMenu;
+    // scene.start handles the swap and an explicit pre-stop can leave the
+    // scene plugin in a state where the start no-ops.
+    this.scene.stop("Game");
+    this.scene.stop("ShopMenu");
+    this.scene.stop("PauseMenu");
+    this.scene.stop("WinScreen");
+    resetSync();
+    this.scene.start("MainMenu");
+  }
+
+  private onPlayerDamaged(): void {
+    if (!this.hurtFlash) return;
+    this.tweens.killTweensOf(this.hurtFlash);
+    this.hurtFlash.setAlpha(HURT_FLASH_ALPHA);
+    this.tweens.add({
+      targets: this.hurtFlash,
+      alpha: 0,
+      duration: HURT_FLASH_MS,
+      ease: "Cubic.easeOut",
+    });
+  }
+
+  private onDoorUnlockedToast(roomIndex: number): void {
+    this.showToast(`LEVEL ${roomIndex} CLEAR`);
+  }
+
+  private showToast(message: string): void {
+    const cx = this.scale.width / 2;
+    if (this.toastText) this.tweens.killTweensOf(this.toastText);
+    if (this.toastBg) this.tweens.killTweensOf(this.toastBg);
+    this.toastText?.destroy();
+    this.toastBg?.destroy();
+
+    this.toastText = this.add
+      .text(cx, TOAST_Y, message, {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_BODY_EM,
+        color: hex(BONE_WHITE),
+        stroke: hex(TEXT_STROKE),
+        strokeThickness: STROKE_THICKNESS_HUD,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_FILL);
+
+    this.toastBg = this.add
+      .rectangle(
+        cx,
+        TOAST_Y,
+        this.toastText.displayWidth + PANEL_PAD_X * 4,
+        this.toastText.displayHeight + PANEL_PAD_Y * 4,
+        MIDNIGHT,
+        0.74,
+      )
+      .setOrigin(0.5)
+      .setStrokeStyle(1, TEXT_SECONDARY, 0.95)
+      .setScrollFactor(0)
+      .setDepth(DEPTH_HUD_BG);
+
+    this.toastText.setAlpha(0);
+    this.toastBg.setAlpha(0);
+    this.tweens.add({
+      targets: [this.toastText, this.toastBg],
+      alpha: 1,
+      y: TOAST_Y - 8,
+      duration: 160,
+      ease: "Cubic.easeOut",
+      hold: 1500,
+      yoyo: true,
+      onComplete: () => {
+        this.toastText?.destroy();
+        this.toastBg?.destroy();
+        this.toastText = undefined;
+        this.toastBg = undefined;
+      },
+    });
+  }
+
   private cleanup(): void {
     const state = getActiveState();
     state.off("runComplete", this.onRunComplete, this);
@@ -485,6 +752,24 @@ export class GameHUD extends Phaser.Scene {
       this.onTimingsVisibilityChanged,
       this,
     );
+    this.game.events.off("playerDamaged", this.onPlayerDamaged, this);
+    this.game.events.off("doorUnlockedToast", this.onDoorUnlockedToast, this);
+
+    if (this.spaceKey) {
+      this.spaceKey.off("down", this.onSpaceDown, this);
+      this.spaceKey.off("up", this.onSpaceUp, this);
+      this.spaceKey = undefined;
+    }
+    this.holdStartedAt = undefined;
+    this.holdRestartFired = false;
+    this.holdLabel?.destroy();
+    this.holdBarBg?.destroy();
+    this.holdBarFill?.destroy();
+    this.holdLabel = undefined;
+    this.holdBarBg = undefined;
+    this.holdBarFill = undefined;
+    this.leaderboardLink?.destroy();
+    this.leaderboardLink = undefined;
 
     this.timeText?.destroy();
     this.timePanel?.destroy();
@@ -495,6 +780,12 @@ export class GameHUD extends Phaser.Scene {
     this.weaponText?.destroy();
     this.weaponIcon?.destroy();
     this.weaponPanel?.destroy();
+    if (this.hurtFlash) this.tweens.killTweensOf(this.hurtFlash);
+    if (this.toastText) this.tweens.killTweensOf(this.toastText);
+    if (this.toastBg) this.tweens.killTweensOf(this.toastBg);
+    this.hurtFlash?.destroy();
+    this.toastText?.destroy();
+    this.toastBg?.destroy();
     this.powerupText?.destroy();
     this.powerupPanel?.destroy();
     this.splitsHeader?.destroy();
@@ -518,6 +809,9 @@ export class GameHUD extends Phaser.Scene {
     this.splitsPanel = undefined;
     this.currentWeaponKey = undefined;
     this.latchedTotalMs = undefined;
+    this.hurtFlash = undefined;
+    this.toastText = undefined;
+    this.toastBg = undefined;
   }
 }
 
