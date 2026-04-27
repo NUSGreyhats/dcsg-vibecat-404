@@ -13,9 +13,9 @@ import (
 // newTimeoutTestEngine constructs an Engine with the minimum state stepTick
 // needs: a RunRunning RunState anchored at start, an empty room 1, and a
 // fresh PlayerState. Channels are buffered large enough that test sends
-// never block. The Submit callback panics if invoked — failed runs must
-// never reach the leaderboard, and that's the strongest assertion the test
-// can make about it.
+// never block. The Submit callback fails the test if invoked — failed runs
+// must never reach the leaderboard, and that's the strongest assertion the
+// test can make about it.
 func newTimeoutTestEngine(t *testing.T, start time.Time) (*Engine, chan []byte, chan protocol.S2CEnvelope) {
 	t.Helper()
 	in := make(chan []byte, 16)
