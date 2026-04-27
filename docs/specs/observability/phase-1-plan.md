@@ -746,10 +746,12 @@ jobs:
           OBS_BASIC_AUTH_HASH: ${{ secrets.OBS_BASIC_AUTH_HASH }}
         with:
           host: ${{ secrets.OBS_HOST }}
-          # Reuses DO_USER/DO_SSH_KEY from the existing game-droplet deploy.
-          # Both droplets are provisioned with the same admin SSH user and key.
-          username: ${{ secrets.DO_USER }}
-          key: ${{ secrets.DO_SSH_KEY }}
+          # SSH user is hardcoded `root` for OBS — DO_USER on this repo
+          # points to a non-root user that exists only on the game droplet.
+          # OBS_SSH_KEY is OBS-specific (verified empirically — DO_SSH_KEY's
+          # public counterpart is not in OBS authorized_keys).
+          username: root
+          key: ${{ secrets.OBS_SSH_KEY }}
           script_stop: true
           command_timeout: 15m
           envs: OBS_DOMAIN,OBS_BASIC_AUTH_HASH
@@ -788,7 +790,7 @@ jobs:
 
             # One-shot swap setup. Idempotent — safe to run every deploy.
             echo "==> swap setup"
-            sudo bash obs/setup-swap.sh
+            bash obs/setup-swap.sh
 
             # Write obs/.env from forwarded Variables/Secrets.
             # OBS_BASIC_AUTH_HASH is single-quoted because docker-compose's
@@ -835,7 +837,7 @@ jobs:
 
 Differences from the existing `deploy.yml` worth noticing:
 - Targets a different host via `OBS_HOST` (game droplet's `DO_HOST` doesn't apply).
-- Reuses `DO_USER` and `DO_SSH_KEY` — the same admin credentials authorize both droplets, so we don't manage parallel `OBS_USER` / `OBS_SSH_KEY` secrets.
+- Hardcodes `root` as the SSH user (DO_USER is non-root and exists only on the game droplet). Uses a separate `OBS_SSH_KEY` — the game droplet's authorized_keys doesn't have `DO_SSH_KEY`'s public counterpart, so OBS gets its own deploy key.
 - Forwards a different set of env vars (no `AUTH_MODE`, `QUEUE_ENABLED`, etc. — those are game-droplet concerns).
 - Runs `obs/setup-swap.sh` via `sudo` once per deploy. The script is idempotent so this is safe.
 - Health check hits VictoriaMetrics's `/health` endpoint over the internal network — Caddy/Grafana are gated by basic-auth so a vanilla curl can't easily check them; VM is the simplest end-to-end-stack-is-up signal.
@@ -880,7 +882,7 @@ In `Settings → Secrets and variables → Actions → Secrets` add:
   ```
   Paste the output (full `$2a$14$...` string) into the secret value.
 
-The OBS deploy reuses the existing `DO_USER` and `DO_SSH_KEY` secrets — both droplets are provisioned with the same admin SSH credentials, so there's no need for parallel `OBS_USER` / `OBS_SSH_KEY` secrets. Confirm `DO_USER` and `DO_SSH_KEY` are already populated (they should be, from the game-droplet deploy).
+Add `OBS_SSH_KEY` (Secret) — the private key whose public counterpart is in the OBS droplet's `~/.ssh/authorized_keys`. Generate fresh with `ssh-keygen -t rsa -b 4096 -f obs_deploy -m PEM -N ''`, install the `.pub` on the OBS droplet, paste the private key into the secret. The deploy SSHes in as `root` (hardcoded) so no `DO_USER` involvement.
 
 - [ ] **Step 3: Sanity-check that the variable list matches the workflow**
 
@@ -920,8 +922,8 @@ Separate $4/mo DigitalOcean Basic droplet (512 MB / 10 GB / 1 vCPU) running the 
 
 ### Provisioning (one-time)
 
-1. **Create the droplet.** DO control panel → Droplets → Create. Distribution: Ubuntu 24.04 LTS. Plan: Basic, $4/mo (1 vCPU / 512 MB / 10 GB SSD). Region: same as the game droplet to minimise scrape latency. Authentication: SSH key — use the **same key already authorized for the game droplet**, since the OBS deploy reuses `DO_SSH_KEY`.
-2. **SSH user posture.** The deploy workflow reuses `DO_USER`, so the same admin user must exist on the OBS droplet. `setup-swap.sh` runs via `sudo` during deploy — that means `DO_USER` must have **passwordless sudo** (or BE root, which is the default on a fresh DO droplet). If you log in as a non-root `DO_USER`, run `echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/$USER && sudo chmod 440 /etc/sudoers.d/$USER` once during provisioning.
+1. **Create the droplet.** DO control panel → Droplets → Create. Distribution: Ubuntu 24.04 LTS. Plan: Basic, $4/mo (1 vCPU / 512 MB / 10 GB SSD). Region: same as the game droplet to minimise scrape latency. Authentication: any SSH key you control — `OBS_SSH_KEY` is generated separately from the game droplet's deploy key.
+2. **SSH user.** The deploy workflow SSHes in as `root` (hardcoded). The DO droplet ships with `root` available by default, so no setup needed.
 3. **DNS.** Point an A-record for `observability.nusgreyhats.org` at the droplet's public IPv4. Caddy obtains a Let's Encrypt cert on first start; it needs the DNS to resolve before the deploy workflow runs.
 4. **DigitalOcean Cloud Firewall** (new firewall, attached to the OBS droplet only):
     - Inbound `22/tcp` allowlisted to the team's IPs.
@@ -931,16 +933,16 @@ Separate $4/mo DigitalOcean Basic droplet (512 MB / 10 GB / 1 vCPU) running the 
     ```bash
     curl -fsSL https://get.docker.com | sh
     ```
-6. **Configure GitHub Secrets/Variables.** New entries needed: `OBS_HOST` (the OBS droplet's public IP), `OBS_BASIC_AUTH_HASH` (bcrypt output of `caddy hash-password --plaintext '<your-password>'`), and the variable `OBS_DOMAIN`. The deploy reuses the existing `DO_USER` and `DO_SSH_KEY` secrets — no `OBS_USER` / `OBS_SSH_KEY` needed.
+6. **Configure GitHub Secrets/Variables.** New entries needed: `OBS_HOST` (the OBS droplet's public IP), `OBS_BASIC_AUTH_HASH` (bcrypt output of `caddy hash-password --plaintext '<your-password>'`), `OBS_SSH_KEY` (private key whose public counterpart is in OBS droplet's `~/.ssh/authorized_keys`), and the variable `OBS_DOMAIN`. The SSH user is hardcoded to `root` in the workflow — no `DO_USER`-style indirection. `secrets.GITHUB_TOKEN` is auto-issued by Actions; nothing to configure.
 
 ### Deploying
 
 Manual trigger: GitHub → Actions → `Deploy OBS to DigitalOcean` → Run workflow → pick branch.
 
 The workflow:
-1. SSHes into the OBS droplet using `OBS_HOST` + the reused `DO_USER` / `DO_SSH_KEY` secrets.
-2. Clones / fast-forwards the repo to `$HOME/defcon-game`.
-3. Runs `obs/setup-swap.sh` via `sudo` (idempotent — re-running is a no-op; needs passwordless sudo).
+1. SSHes into the OBS droplet as `root` using `OBS_HOST` + `OBS_SSH_KEY`.
+2. Clones / fast-forwards the repo to `$HOME/defcon-game` using a workflow-scoped `GITHUB_TOKEN` for HTTPS auth (private repo).
+3. Runs `obs/setup-swap.sh` (idempotent; runs as root, no `sudo` needed).
 4. Writes `obs/.env` from forwarded Variables and Secrets, mode 600.
 5. `docker compose -f obs/docker-compose.yml up -d --build --remove-orphans`.
 6. Smoke-checks Caddy (`:80`) and runs a VictoriaMetrics health check from inside the Grafana container.
