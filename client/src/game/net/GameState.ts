@@ -32,15 +32,47 @@ export class GameState extends Phaser.Events.EventEmitter {
   splits: SplitData[] = [];
   leaderboard: LeaderboardEntry[] = [];
   lastError?: GameStateError;
+  /**
+   * server_now − client_now in ms, sampled from the most recent source we
+   * have (S2C envelope `server_ts`, or HTTP `Date` header via
+   * setServerTime). Positive = server clock is ahead of the client clock.
+   *
+   * Diagnostic only — the client must NOT subtract this from outgoing
+   * envelope `ts` (per docs/specs/client/02-net-sync.md:100-101, the
+   * stock client sends raw Date.now() so exploiting BUG-02 requires a
+   * custom client). UI uses this to warn the user when their clock has
+   * drifted past the ±2s server window.
+   */
+  serverOffsetMs?: number;
 
   constructor() {
     super();
   }
 
   /**
+   * Record a server-time observation. Called from envelope.apply() with
+   * each S2C envelope's server_ts, and from the HTTP login flow with the
+   * response's Date header (coarse but available before WS auth, so
+   * MainMenu can warn the user before AUTH is even attempted).
+   */
+  setServerTime(serverNowMs: number, clientNowMs: number = Date.now()): void {
+    if (!Number.isFinite(serverNowMs) || serverNowMs <= 0) {
+      return;
+    }
+    this.serverOffsetMs = serverNowMs - clientNowMs;
+    this.emit("serverTime", this.serverOffsetMs);
+  }
+
+  /**
    * Apply a server envelope. Mutates state and emits the appropriate event.
    */
   apply(envelope: S2CEnvelope): void {
+    // Track the server's wallclock on every inbound packet. Cheap, and
+    // the latest sample is the freshest; later UI consumers read it via
+    // serverOffsetMs.
+    if (typeof envelope.server_ts === "number") {
+      this.setServerTime(envelope.server_ts);
+    }
     switch (envelope.type) {
       case S2CType.AUTH_OK: {
         const data = envelope.data as { display_name: string };

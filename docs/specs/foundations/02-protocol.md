@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the WebSocket wire protocol: packet envelope shape, the C2S / S2C packet registry, sub-structures passed inside `data` payloads, JSON parser semantics (including the intentional parser differential that enables BUG-09), and the dispatch pipeline on the server.
+Defines the WebSocket wire protocol: packet envelope shape, the C2S / S2C packet registry, sub-structures passed inside `data` payloads, and the dispatch pipeline on the server.
 
 ## Envelope
 
@@ -43,7 +43,6 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 | 0x05 | `C2S_SWITCH_WEAPON` | `{ weapon_id: uint8 }`                              |
 | 0x06 | `C2S_INTERACT`      | `{ target_id: uint32, claimed_type: uint8 }`        |
 | 0x07 | `C2S_ENTER_DOOR`    | `{ door_id: uint32 }`                               |
-| 0x08 | `C2S_USE_ITEM`      | `{ item_name: string }`                             |
 | 0x09 | `C2S_SHOP_PURCHASE` | `{ item_id: uint8 }`                                |
 | 0x0A | `C2S_REPLAY_CONTROL`| `{ action: "play"\|"pause"\|"set_speed"\|"restart", speed?: float }` |
 
@@ -73,7 +72,7 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 | `EnemySpawn`       | `{ entity_id, type, x, y, hp }`                                                               |
 | `PickupSpawn`      | `{ entity_id, type, x, y }`                                                                   |
 | `DoorDef`          | `{ door_id, x, y, target_room, locked }`                                                      |
-| `PlayerSnapshot`   | `{ x, y, hp, weapon_id, ammo, inventory: []string, coins: int32, speed_stacks: uint8, fire_rate_stacks: uint8, damage_stacks: uint8, aim_angle: float32 }`. `aim_angle` is the radians angle of the player's most recent `C2S_SHOOT` (zero until the first shot). The player client ignores it (their local cursor read is more responsive); spectators (no local cursor) render the gun rotation from this field. See [04-lobby.md#live-spectating](./04-lobby.md#live-spectating). |
+| `PlayerSnapshot`   | `{ x, y, hp, weapon_id, ammo, coins: int32, speed_stacks: uint8, fire_rate_stacks: uint8, damage_stacks: uint8, aim_angle: float32 }`. `aim_angle` is the radians angle of the player's most recent `C2S_SHOOT` (zero until the first shot). The player client ignores it (their local cursor read is more responsive); spectators (no local cursor) render the gun rotation from this field. See [04-lobby.md#live-spectating](./04-lobby.md#live-spectating). |
 | `EntitySnapshot`   | `{ entity_id, type, x, y, hp, state }`                                                        |
 | `ProjSnapshot`     | `{ proj_id, x, y, angle, owner }`                                                             |
 | `SplitData`        | `{ room_index, time_ms, kills }`                                                              |
@@ -94,10 +93,7 @@ All traffic over the per-player WebSocket is JSON. Every packet has a typed enve
 raw bytes on WS
     │
     ▼
-[pre-processing / audit middleware]      ← parser P1 (may be manual / different)
-    │                                       logs e.g. item usage
-    ▼
-encoding/json.Unmarshal(envelope)        ← parser P2 (stdlib)
+encoding/json.Unmarshal(envelope)
     │
     ▼
 dispatch by type  ──► handler per type
@@ -105,19 +101,6 @@ dispatch by type  ──► handler per type
     ▼
 mutates game state (owned by gameLoop goroutine)
 ```
-
-**Critical:** parser P1 (the logging/audit middleware) and parser P2 (`encoding/json` used for dispatch) can disagree on the same raw bytes. The game keeps this disagreement intentionally — it's the core mechanism of BUG-09 (below).
-
-## JSON parser semantics (footguns)
-
-Go's `encoding/json`:
-
-1. Unmarshals struct fields **case-insensitively** by default. `{"Weapon_ID": 5}`, `{"weapon_id": 5}`, and `{"WEAPON_ID": 5}` all match the same struct field.
-2. Silently accepts **duplicate keys** — last one wins.
-
-Source: [Trail of Bits — Unexpected security footguns in Go's parsers](https://blog.trailofbits.com/2025/06/17/unexpected-security-footguns-in-gos-parsers/).
-
-Both behaviors must be preserved — they are the parser half of BUG-09.
 
 ## Spectator protocol
 
@@ -180,89 +163,8 @@ This gives the viewer everything it needs to render from the first frame without
 - **Server:** typed envelope live across `server/internal/protocol/` (decode) and `server/internal/game/loop.go` (dispatch). Single `gameLoop` goroutine drains `inCh`, runs the 20 Hz tick, and emits `S2C_*` envelopes via `outCh`.
 - **Spectator protocol:** server-side fan-out (per-spectator outCh + catchup) shipped in #23. Client-side bundle (`client/src/spectate-main.ts` + `SpectatorSync` + `SpectateGame`) shipped in the same PR.
 
-## Intentional bugs in this area
-
-### BUG-09 JSON Case-Insensitive Field Smuggling — DISABLED
-
-**Status:** Disabled. The parser differential (P1 case-sensitive/first-wins vs P2 `encoding/json` case-insensitive/last-wins) is still present, but its payload target — the `DebugItems` fallback in `server/internal/game/items.go` — has been removed. A smuggled `item_name: "timewarp"` now dead-ends at `ValidateItemName` (not in `AllowedItems` → rejected). See [../bugs.md — currently disabled](../bugs.md#currently-disabled).
-
-**To reintroduce:** re-add the `DebugItems` map + fallback branch in `HandleUseItem`. See [../features/inventory-items.md](../features/inventory-items.md) for the dispatch shape to restore.
-
-**Source:** [Trail of Bits — Unexpected security footguns in Go's parsers](https://blog.trailofbits.com/2025/06/17/unexpected-security-footguns-in-gos-parsers/).
-
-**Design choices enabling the bug:**
-
-1. `encoding/json` unmarshals case-insensitively.
-2. `encoding/json` takes the last of duplicate keys.
-3. A pre-processing middleware logs item usage using a **different** parser (or a manual string search) that is case-sensitive and/or uses first-key-wins semantics.
-4. A fallback/debug item dispatch path still exists in the item handler (see [../features/inventory-items.md](../features/inventory-items.md)).
-
-**Root cause sketch:**
-
-```go
-type UseItemPacket struct {
-    ItemName string `json:"item_name"`
-}
-
-var allowedItems = map[string]ItemDef{
-    "health_potion":  { ... },
-    "speed_boost":    { ... },
-    "shield":         { ... },
-}
-
-var debugItems = map[string]ItemDef{
-    "instakill":     { damage: 9999 },
-    "teleport":      { ... },
-    "timewarp":      { duration: -5000 },  // subtracts 5s from elapsed
-}
-
-func handleUseItem(pkt UseItemPacket, player *PlayerState) {
-    item, ok := allowedItems[pkt.ItemName]
-    if !ok {
-        // fall through to debugItems as a left-in fallback
-        return
-    }
-    applyItem(item, player)
-}
-```
-
-The dispatcher front-end calls `strings.EqualFold` against an allowlist built from `allowedItems` keys only; the logging middleware parses the raw JSON with a different parser that is case-sensitive and takes the **first** `item_name` key.
-
-**Exploit path:**
-
-Client sends a `C2S_USE_ITEM` with duplicate `item_name` keys:
-
-```json
-{
-  "type": 8,
-  "seq": 1,
-  "ts": 123,
-  "data": {"item_name": "HEALTH_POTION", "item_name": "timewarp"}
-}
-```
-
-- Logging middleware (parser P1, first-key-wins) sees `"HEALTH_POTION"` → logs legitimate item use.
-- `encoding/json` (parser P2, last-key-wins) produces `ItemName = "timewarp"`.
-- `strings.EqualFold` against the allowlist fails — BUT the fallback debug dispatch path fires and `timewarp` subtracts 5 s from elapsed time, or `instakill` clears a tough enemy.
-
-**Bound:**
-- `timewarp` is limited to one use per room (server tracks usage).
-- `instakill` only works on non-boss enemies.
-- Debug item names (`timewarp`, `instakill`, `teleport`) are discoverable in the stripped source but not hinted in-game.
-
-**Detection:**
-- Audit log records the benign first `item_name`; leaderboard replay will mismatch if the log is cross-referenced with the effective game state.
-- Do NOT add a "duplicate key check" in `encoding/json` — that kills the bug.
-
-**Synergies (when active):**
-- `timewarp` (−5 s) stacks with seed-planned routing — see [BUG-01](../features/mob-ai.md#bug-01-mob-seed-optimization).
-- `instakill` can shorten boss setup — see [BUG-08](../features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max) (also disabled).
-
-**See also:** BUG-10 at [../features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass](../features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass) (dispatch-side details of item handling).
-
 ## Cross-references
 
 - [05-server-runtime.md](./05-server-runtime.md) — dispatch/drain, tick loop, `ts` validation.
 - [06-game-state-conventions.md](./06-game-state-conventions.md) — state types handlers mutate.
-- [../features/inventory-items.md](../features/inventory-items.md) — BUG-09 dispatch-side details.
 - [../bugs.md](../bugs.md) — central bug index.

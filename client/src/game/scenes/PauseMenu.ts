@@ -297,7 +297,6 @@ export class PauseMenu extends Phaser.Scene {
     this.removeCanvasBlur();
     this.scene.stop("Game");
     this.scene.stop("GameHUD");
-    this.scene.stop("InventoryMenu");
     this.scene.stop("WinScreen");
     resetSync();
     this.scene.start("MainMenu");

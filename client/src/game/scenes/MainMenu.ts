@@ -73,6 +73,7 @@ export class MainMenu extends Phaser.Scene {
   private passwordInput?: HTMLInputElement;
   private statusDot?: Phaser.GameObjects.Arc;
   private statusText?: Phaser.GameObjects.Text;
+  private clockSkewText?: Phaser.GameObjects.Text;
   private startButton?: HTMLButtonElement;
   private submitting = false;
   private resizeHandlers: Array<() => void> = [];
@@ -84,6 +85,11 @@ export class MainMenu extends Phaser.Scene {
   private readyEnterKey?: Phaser.Input.Keyboard.Key;
   private readyPlayerName = "";
   private readyActive = false;
+
+  // Threshold (ms) above which a clock skew warning is shown. The server
+  // window is ±2s; we warn at ±1.5s so the banner appears before the
+  // user actually trips ts_out_of_window.
+  private static readonly CLOCK_SKEW_WARN_MS = 1500;
 
   private static readonly PANEL_WIDTH = 460;
   private static readonly PANEL_MIN_WIDTH = 340;
@@ -260,10 +266,42 @@ export class MainMenu extends Phaser.Scene {
 
     this.drawSponsorsPanel(panelX, sponsorTop, panelWidth, inputWidth);
 
+    // Clock-skew warning. Hidden until we have a server-time sample
+    // (HTTP Date header from /api/login, or any S2C envelope). Anchored
+    // top-center because the bottom-right login + sponsors stack is
+    // already crowded; top-of-screen is otherwise empty splash and
+    // gives the warning room to wrap. See issue #46.
+    const bannerWidth = Math.min(720, w - 80);
+    this.clockSkewText = this.add
+      .text(w / 2, 24, "", {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_BODY,
+        color: hex(WARNING),
+        align: "center",
+        wordWrap: { width: bannerWidth },
+        backgroundColor: hex(DEEP_NAVY),
+        padding: { x: 16, y: 8 },
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(DEPTH_SPLASH + 1)
+      .setVisible(false);
+    const repositionBanner = () => {
+      this.clockSkewText?.setPosition(this.scale.width / 2, 24);
+      this.clockSkewText?.setWordWrapWidth(
+        Math.min(720, this.scale.width - 80),
+      );
+    };
+    this.scale.on("resize", repositionBanner);
+    this.resizeHandlers.push(repositionBanner);
+
     const sync = getSync();
     sync.state.on("authOk", this.onAuthOk, this);
     sync.state.on("runStarted", this.onRunStarted, this);
     sync.state.on("error", this.onError, this);
+    sync.state.on("serverTime", this.refreshClockSkewBanner, this);
+    // Render once on entry in case a prior /api/login already populated
+    // serverOffsetMs before this scene mounted.
+    this.refreshClockSkewBanner();
 
     const kb = this.input.keyboard;
     if (kb) {
@@ -280,6 +318,23 @@ export class MainMenu extends Phaser.Scene {
     } else {
       setTimeout(() => this.usernameInput?.focus(), 50);
     }
+  }
+
+  private refreshClockSkewBanner(): void {
+    const t = this.clockSkewText;
+    if (!t) return;
+    const offset = getSync().state.serverOffsetMs;
+    if (offset === undefined || Math.abs(offset) < MainMenu.CLOCK_SKEW_WARN_MS) {
+      t.setVisible(false);
+      return;
+    }
+    const seconds = (Math.abs(offset) / 1000).toFixed(1);
+    const direction = offset > 0 ? "behind" : "ahead of";
+    t.setText(
+      `⚠ Your clock is ~${seconds}s ${direction} the server. ` +
+        `Sync your system clock (NTP) — otherwise the server will refuse to start your run.`,
+    );
+    t.setVisible(true);
   }
 
   /**
@@ -919,6 +974,18 @@ export class MainMenu extends Phaser.Scene {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
+      // Capture the HTTP Date header as a coarse server-time observation
+      // before the WS opens. 1-second resolution + RTT slop, but good
+      // enough to detect a multi-second clock drift and warn the user
+      // before C2S_AUTH would be rejected by the ±2s ts window.
+      const dateHeader = res.headers.get("Date");
+      if (dateHeader) {
+        const serverNow = Date.parse(dateHeader);
+        if (!Number.isNaN(serverNow)) {
+          getSync().state.setServerTime(serverNow);
+          this.refreshClockSkewBanner();
+        }
+      }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as {
           error?: string;
@@ -1127,6 +1194,7 @@ export class MainMenu extends Phaser.Scene {
     this.events.off("resume", this.onResume, this);
     this.readyEnterKey?.off("down", this.onReadyEnter, this);
     this.readyEnterKey = undefined;
+    sync.state.off("serverTime", this.refreshClockSkewBanner, this);
     for (const fn of this.resizeHandlers) {
       window.removeEventListener("resize", fn);
       this.scale.off("resize", fn);
