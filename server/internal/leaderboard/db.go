@@ -128,18 +128,30 @@ func InsertRun(db *sql.DB, run *CompletedRun) error {
 	return nil
 }
 
-// TopRuns returns the fastest n runs ordered by total_ms ascending, with
-// rank filled from the 1-based row position.
+// TopRuns returns the fastest n deduplicated runs ordered by total_ms
+// ascending, with rank filled from the 1-based row position. Only each
+// player's fastest unflagged run is included, matching the public lobby
+// leaderboard's default view.
 func TopRuns(db *sql.DB, n int) ([]protocol.LeaderboardEntry, error) {
 	if n <= 0 {
 		return nil, nil
 	}
 	rows, err := db.Query(
-		`SELECT cr.replay_id, cr.display_name, cr.total_ms, cr.seed, cr.splits_json, cr.submitted_at
-           FROM completed_runs cr
-      LEFT JOIN flagged_runs fr ON fr.replay_id = cr.replay_id
-          WHERE fr.replay_id IS NULL
-          ORDER BY cr.total_ms ASC, cr.submitted_at ASC, cr.replay_id ASC
+		`WITH ranked AS (
+             SELECT cr.replay_id, cr.player_id, cr.display_name, cr.total_ms,
+                    cr.seed, cr.splits_json, cr.submitted_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY cr.player_id
+                        ORDER BY cr.total_ms ASC, cr.submitted_at ASC, cr.replay_id ASC
+                    ) AS player_rank
+               FROM completed_runs cr
+          LEFT JOIN flagged_runs fr ON fr.replay_id = cr.replay_id
+              WHERE fr.replay_id IS NULL
+         )
+         SELECT replay_id, display_name, total_ms, seed, splits_json, submitted_at
+           FROM ranked
+          WHERE player_rank = 1
+          ORDER BY total_ms ASC, submitted_at ASC, replay_id ASC
           LIMIT ?`,
 		n,
 	)
@@ -185,8 +197,9 @@ func TopRuns(db *sql.DB, n int) ([]protocol.LeaderboardEntry, error) {
 	return entries, nil
 }
 
-// RankOfRun returns the 1-based leaderboard rank for replayID, excluding
-// flagged runs the same way TopRuns does.
+// RankOfRun returns the 1-based all-runs rank for replayID, excluding
+// flagged runs. The broadcast TopRuns view is player-deduped, but the
+// submitted run still receives its exact raw placement.
 func RankOfRun(db *sql.DB, replayID string) (int, error) {
 	var rank int
 	err := db.QueryRow(
