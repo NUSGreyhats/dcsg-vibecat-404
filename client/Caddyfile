@@ -6,6 +6,17 @@
 :3000 {
     encode gzip
 
+    # /_metrics/node gated to OBS droplet's IP. Mismatched source IPs
+    # fall through to the static file_server (returns the SPA index).
+    @metrics_node {
+        path /_metrics/node
+        remote_ip {$OBS_HOST}
+    }
+    handle @metrics_node {
+        rewrite * /metrics
+        reverse_proxy node-exporter:9100
+    }
+
     # Game-server WebSockets: /ws is the player path, /ws/spectate is the
     # read-only viewer path (spectator fan-out lives in the gameLoop),
     # /ws/replay is the admin-gated replay viewer (ticket-validated by

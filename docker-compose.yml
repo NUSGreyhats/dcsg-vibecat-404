@@ -84,11 +84,34 @@ services:
 
   client:
     build: ./client
+    environment:
+      # Source-IP allowlist for /_metrics/* — see client/Caddyfile.
+      # 127.0.0.1 default = closed in dev (no OBS droplet to scrape).
+      OBS_HOST: "${OBS_HOST:-127.0.0.1}"
     ports:
       - "80:3000"
     depends_on:
       - game-server
       - lobby
+    # exporters intentionally not in depends_on — game UI must keep
+    # serving even if scrape backends are down.
+    restart: unless-stopped
+
+  # Scraped by OBS via the client Caddy's /_metrics/* routes.
+  # See docs/specs/observability/design.md (Phase 2) for the contract.
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    pid: host
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
     restart: unless-stopped
 
 volumes:
