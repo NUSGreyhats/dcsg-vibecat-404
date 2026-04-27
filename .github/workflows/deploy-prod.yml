@@ -1,0 +1,134 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    # Per-run config. Defaults are baked into this workflow so prod
+    # doesn't share Variables with the dev/staging deploy. Override
+    # any of these at trigger time when you want the prod cutover
+    # posture (AUTH_MODE=token + QUEUE_ENABLED=true + MAX_CONCURRENT=4).
+    inputs:
+      AUTH_MODE:
+        description: "AUTH_MODE (open|identity|token)"
+        required: false
+        default: "identity"
+      QUEUE_ENABLED:
+        description: "QUEUE_ENABLED (true|false)"
+        required: false
+        default: "false"
+      MAX_CONCURRENT:
+        description: "MAX_CONCURRENT (int)"
+        required: false
+        default: "150"
+      LEADERBOARD_ENABLED:
+        description: "LEADERBOARD_ENABLED (true|false)"
+        required: false
+        default: "true"
+      LEADERBOARD_DISABLED_MESSAGE:
+        description: "Win-screen booth CTA when leaderboard is off"
+        required: false
+        default: ""
+
+# Distinct group from the dev/staging deploy so prod and staging
+# never block each other; serialized within prod so two prod
+# triggers in a row can't fight for the droplet.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy docker-compose stack to prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          AUTH_MODE: ${{ inputs.AUTH_MODE }}
+          QUEUE_ENABLED: ${{ inputs.QUEUE_ENABLED }}
+          MAX_CONCURRENT: ${{ inputs.MAX_CONCURRENT }}
+          LEADERBOARD_ENABLED: ${{ inputs.LEADERBOARD_ENABLED }}
+          LEADERBOARD_DISABLED_MESSAGE: ${{ inputs.LEADERBOARD_DISABLED_MESSAGE }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          ADMIN_SESSION_SECRET: ${{ secrets.ADMIN_SESSION_SECRET }}
+        with:
+          host: ${{ secrets.DO_HOST_PROD }}
+          username: ${{ secrets.DO_USER_PROD }}
+          key: ${{ secrets.DO_SSH_KEY_PROD }}
+          script_stop: true
+          command_timeout: 15m
+          envs: AUTH_MODE,QUEUE_ENABLED,MAX_CONCURRENT,LEADERBOARD_ENABLED,LEADERBOARD_DISABLED_MESSAGE,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,ADMIN_SESSION_SECRET
+          script: |
+            set -euo pipefail
+
+            REPO_SLUG="${{ github.repository }}"
+            REF="${{ github.ref_name }}"
+            DIR="$HOME/defcon-game"
+
+            echo "==> Target: $REPO_SLUG @ $REF (PROD)"
+            echo "==> Host:   $(hostname)  user: $(whoami)"
+            echo "==> Path:   $DIR"
+            echo "==> Env:    AUTH_MODE=${AUTH_MODE:-<unset>} QUEUE_ENABLED=${QUEUE_ENABLED:-<unset>} MAX_CONCURRENT=${MAX_CONCURRENT:-<unset>} LEADERBOARD_ENABLED=${LEADERBOARD_ENABLED:-<unset>} leaderboard_msg=$([ -n "${LEADERBOARD_DISABLED_MESSAGE:-}" ] && echo set || echo unset) admin_telegram=$([ -n "${TELEGRAM_BOT_TOKEN:-}" ] && echo set || echo unset) admin_session=$([ -n "${ADMIN_SESSION_SECRET:-}" ] && echo set || echo unset)"
+
+            docker version >/dev/null 2>&1 || {
+              echo "docker is not available to $USER — add the user to the 'docker' group or install docker." >&2
+              exit 1
+            }
+            docker compose version >/dev/null 2>&1 || {
+              echo "docker compose v2 is required (plugin or standalone compose-v2)." >&2
+              exit 1
+            }
+
+            if [ ! -d "$DIR/.git" ]; then
+              echo "==> Cloning fresh checkout"
+              git clone --depth 50 "https://github.com/${REPO_SLUG}.git" "$DIR"
+            fi
+
+            cd "$DIR"
+            git remote set-url origin "https://github.com/${REPO_SLUG}.git"
+            git fetch --prune --tags origin "+refs/heads/*:refs/remotes/origin/*"
+            RESOLVED_SHA="$(git rev-parse "origin/${REF}" 2>/dev/null || git rev-parse "${REF}")"
+            echo "==> Resolved ${REF} → ${RESOLVED_SHA}"
+            git reset --hard "${RESOLVED_SHA}"
+
+            echo "==> Writing .env"
+            umask 077
+            cat > .env <<EOF
+            AUTH_MODE=${AUTH_MODE:-}
+            QUEUE_ENABLED=${QUEUE_ENABLED:-}
+            MAX_CONCURRENT=${MAX_CONCURRENT:-}
+            LEADERBOARD_ENABLED=${LEADERBOARD_ENABLED:-}
+            LEADERBOARD_DISABLED_MESSAGE=${LEADERBOARD_DISABLED_MESSAGE:-}
+            TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+            TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID:-}
+            ADMIN_SESSION_SECRET=${ADMIN_SESSION_SECRET:-}
+            EOF
+            umask 022
+
+            echo "==> docker compose up -d --build"
+            docker compose up -d --build --remove-orphans
+
+            echo "==> docker image prune"
+            docker image prune -f >/dev/null
+
+            echo "==> Status"
+            docker compose ps
+
+            for i in 1 2 3 4 5; do
+              if curl -fsS http://localhost:80/ >/dev/null 2>&1; then
+                echo "==> client reachable on :80"
+                break
+              fi
+              echo "    waiting for client ($i/5)…"
+              sleep 2
+            done
+            curl -fsS http://127.0.0.1:8080/health >/dev/null \
+              && echo "==> game-server /health ok" \
+              || { echo "!! game-server /health failed" >&2; exit 1; }
+            curl -fsS http://localhost:80/api/health >/dev/null \
+              && echo "==> lobby /api/health reachable via Caddy" \
+              || { echo "!! lobby /api/health unreachable via Caddy" >&2; exit 1; }
+
+            echo "==> Deploy complete: ${REPO_SLUG}@${RESOLVED_SHA} (PROD)"
