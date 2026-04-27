@@ -24,7 +24,7 @@ This file is a thin index. Start at [`docs/specs/README.md`](docs/specs/README.m
 | [docs/specs/foundations/05-server-runtime.md](docs/specs/foundations/05-server-runtime.md)     | Goroutines, tick loop, BUG-02 / BUG-06 / BUG-11                    |
 | [docs/specs/foundations/06-game-state-conventions.md](docs/specs/foundations/06-game-state-conventions.md) | State blocks + ownership + bug-critical type choices   |
 | [docs/specs/foundations/07-determinism-seeding.md](docs/specs/foundations/07-determinism-seeding.md) | MobRNG + consumption invariant replay relies on            |
-| [docs/specs/foundations/08-leaderboard-replay.md](docs/specs/foundations/08-leaderboard-replay.md) | CompletedRun, checksum, replay engine                        |
+| [docs/specs/foundations/08-leaderboard-replay.md](docs/specs/foundations/08-leaderboard-replay.md) | CompletedRun, checksum, replay engine + streaming `/ws/replay` |
 | [docs/specs/foundations/09-ci-cd-deploy.md](docs/specs/foundations/09-ci-cd-deploy.md)         | Pipelines, source stripping, build tags that ship BUG-11           |
 | [docs/specs/foundations/10-client-architecture.md](docs/specs/foundations/10-client-architecture.md) | Phaser scenes, net sync, packet→scene mapping                |
 | [docs/specs/features/combat-weapons.md](docs/specs/features/combat-weapons.md)                 | Damage pipeline, HP, cooldowns (BUG-04, BUG-07, BUG-08)            |
@@ -32,6 +32,7 @@ This file is a thin index. Start at [`docs/specs/README.md`](docs/specs/README.m
 | [docs/specs/features/rooms-doors.md](docs/specs/features/rooms-doors.md)                       | Room traversal, door state machine (BUG-03)                        |
 | [docs/specs/features/pickups.md](docs/specs/features/pickups.md)                               | Pickups + interact range (BUG-05)                                  |
 | [docs/specs/features/inventory-items.md](docs/specs/features/inventory-items.md)               | Inventory, item parsing (BUG-10, BUG-09 dispatch half)             |
+| [docs/specs/client/11-replay-viewer.md](docs/specs/client/11-replay-viewer.md)                 | Replay viewer client (third Phaser bundle, plays back stored runs) |
 
 ## Open questions
 

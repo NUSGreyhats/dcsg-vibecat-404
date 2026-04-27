@@ -19,6 +19,7 @@ export default defineConfig({
             input: {
                 index: 'index.html',
                 spectate: 'spectate.html',
+                replay: 'replay.html',
             },
             output: {
                 manualChunks: {
@@ -33,6 +34,9 @@ export default defineConfig({
         // proxies down to the Go server — same URL shape as prod Caddy.
         port: 5173,
         proxy: {
+            // /ws covers /ws, /ws/spectate, /ws/replay because Vite's
+            // default match is a path prefix. The WS upgrade carries
+            // query strings (replay_id, ticket) verbatim.
             '/ws': { target: gameServerWs, ws: true, changeOrigin: true },
             '/api': { target: gameServer, changeOrigin: true },
             '/register': { target: gameServer, changeOrigin: true },

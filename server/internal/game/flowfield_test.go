@@ -498,10 +498,10 @@ func TestUpdateEnemy_AggroRoutesAroundUShape(t *testing.T) {
 		Y:          mobY,
 		HP:         3,
 		MaxHP:      3,
-		AIState:    AIAggro,           // start aggroed so the test isolates the chase
-		AggroRange: 2000,              // way larger than the room — stays aggroed
+		AIState:    AIAggro, // start aggroed so the test isolates the chase
+		AggroRange: 2000,    // way larger than the room — stays aggroed
 		Speed:      Archetypes[EnemyGrunt].Speed,
-		JitterX:    0.5,               // no bias — common case
+		JitterX:    0.5, // no bias — common case
 		JitterY:    0.5,
 	}
 
@@ -522,7 +522,7 @@ func TestUpdateEnemy_AggroRoutesAroundUShape(t *testing.T) {
 
 		dx := p.X - e.X
 		dy := p.Y - e.Y
-		if dx*dx+dy*dy < 34*34 {
+		if dx*dx+dy*dy < meleeAttackRange*meleeAttackRange {
 			// Reached melee range — chase succeeded.
 			return
 		}
@@ -595,10 +595,11 @@ func TestUpdateEnemy_NoOvershootOscillation(t *testing.T) {
 	// Mob 1 px diagonally off the tile center — well inside one tick's
 	// step (4.75 px for a grunt at 95 px/s × 50 ms). Same tile as the
 	// player, no jitter bias, so the BFS source is the mob's own tile and
-	// the aim point is the mob's own tile center.
+	// the aim point is the mob's own tile center. Use kamikaze so melee
+	// standoff does not mask the movement-clamp behaviour under test.
 	e := &EnemyState{
 		EntityID:   1,
-		Type:       EnemyGrunt,
+		Type:       EnemyKamikaze,
 		X:          playerX - 1,
 		Y:          playerY - 1,
 		HP:         3,

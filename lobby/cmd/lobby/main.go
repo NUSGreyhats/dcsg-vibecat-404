@@ -37,6 +37,7 @@ import (
 	"github.com/greyhats/defcon-game/lobby/internal/settings"
 	"github.com/greyhats/defcon-game/lobby/web"
 	"github.com/greyhats/defcon-game/pkg/identity"
+	"github.com/greyhats/defcon-game/pkg/replayauth"
 )
 
 // avgTurnMs is the rough turn duration used to compute est_wait_ms for
@@ -307,6 +308,12 @@ func main() {
 			adminFlagHandler(w, r, gameDB, true)
 		case r.Method == http.MethodPost && r.URL.Path == "/admin/leaderboard/unflag":
 			adminFlagHandler(w, r, gameDB, false)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/meta") && strings.HasPrefix(r.URL.Path, "/admin/replay/"):
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/admin/replay/"), "/meta")
+			adminReplayMetaHandler(w, gameDB, id)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/ticket") && strings.HasPrefix(r.URL.Path, "/admin/replay/"):
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/admin/replay/"), "/ticket")
+			adminReplayTicketHandler(w, gameDB, id, adminSessionSecret)
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/admin/replay/"):
 			id := strings.TrimPrefix(r.URL.Path, "/admin/replay/")
 			if id == "" || strings.Contains(id, "/") {
@@ -737,6 +744,76 @@ func adminSetMaxConcurrent(w http.ResponseWriter, r *http.Request, lobbyDB *sql.
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// adminReplayMetaHandler serves GET /admin/replay/:id/meta — the
+// lightweight metadata projection used by the replay viewer's loading
+// screen and end screen. Admin-gated by the parent /admin/* wrapper.
+//
+// Empty `id` (someone hits exactly /admin/replay//meta) is rejected as
+// a 400 — the path-suffix matcher in the router doesn't on its own
+// reject double slashes.
+func adminReplayMetaHandler(w http.ResponseWriter, gameDB *sql.DB, id string) {
+	if id == "" || strings.Contains(id, "/") {
+		http.Error(w, "invalid replay id", http.StatusBadRequest)
+		return
+	}
+	meta, err := leaderboard.GetReplayMeta(gameDB, id)
+	if err != nil {
+		if errors.Is(err, leaderboard.ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("leaderboard: meta %s: %v", id, err)
+		http.Error(w, "meta unavailable", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(meta)
+}
+
+// adminReplayTicketHandler serves POST /admin/replay/:id/ticket — mints
+// a 30-min HMAC ticket bound to the replay_id, signed with the shared
+// admin session secret. Admin-gated by the parent /admin/* wrapper.
+//
+// We deliberately verify the row exists (and that its checksum is
+// intact) before issuing a ticket: a ticket for a missing or corrupted
+// row would produce a confusing failure mode at the WS upgrade. Better
+// to surface "not found" / "integrity check failed" at the same layer
+// the user is reading meta from.
+func adminReplayTicketHandler(w http.ResponseWriter, gameDB *sql.DB, id string, secret []byte) {
+	if id == "" || strings.Contains(id, "/") {
+		http.Error(w, "invalid replay id", http.StatusBadRequest)
+		return
+	}
+	if len(secret) < 16 {
+		http.Error(w, "ticket secret unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if _, err := leaderboard.GetReplay(gameDB, id); err != nil {
+		if errors.Is(err, leaderboard.ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, leaderboard.ErrChecksumMismatch) {
+			log.Printf("leaderboard: ticket %s: checksum mismatch", id)
+			http.Error(w, "REPLAY_INTEGRITY_FAILED", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("leaderboard: ticket %s: %v", id, err)
+		http.Error(w, "replay unavailable", http.StatusInternalServerError)
+		return
+	}
+	exp := time.Now().Add(replayauth.TTL)
+	body := struct {
+		Ticket    string `json:"ticket"`
+		ExpiresAt int64  `json:"expires_at"`
+	}{
+		Ticket:    replayauth.Sign(secret, id, exp),
+		ExpiresAt: exp.UnixMilli(),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // adminWinnersCSV streams the non-flagged top runs joined with player

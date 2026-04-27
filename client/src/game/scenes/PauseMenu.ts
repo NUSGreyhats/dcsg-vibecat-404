@@ -304,8 +304,8 @@ export class PauseMenu extends Phaser.Scene {
   }
 
   private logout(): void {
-    // Same as restart, but also wipes the cached player_id so MainMenu
-    // shows the login form instead of auto-resuming the previous account.
+    // Same as restart, but also wipes any cached player_id from local
+    // session state before MainMenu asks for credentials again.
     clearCachedPlayerId();
     this.restart();
   }

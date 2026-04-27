@@ -29,6 +29,18 @@ const (
 	// Per-packet ts validation window. No cumulative drift check — BUG-02.
 	TsValidationWindow = 2 * time.Second
 
+	// MaxRunDuration is the hard cap on a single run. The lobby advancer's
+	// TurnTTL is 5min; this gives ~2× margin for slow-but-legitimate play
+	// before we force-end the run as RunFailed and release the
+	// MAX_CONCURRENT slot held by handleWS for waiting players.
+	MaxRunDuration = 10 * time.Minute
+
+	// IdleTimeout is the no-C2S-packet window after which an active run is
+	// force-ended as RunFailed. Catches AFK / disconnected-but-not-closed
+	// clients much faster than MaxRunDuration. Set on a per-engine clock
+	// (Engine.lastInputAt), reset in drainInput on every received frame.
+	IdleTimeout = 90 * time.Second
+
 	// Reconciliation tick cadence (BUG-11 recovery).
 	ReconcileEveryTicks = 10
 

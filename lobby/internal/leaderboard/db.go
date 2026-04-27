@@ -141,6 +141,47 @@ type Replay struct {
 	InputLog    []byte `json:"input_log"`
 }
 
+// ReplayMeta is the lightweight projection of a CompletedRun returned
+// by the public viewer's /admin/replay/:id/meta endpoint. It deliberately
+// omits input_log and checksum so an admin-panel JS bug can't accidentally
+// exfiltrate input logs into the DOM of every page that fetches metadata.
+type ReplayMeta struct {
+	ReplayID    string  `json:"replay_id"`
+	DisplayName string  `json:"display_name"`
+	TotalMs     int64   `json:"total_ms"`
+	Seed        int64   `json:"seed"`
+	Splits      []Split `json:"splits"`
+	SubmittedAt string  `json:"submitted_at"`
+}
+
+// GetReplayMeta returns the metadata for a single replay, sans input_log.
+// Mirrors GetReplay's error semantics (ErrNotFound on missing row) but
+// does no checksum verification — the on-disk integrity check belongs
+// to the path that actually consumes input_log (replay engine, raw
+// download). The metadata projection is read-only display fodder.
+func GetReplayMeta(db *sql.DB, replayID string) (*ReplayMeta, error) {
+	var m ReplayMeta
+	var splitsJSON string
+	err := db.QueryRow(
+		`SELECT replay_id, display_name, total_ms, seed, splits_json, submitted_at
+           FROM completed_runs
+          WHERE replay_id = ?`,
+		replayID,
+	).Scan(&m.ReplayID, &m.DisplayName, &m.TotalMs, &m.Seed, &splitsJSON, &m.SubmittedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("leaderboard: get meta: %w", err)
+	}
+	if splitsJSON != "" {
+		if err := json.Unmarshal([]byte(splitsJSON), &m.Splits); err != nil {
+			return nil, fmt.Errorf("leaderboard: unmarshal splits: %w", err)
+		}
+	}
+	return &m, nil
+}
+
 // GetReplay fetches a single completed run by replay_id. Returns ErrNotFound
 // if the row doesn't exist, or ErrChecksumMismatch if the stored checksum
 // doesn't match SHA256(seed || input_log) — see
