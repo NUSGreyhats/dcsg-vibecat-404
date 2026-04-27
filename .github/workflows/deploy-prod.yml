@@ -53,19 +53,22 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
           ADMIN_SESSION_SECRET: ${{ secrets.ADMIN_SESSION_SECRET }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.DO_HOST_PROD }}
           username: ${{ secrets.DO_USER_PROD }}
           key: ${{ secrets.DO_SSH_KEY_PROD }}
           script_stop: true
           command_timeout: 15m
-          envs: AUTH_MODE,QUEUE_ENABLED,MAX_CONCURRENT,LEADERBOARD_ENABLED,LEADERBOARD_DISABLED_MESSAGE,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,ADMIN_SESSION_SECRET
+          envs: AUTH_MODE,QUEUE_ENABLED,MAX_CONCURRENT,LEADERBOARD_ENABLED,LEADERBOARD_DISABLED_MESSAGE,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,ADMIN_SESSION_SECRET,GITHUB_TOKEN
           script: |
             set -euo pipefail
 
             REPO_SLUG="${{ github.repository }}"
             REF="${{ github.ref_name }}"
             DIR="$HOME/defcon-game"
+            REPO_URL_AUTH="https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO_SLUG}.git"
+            REPO_URL_PLAIN="https://github.com/${REPO_SLUG}.git"
 
             echo "==> Target: $REPO_SLUG @ $REF (PROD)"
             echo "==> Host:   $(hostname)  user: $(whoami)"
@@ -83,12 +86,15 @@ jobs:
 
             if [ ! -d "$DIR/.git" ]; then
               echo "==> Cloning fresh checkout"
-              git clone --depth 50 "https://github.com/${REPO_SLUG}.git" "$DIR"
+              git clone --depth 50 "$REPO_URL_AUTH" "$DIR"
             fi
 
             cd "$DIR"
-            git remote set-url origin "https://github.com/${REPO_SLUG}.git"
+            # Use token for fetch; restore plain URL after so the token
+            # doesn't sit in .git/config between runs (expires with the workflow anyway).
+            git remote set-url origin "$REPO_URL_AUTH"
             git fetch --prune --tags origin "+refs/heads/*:refs/remotes/origin/*"
+            git remote set-url origin "$REPO_URL_PLAIN"
             RESOLVED_SHA="$(git rev-parse "origin/${REF}" 2>/dev/null || git rev-parse "${REF}")"
             echo "==> Resolved ${REF} → ${RESOLVED_SHA}"
             git reset --hard "${RESOLVED_SHA}"
