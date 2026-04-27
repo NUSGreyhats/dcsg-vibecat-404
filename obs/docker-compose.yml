@@ -1,10 +1,5 @@
-# OBS observability stack.
-# Run from the obs/ directory: `docker compose up -d --build`
-# (compose auto-loads obs/.env from this directory).
-#
-# Architecture: see ../docs/specs/observability/design.md.
-# Phase 1 scope: stand up the platform monitoring itself.
-# Game-droplet exporters and app metrics arrive in Phases 2 and 3.
+# OBS observability stack. See ../docs/specs/observability/design.md.
+# Run from obs/: `docker compose up -d --build`.
 
 services:
   victoria-metrics:
@@ -20,19 +15,16 @@ services:
     volumes:
       - vm-data:/storage
       - ./victoria-metrics/scrape.yml:/etc/victoria-metrics/scrape.yml:ro
+    # `game-droplet` hostname → game droplet IP, used in scrape.yml.
+    extra_hosts:
+      - "game-droplet:${GAME_HOST:-127.0.0.1}"
     restart: unless-stopped
-    # No ports exposed to host — only Grafana (via Caddy) talks to it,
-    # over the Docker network.
 
   grafana:
     image: grafana/grafana:11.4.0
     container_name: obs-grafana
+    # Anonymous Editor; admin login disabled. See design.md "Grafana auth".
     environment:
-      # Auth: everyone past the Caddy basic-auth gate is anonymous Editor.
-      # No Grafana login flow — the admin user still exists internally
-      # but the login form is disabled and basic-auth API is off, so
-      # nothing can authenticate as admin. Provisioning still works
-      # (it bypasses HTTP auth).
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Editor
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
@@ -47,7 +39,6 @@ services:
     depends_on:
       - victoria-metrics
     restart: unless-stopped
-    # No ports exposed to host — Caddy fronts it.
 
   caddy:
     image: caddy:2.8-alpine
@@ -79,8 +70,6 @@ services:
       - /sys:/host/sys:ro
       - /:/rootfs:ro
     restart: unless-stopped
-    # No ports exposed to host — VictoriaMetrics scrapes it over the Docker
-    # network at node-exporter:9100.
 
 volumes:
   vm-data:

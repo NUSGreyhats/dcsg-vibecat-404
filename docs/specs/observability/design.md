@@ -2,7 +2,7 @@
 
 > Tracks GitHub issue [#75 "Admin panel observability"](https://github.com/NUSGreyhats/DEFCON-Game/issues/75).
 
-**Status:** Phase 1 implementation in progress (plan at [`phase-1-plan.md`](./phase-1-plan.md)); Phases 2 + 3 plans deferred until Phase 1 ships.
+**Status:** Phase 1 shipped; Phase 2 (game-droplet exporters) implementation in progress. Phase 3 deferred.
 **Date:** 2026-04-27
 **Target event:** DEF CON SG (3-day window)
 
@@ -27,7 +27,7 @@ Two droplets. Observability runs on a **separate VM** so a saturated game host d
 │    /_metrics/lobby ───┼──► lobby    │    │   (single-node, loopback)   │
 │    /_metrics/game ────┼──► server   │    │   ↑ scrape every 15s        │
 │    /_metrics/node ────┼──► node-exp │    │                             │
-│    /_metrics/cadvisor ┼──► cadvisor │    │  node-exp :9100 (loopback)  │
+│                       │             │    │  node-exp :9100 (loopback)  │
 │                       │             │ ◄──┤                             │
 │  (all backends on     │             │HTTP│                             │
 │   docker net,         │             │ +  │                             │
@@ -48,7 +48,7 @@ droplet allowlists :22 to team IPs and exposes :80/:443 to the world.
 - **VictoriaMetrics single-node** for metrics storage. Prometheus-compatible (same scrape config, same query API, same exposition format). Chosen specifically for ~2-3× lower memory footprint than Prometheus at our scale, which matters on a 512 MB VM. Drop-in: Grafana speaks to it via the existing "Prometheus" datasource type.
 - **Grafana, self-hosted on the OBS VM** (not Grafana Cloud — keeps everything inside the existing Docker Compose deploy pattern, no external account).
 - **`prometheus/client_golang`** for app instrumentation (industry standard, idiomatic Go; emits the same exposition format VictoriaMetrics scrapes).
-- **cAdvisor** for per-container metrics, **node-exporter** for host metrics (one each on every VM).
+- **node-exporter** for host metrics on each VM. (cAdvisor for per-container metrics is in the decisions log — currently skipped due to a Docker incompatibility.)
 - **Caddy** in front of Grafana on the OBS VM (TLS via Let's Encrypt, basic-auth gate). Same pattern as the existing client front-door.
 
 ## Sizing — DigitalOcean $4/mo Basic droplet
@@ -61,7 +61,6 @@ droplet allowlists :22 to team IPs and exposes :80/:443 to the world.
 |---|---|
 | node-exporter on game droplet (default + minor trim) | ~400 |
 | node-exporter on OBS VM (self-monitoring) | ~400 |
-| cAdvisor on game droplet (3 containers, modern defaults) | ~120 |
 | App metrics: `lobby` + `game-server` | ~200 |
 | VictoriaMetrics self-scrape | ~100 |
 | Grafana self-metrics | ~50 |
@@ -108,7 +107,6 @@ For comparison: Prometheus at the same scale would be ~400-500 MB typical and ~6
 
 - **1 GB swapfile** on the OBS VM (defensive, not load-bearing — VictoriaMetrics fits under the budget at this scale; swap is just belt-and-suspenders for unexpected cardinality growth).
 - VictoriaMetrics flags: `-retentionPeriod=7d`, `-storageDataPath=/storage`, `-search.maxSeries=10000` (caps a single query's series scan), `-memory.allowedPercent=70` (caps VM's adaptive memory ceiling so it leaves room for Grafana on this small box).
-- **cAdvisor**: `--store_container_labels=false --docker_only=true` only. Modern cAdvisor (v0.49+) already disables high-cardinality collectors (`percpu`, `sched`, `process`, `tcp`, `udp`, etc.) by default — do not specify a `--disable_metrics` list, the defaults are correct.
 - **Single Grafana org, no plugins**, no embedded image renderer.
 - **Live-resize escape hatch:** if the OBS VM OOMs during the event, DO supports live resize to 1 GB ($2 extra for the month) without a rebuild — documented in the runbook. Less likely with VictoriaMetrics than it would have been with Prometheus, but still worth knowing.
 
@@ -116,7 +114,7 @@ For comparison: Prometheus at the same scale would be ~400-500 MB typical and ~6
 
 ### Scrape access from OBS → game droplet
 
-VictoriaMetrics on OBS must reach four `/metrics` endpoints on the game droplet: cAdvisor, node-exporter, `lobby`, `game-server`.
+VictoriaMetrics on OBS must reach three `/metrics` endpoints on the game droplet: node-exporter, `lobby`, `game-server`.
 
 **Approach: route all four through the existing `client` Caddy on `:80`, gated by source-IP match.** This stays consistent with the existing pattern (everything on the game droplet enters via Caddy; backends bind to loopback or the Docker network only).
 
@@ -126,10 +124,16 @@ Path convention — underscore-prefixed to mark internal-only:
 |------------------------|----------------------------------|
 | `/_metrics/lobby`      | `lobby:3001/metrics`             |
 | `/_metrics/game`       | `game-server:8080/metrics`       |
-| `/_metrics/cadvisor`   | `cadvisor:8080/metrics` (its default port) |
 | `/_metrics/node`       | `node-exporter:9100/metrics`     |
 
-Each Caddy `@metrics_*` matcher includes a `remote_ip` directive limited to the OBS droplet IP. Anyone else hitting `/_metrics/...` gets a 403. cAdvisor and node-exporter on the game droplet bind to the Docker network only — they are *not* reachable from outside Caddy.
+The Caddy `@metrics_node` matcher includes a `remote_ip` directive limited to the OBS droplet IP. Mismatched IPs fall through Caddy's matcher chain to the static `file_server`, which serves the SPA index — no metrics leak. node-exporter binds to the Docker network only and is *not* reachable from outside Caddy.
+
+**Source-IP preservation under Docker is deployment-dependent.** Docker's default bridge networking with `userland-proxy=true` rewrites incoming source IPs to the bridge gateway, which would break this gate (Caddy would never see the OBS droplet's real IP). Two contingencies:
+
+- If the game droplet runs Docker with `userland-proxy=false` (set in `/etc/docker/daemon.json`) or its kernel/iptables stack preserves source IP via DNAT, the gate works as designed.
+- If not, a Phase 2.5 follow-up swaps `remote_ip` for HTTP basic-auth on the metrics paths (a shared `OBS_SCRAPE_TOKEN` secret in both `client/Caddyfile`'s `basic_auth` directive and OBS's scrape config). Same threat coverage; works regardless of Docker's NAT behavior.
+
+We ship the `remote_ip` version first because it's simpler and most modern Linux Docker setups preserve source IPs. We'll know which is the case from the first scrape after deploy: if the OBS-side dashboards populate, source IPs are preserved.
 
 **DO Cloud Firewall — game droplet:** *no change*. Caddy's `remote_ip` directive does the gating in-app; attaching a new Cloud Firewall now would risk breaking the existing public traffic if a rule is forgotten (Cloud Firewall replaces the default-allow policy when attached). The metrics endpoints are already off the public address space — they only exist as Caddy paths reachable from the OBS IP.
 
@@ -160,7 +164,12 @@ New repo `Variables` (non-secret, version-controlled-elsewhere) and `Secrets` in
 - `OBS_DOMAIN` (variable) — `observability.nusgreyhats.org`. Used by Caddy on OBS for the LE TLS cert.
 - `OBS_BASIC_AUTH_HASH` (secret) — bcrypt hash from `caddy hash-password`. The username is hardcoded to `nusgreyhats` in the Caddyfile and isn't managed as a secret. **The only credential mods type day-to-day.**
 
-- `OBS_SSH_KEY` (secret) — private SSH key whose public counterpart is in the OBS droplet's `~/.ssh/authorized_keys`. We considered reusing `DO_SSH_KEY` from the game-droplet deploy, but the two droplets ended up with different `authorized_keys` sets (the CI deploy key the game droplet uses isn't authorized on OBS). Cleaner to keep OBS's key separate — game droplet untouched, blast radius smaller.
+- `OBS_SSH_KEY` (secret) — private SSH key whose public counterpart is in the OBS droplet's `~/.ssh/authorized_keys`. Verified empirically: `DO_SSH_KEY` does not authenticate against OBS, so OBS gets its own deploy key. Game droplet untouched.
+
+**Phase 2 additions** (existing secrets reused, no new ones to configure):
+
+- `OBS_HOST` (already present) — game droplet's `deploy.yml` now also forwards this so `client/Caddyfile`'s `remote_ip {$OBS_HOST}` directive can substitute it.
+- `DO_HOST` (already present) — OBS droplet's `deploy-obs.yml` reads it as `GAME_HOST` env var, aliased to `game-droplet` in the VM container's `/etc/hosts` so `scrape.yml` can reference it by hostname.
 
 The OBS deploy hardcodes `root` as the SSH user (it doesn't reuse `DO_USER`, which on this repo's existing deploy points to a non-root account that doesn't exist on the OBS droplet). Both DO droplets ship with `root` available by default; OBS uses it directly. `setup-swap.sh` runs as root without needing `sudo`. Also forwards `secrets.GITHUB_TOKEN` (auto-issued, run-scoped) so the droplet can `git clone` a private repo.
 
@@ -175,12 +184,6 @@ From **node-exporter** on each VM:
 - Network: bytes in/out per interface, conntrack count, dropped packets
 - Load average (1, 5, 15)
 - File descriptor count
-
-From **cAdvisor** on the game droplet:
-- Per-container CPU% and CPU throttling
-- Per-container memory RSS, working set, cache
-- Per-container `container_fs_*` (filesystem usage — kept on purpose, the SQLite databases live in a Docker volume and we want to know if it's filling up)
-- Per-container network rx/tx bytes
 
 ### Phase 3 — App-level (instrumented in Go)
 
@@ -251,10 +254,9 @@ Each phase ships working, useful software on its own. One spec, three plans (thi
 **Demo:** mods open Grafana mid-event, see real-time CPU / mem / disk / network for the game droplet host and per-container resource usage.
 
 **Deliverables:**
-- Add `cadvisor` and `node-exporter` services to the existing root `docker-compose.yml`. **No public ports** — they bind to the Docker network only and are reachable exclusively through the existing `client` Caddy.
-- **node-exporter container config (same gotcha as Phase 1):** bind-mount `/proc:/host/proc:ro`, `/sys:/host/sys:ro`, `/:/rootfs:ro`; pass `--path.procfs=/host/proc --path.sysfs=/host/sys --path.rootfs=/rootfs`; run with `pid: host`.
-- **cAdvisor container config:** bind-mount `/:/rootfs:ro`, `/var/run:/var/run:ro`, `/sys:/sys:ro`, `/var/lib/docker/:/var/lib/docker:ro`, `/dev/disk/:/dev/disk:ro`, `/var/run/docker.sock:/var/run/docker.sock:ro`. Flags: `--store_container_labels=false --docker_only=true`. **Do not** add a `--disable_metrics` list — modern cAdvisor (v0.49+) already disables high-cardinality collectors by default.
-- Extend `client/Caddyfile` with two new matcher-and-handle blocks (one per metric path). Caddy v2 syntax — example for the node-exporter route:
+- Add `node-exporter` service to the existing root `docker-compose.yml`. **No public ports** — it binds to the Docker network only and is reachable exclusively through the existing `client` Caddy.
+- **node-exporter container config:** bind-mount `/proc:/host/proc:ro`, `/sys:/host/sys:ro`, `/:/rootfs:ro`; pass `--path.procfs=/host/proc --path.sysfs=/host/sys --path.rootfs=/rootfs`; run with `pid: host`. (Without these, node-exporter reports the container's own `/proc` / `/sys` — mostly empty.)
+- Extend `client/Caddyfile` with one matcher-and-handle block:
   ```
   @metrics_node {
       path /_metrics/node
@@ -265,12 +267,12 @@ Each phase ships working, useful software on its own. One spec, three plans (thi
       reverse_proxy node-exporter:9100
   }
   ```
-  Mirror the same shape for `@metrics_cadvisor` (proxying to `cadvisor:8080`). Non-matching source IPs fall through to the next handler and end up on the static file server (which 404s on these paths) — effectively a 404, not a 403, but indistinguishable for our purposes. If we want an explicit 403 we can add a second matcher with `not remote_ip` and an `error 403`.
-- No DO Cloud Firewall change on the game droplet — the in-Caddy source-IP gate is sufficient and avoids the risk of an attached firewall breaking existing public traffic.
-- Update OBS scrape config (`obs/victoria-metrics/scrape.yml`) to add a job for the game droplet: targets `http://<game-droplet-host>/_metrics/node` and `/_metrics/cadvisor`.
-- Add two provisioned Grafana dashboards: "Game host" (node-exporter) and "Game containers" (cAdvisor).
+  Non-matching source IPs fall through to the static `file_server` (returns the SPA index — no metrics leak).
+- No DO Cloud Firewall change on the game droplet — the in-Caddy source-IP gate is sufficient.
+- Update `obs/victoria-metrics/scrape.yml` to add a `node-exporter-game` job (`metrics_path: /_metrics/node`, target `game-droplet:80`). The `game-droplet` host is aliased to the game droplet's IP via `extra_hosts` on the VM container, sourced from the existing `DO_HOST` secret as `GAME_HOST`.
+- The standard "Node Exporter Full" dashboard provisioned in Phase 1 already shows both `host=obs` and `host=game` — no new dashboard JSON needed.
 
-**Validates:** the in-Caddy source-IP gate, two-VM scraping, dashboard provisioning workflow for game-host metrics.
+**Validates:** the in-Caddy source-IP gate, two-VM scraping over the existing client Caddy.
 
 ### Phase 3 — App instrumentation (the live-event vibe stuff)
 
@@ -321,7 +323,7 @@ Tracked in this doc only as a forward-looking note; **not** part of the current 
 - **Single shared basic-auth credential for Grafana:** mods are a small, trusted set; Grafana data is read-only; per-mod accounts add operational overhead with no security gain. Documented as a known trade-off rather than a defect — if the credential ever leaks, rotate `OBS_BASIC_AUTH_HASH` and redeploy.
 - **Metrics paths exposed via existing client Caddy with source-IP gate, not as separate public ports:** stays consistent with the existing pattern (single public entry point per droplet, all reverse-proxied through Caddy). Avoids new firewall holes and avoids duplicating TLS termination on the game droplet.
 - **7-day retention over 30:** team explicitly does not need a long postmortem window. 7 days covers the 3-day event plus a few days of buffer for any post-event surprises.
-- **Defaulted-by-cAdvisor cardinality cuts only:** earlier draft listed `--disable_metrics=disk,udp,tcp`. Disabling `disk` is wrong — the SQLite databases live in a Docker volume and `container_fs_*` is exactly the series we want. `tcp`/`udp` are already disabled by default in cAdvisor v0.47+. Final flag list is `--store_container_labels=false --docker_only=true`.
+- **cAdvisor dropped from Phase 2:** every released cAdvisor version (v0.49 through v0.55) fails to read container layer metadata when Docker uses the `overlayfs` storage driver via containerd-snapshotter — the default on the game droplet's Docker 28+ install. cAdvisor expects `/var/lib/docker/image/overlay2/layerdb/...` but the actual data lives at `/var/lib/containerd/io.containerd.snapshotter.v1.*`. See [cadvisor#3643](https://github.com/google/cadvisor/issues/3643), [cadvisor#3860](https://github.com/google/cadvisor/issues/3860), fix in [PR #3709](https://github.com/google/cadvisor/pull/3709) (unreleased). Alternatives considered: switch the game droplet to `overlay2` storage driver (disruptive — requires recreating all container images) or keep iterating cAdvisor flags (we tried; nothing works without upstream changes). Decision: skip cAdvisor; Phase 3's app metrics + node-exporter's host metrics cover the use cases that matter for the event. Revisit when upstream releases a fix.
 - **No alerts in initial scope:** alerting is its own design (thresholds, runbooks, escalation). Phase 4 captured for later but explicitly deferred.
 
 ## Open questions

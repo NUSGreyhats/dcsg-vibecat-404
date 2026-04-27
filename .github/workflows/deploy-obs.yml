@@ -20,19 +20,17 @@ jobs:
         env:
           OBS_DOMAIN: ${{ vars.OBS_DOMAIN }}
           OBS_BASIC_AUTH_HASH: ${{ secrets.OBS_BASIC_AUTH_HASH }}
+          # Reuse the game droplet's own IP secret as the scrape target.
+          GAME_HOST: ${{ secrets.DO_HOST }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.OBS_HOST }}
-          # Hardcoded root@ — DO_USER points to a non-root user that exists
-          # only on the game droplet. Both DO droplets ship with root by
-          # default; OBS uses it directly.
+          # OBS-specific creds — see design.md "Secrets and variables".
           username: root
-          # OBS_SSH_KEY is OBS-specific. DO_SSH_KEY's public counterpart
-          # is not in OBS authorized_keys (verified empirically).
           key: ${{ secrets.OBS_SSH_KEY }}
           script_stop: true
           command_timeout: 15m
-          envs: OBS_DOMAIN,OBS_BASIC_AUTH_HASH,GITHUB_TOKEN
+          envs: OBS_DOMAIN,OBS_BASIC_AUTH_HASH,GAME_HOST,GITHUB_TOKEN
           script: |
             set -euo pipefail
 
@@ -56,9 +54,8 @@ jobs:
             fi
 
             cd "$DIR"
-            # Use the token for this fetch; restore the plain URL after
-            # so the token doesn't sit in .git/config between runs (the
-            # token expires when the workflow does anyway).
+            # Token-auth for the fetch only; restore plain URL after so the
+            # (expiring) token doesn't sit in .git/config between runs.
             git remote set-url origin "$REPO_URL_AUTH"
             git fetch --prune --tags origin "+refs/heads/*:refs/remotes/origin/*"
             git remote set-url origin "$REPO_URL_PLAIN"
@@ -70,19 +67,25 @@ jobs:
             echo "==> swap setup"
             bash obs/setup-swap.sh
 
-            # Write obs/.env from forwarded vars. The bcrypt hash is single-
-            # quoted so docker-compose's env_file parser doesn't apply
-            # parameter expansion to the $-containing value.
+            # bcrypt hash is single-quoted so docker-compose's env_file
+            # parser leaves the $ characters alone.
             echo "==> Writing obs/.env"
             umask 077
             cat > obs/.env <<EOF
             OBS_DOMAIN=${OBS_DOMAIN:-}
             OBS_BASIC_AUTH_HASH='${OBS_BASIC_AUTH_HASH:-}'
+            GAME_HOST=${GAME_HOST:-}
             EOF
             umask 022
 
             echo "==> docker compose up -d --build"
             docker compose -f obs/docker-compose.yml up -d --build --remove-orphans
+
+            # VM auto-reloads scrape.yml from inotify, but git's atomic
+            # rename-replace breaks the watch on the original inode.
+            # Force a restart so VM re-reads the file at startup.
+            echo "==> restart victoria-metrics to pick up scrape.yml changes"
+            docker compose -f obs/docker-compose.yml restart victoria-metrics
 
             echo "==> docker image prune"
             docker image prune -f >/dev/null
