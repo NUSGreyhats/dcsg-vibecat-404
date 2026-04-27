@@ -154,27 +154,28 @@ Separate $4/mo DigitalOcean Basic droplet (512 MB / 10 GB / 1 vCPU) running the 
 
 ### Provisioning (one-time)
 
-1. **Create the droplet.** DO control panel → Droplets → Create. Distribution: Ubuntu 24.04 LTS. Plan: Basic, $4/mo (1 vCPU / 512 MB / 10 GB SSD). Region: same as the game droplet to minimise scrape latency. Authentication: SSH key — use the **same key already authorized for the game droplet**, since the OBS deploy reuses `DO_SSH_KEY` (rather than introducing a separate `OBS_SSH_KEY`).
-2. **SSH user posture.** The deploy workflow reuses `DO_USER`, so the same admin user must exist on the OBS droplet. `setup-swap.sh` runs via `sudo` during deploy — that means `DO_USER` must have **passwordless sudo** (or BE root, which is the default on a fresh DO droplet). If you log in as a non-root `DO_USER`, run `echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/$USER && sudo chmod 440 /etc/sudoers.d/$USER` once during provisioning.
-3. **DNS.** Point an A-record for `observability.nusgreyhats.org` at the droplet's public IPv4. Caddy obtains a Let's Encrypt cert on first start; it needs the DNS to resolve before the deploy workflow runs.
-4. **DigitalOcean Cloud Firewall** (new firewall, attached to the OBS droplet only):
+1. **Create the droplet.** DO control panel → Droplets → Create. Distribution: Ubuntu 24.04 LTS. Plan: Basic, $4/mo (1 vCPU / 512 MB / 10 GB SSD). Region: same as the game droplet to minimise scrape latency. Authentication: any SSH key you control — `OBS_SSH_KEY` is a separate deploy key from the game droplet's `DO_SSH_KEY`.
+2. **SSH user.** The deploy workflow SSHes in as `root` (hardcoded). DO droplets ship with `root` available by default — no setup needed.
+3. **Generate the OBS-specific deploy key.** Run `ssh-keygen -t ed25519 -f obs_deploy -C 'github-actions-obs-deploy' -N ''`. Append the `obs_deploy.pub` to the OBS droplet's `~/.ssh/authorized_keys`. Paste the private key contents into a new GitHub Secret `OBS_SSH_KEY`.
+4. **DNS.** Point an A-record for `observability.nusgreyhats.org` at the droplet's public IPv4. Caddy obtains a Let's Encrypt cert on first start; it needs the DNS to resolve before the deploy workflow runs.
+5. **DigitalOcean Cloud Firewall** (new firewall, attached to the OBS droplet only):
     - Inbound `22/tcp` allowlisted to the team's IPs.
     - Inbound `80/tcp` and `443/tcp` from world (Caddy + LE).
     - Everything else denied.
-5. **Install Docker + compose v2** on the droplet (one-time):
+6. **Install Docker + compose v2** on the droplet (one-time):
     ```bash
     curl -fsSL https://get.docker.com | sh
     ```
-6. **Configure GitHub Secrets/Variables.** New entries needed: `OBS_HOST` (the OBS droplet's public IP), `OBS_BASIC_AUTH_HASH` (bcrypt output of `caddy hash-password --plaintext '<your-password>'`), and the variable `OBS_DOMAIN`. The deploy reuses the existing `DO_USER` and `DO_SSH_KEY` secrets — no `OBS_USER` / `OBS_SSH_KEY` needed.
+7. **Configure GitHub Secrets/Variables.** Other new entries needed (besides `OBS_SSH_KEY` from step 3): `OBS_HOST` (the OBS droplet's public IP), `OBS_BASIC_AUTH_HASH` (bcrypt output of `caddy hash-password --plaintext '<your-password>'`), and the variable `OBS_DOMAIN`. SSH user is hardcoded to `root` in the workflow. `secrets.GITHUB_TOKEN` is auto-issued by Actions; nothing to configure.
 
 ### Deploying
 
 Manual trigger: GitHub → Actions → `Deploy OBS to DigitalOcean` → Run workflow → pick branch.
 
 The workflow:
-1. SSHes into the OBS droplet using `OBS_HOST` + the reused `DO_USER` / `DO_SSH_KEY` secrets.
-2. Clones / fast-forwards the repo to `$HOME/defcon-game`.
-3. Runs `obs/setup-swap.sh` via `sudo` (idempotent — re-running is a no-op; needs passwordless sudo).
+1. SSHes into the OBS droplet as `root` using `OBS_HOST` + `OBS_SSH_KEY`.
+2. Clones / fast-forwards the repo to `$HOME/defcon-game` using a workflow-scoped `GITHUB_TOKEN` for HTTPS auth (private repo).
+3. Runs `obs/setup-swap.sh` (idempotent; runs as root, no `sudo` needed).
 4. Writes `obs/.env` from forwarded Variables and Secrets, mode 600. The bcrypt hash is single-quoted in the heredoc so docker-compose's env_file parser passes the `$` characters through literally.
 5. `docker compose -f obs/docker-compose.yml up -d --build --remove-orphans`.
 6. Smoke-checks Caddy (`:80`) and runs a VictoriaMetrics health check from inside the Grafana container (which has working network connectivity to `victoria-metrics:8428`).

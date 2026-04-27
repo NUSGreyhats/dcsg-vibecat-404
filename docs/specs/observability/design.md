@@ -160,7 +160,9 @@ New repo `Variables` (non-secret, version-controlled-elsewhere) and `Secrets` in
 - `OBS_DOMAIN` (variable) — `observability.nusgreyhats.org`. Used by Caddy on OBS for the LE TLS cert.
 - `OBS_BASIC_AUTH_HASH` (secret) — bcrypt hash from `caddy hash-password`. The username is hardcoded to `nusgreyhats` in the Caddyfile and isn't managed as a secret. **The only credential mods type day-to-day.**
 
-The OBS deploy reuses the existing game-droplet's `DO_USER` and `DO_SSH_KEY` secrets — both droplets are provisioned with the same admin SSH credentials. Only `OBS_HOST` is OBS-specific on the SSH side.
+- `OBS_SSH_KEY` (secret) — private SSH key whose public counterpart is in the OBS droplet's `~/.ssh/authorized_keys`. We considered reusing `DO_SSH_KEY` from the game-droplet deploy, but the two droplets ended up with different `authorized_keys` sets (the CI deploy key the game droplet uses isn't authorized on OBS). Cleaner to keep OBS's key separate — game droplet untouched, blast radius smaller.
+
+The OBS deploy hardcodes `root` as the SSH user (it doesn't reuse `DO_USER`, which on this repo's existing deploy points to a non-root account that doesn't exist on the OBS droplet). Both DO droplets ship with `root` available by default; OBS uses it directly. `setup-swap.sh` runs as root without needing `sudo`. Also forwards `secrets.GITHUB_TOKEN` (auto-issued, run-scoped) so the droplet can `git clone` a private repo.
 
 ## Metric inventory
 
