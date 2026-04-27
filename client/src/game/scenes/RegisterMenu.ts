@@ -1,7 +1,6 @@
 import Phaser from "phaser";
 import {
   ACCENT_PRIMARY,
-  BUTTON_HOVER_COLOR,
   BUTTON_IDLE_COLOR,
   BONE_WHITE,
   DEEP_NAVY,

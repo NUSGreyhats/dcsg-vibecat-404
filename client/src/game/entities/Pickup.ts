@@ -21,7 +21,7 @@ function styleFor(type: number): PickupStyle {
     case PICKUP_TYPE.HEALTH:
       return { color: 0xdc2d2d, size: 16, glyph: "♥", iconKey: "heart" };
     case PICKUP_TYPE.AMMO:
-      return { color: COIN_GOLD, size: 16, glyph: "■", iconKey: "ammo_pack" };
+      return { color: COIN_GOLD, size: 16, glyph: "▼", iconKey: "ammo_pack" };
     case PICKUP_TYPE.COIN:
       return { color: COIN_GOLD, size: 12, glyph: "$", iconKey: "coin" };
     default:

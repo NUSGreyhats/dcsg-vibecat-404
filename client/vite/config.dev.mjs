@@ -5,10 +5,9 @@ import { defineConfig } from 'vite';
 const gameServer = process.env.GAME_SERVER ?? 'http://localhost:8080';
 const gameServerWs = gameServer.replace(/^http/, 'ws');
 
-// Lobby service expected at :3001 in dev (serves /leaderboard, /spectate,
-// /register page, /api/leaderboard, /api/replay/*). Falls back to the
-// game server so a dev who's only running the game binary with
-// DEV_MOUNT_IDENTITY=1 still gets /register + /api/login. Override with
+// Lobby service expected at :3001 in dev. It owns the non-WS HTTP surface:
+// /api/register, /api/verify, /api/login, queue endpoints, leaderboard,
+// replay HTTP endpoints, and the /leaderboard page. Override with
 // LOBBY_SERVER if running the lobby on a non-default port.
 const lobbyServer = process.env.LOBBY_SERVER ?? 'http://localhost:3001';
 
@@ -38,11 +37,10 @@ export default defineConfig({
             // default match is a path prefix. The WS upgrade carries
             // query strings (replay_id, ticket) verbatim.
             '/ws': { target: gameServerWs, ws: true, changeOrigin: true },
-            '/api': { target: gameServer, changeOrigin: true },
-            '/register': { target: gameServer, changeOrigin: true },
-            // Leaderboard page is lobby-only; the game server doesn't
-            // expose /leaderboard even with DEV_MOUNT_IDENTITY=1, so this
-            // has to go to the lobby binary.
+            // The lobby owns all /api/* HTTP routes in dev, including auth,
+            // queue, leaderboard, and replay endpoints.
+            '/api': { target: lobbyServer, changeOrigin: true },
+            // The leaderboard page itself is also lobby-only.
             '/leaderboard': { target: lobbyServer, changeOrigin: true },
         },
     }
