@@ -85,11 +85,15 @@ services:
   client:
     build: ./client
     environment:
+      DOMAIN: "${DOMAIN:-}"
       # Source-IP allowlist for /_metrics/* — see client/Caddyfile.
       # 127.0.0.1 default = closed in dev (no OBS droplet to scrape).
       OBS_HOST: "${OBS_HOST:-127.0.0.1}"
     ports:
-      - "80:3000"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
     depends_on:
       - game-server
       - lobby
@@ -116,3 +120,4 @@ services:
 
 volumes:
   game-data:
+  caddy-data:

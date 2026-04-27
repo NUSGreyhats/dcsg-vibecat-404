@@ -1,9 +1,11 @@
 {
-    auto_https off
     admin off
 }
 
-:3000 {
+# DOMAIN env var selects the site address. A real hostname (e.g. game.example.com)
+# triggers Caddy's automatic HTTPS via Let's Encrypt. Unset falls back to :80
+# for local dev without TLS.
+{$DOMAIN::80} {
     encode gzip
 
     # /_metrics/node gated to OBS droplet's IP. Mismatched source IPs

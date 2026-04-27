@@ -8,4 +8,4 @@ RUN yarn build
 FROM caddy:2-alpine
 COPY --from=build /src/dist /srv
 COPY Caddyfile /etc/caddy/Caddyfile
-EXPOSE 3000
+EXPOSE 80 443
