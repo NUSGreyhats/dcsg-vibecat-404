@@ -4,6 +4,7 @@ server/defcon-server
 server/cmd/server/server
 server/bin/
 server/*.test
+tools/loadtest/loadtest
 
 # Databases and data at rest
 *.db
