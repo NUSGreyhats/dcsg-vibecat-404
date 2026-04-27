@@ -27,6 +27,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/greyhats/defcon-game/lobby/internal/admin"
 	"github.com/greyhats/defcon-game/lobby/internal/adminauth"
@@ -485,7 +486,17 @@ func adminFlagHandler(w http.ResponseWriter, r *http.Request, db *sql.DB, flag b
 		return
 	}
 	if len(body.Reason) > maxFlagReasonBytes {
-		body.Reason = body.Reason[:maxFlagReasonBytes]
+		// Byte-slice the cap, then walk back to a rune boundary so we
+		// never store invalid UTF-8 — naive [:n] can split a multi-byte
+		// rune (any non-ASCII char) and break SQLite text handling and
+		// the admin UI's render. utf8.ValidString recovers in at most
+		// 3 bytes (max rune length is 4 → cap could land inside a 4-
+		// byte rune that started at cap-3).
+		s := body.Reason[:maxFlagReasonBytes]
+		for len(s) > 0 && !utf8.ValidString(s) {
+			s = s[:len(s)-1]
+		}
+		body.Reason = s
 	}
 	var err error
 	if flag {
@@ -904,17 +915,39 @@ func adminWinnersCSV(w http.ResponseWriter, gameDB, identityDB *sql.DB) {
 }
 
 // csvSafe defuses spreadsheet formula injection in user-controlled cell
-// values. Excel/Sheets/LibreOffice treat a cell beginning with '=', '+',
-// '-', '@', tab, or CR as a formula and will execute it on open. Prefix
-// such cells with a single quote so the spreadsheet renders the literal
-// text. OWASP CSV-injection guidance.
+// values. Excel / Sheets / LibreOffice treat a cell as a formula when:
+//   - the first byte is one of `=`, `+`, `-`, `@`, tab, CR, or LF, OR
+//   - the first non-whitespace byte is one of `=`, `+`, `-`, `@`
+//     (i.e. " =HYPERLINK(...)", "\t+cmd|'...'!A0" — leading whitespace
+//     doesn't save us; some apps strip it before parsing).
+//
+// In either case, prefix the cell with a single quote so the
+// spreadsheet renders the literal text. OWASP CSV-injection guidance.
 func csvSafe(s string) string {
 	if s == "" {
 		return s
 	}
-	switch s[0] {
-	case '=', '+', '-', '@', '\t', '\r':
+	if isCSVDangerousByte(s[0]) {
+		return "'" + s
+	}
+	if trimmed := strings.TrimLeft(s, " \t\r\n"); trimmed != "" && isFormulaSigil(trimmed[0]) {
 		return "'" + s
 	}
 	return s
+}
+
+func isCSVDangerousByte(c byte) bool {
+	switch c {
+	case '=', '+', '-', '@', '\t', '\r', '\n':
+		return true
+	}
+	return false
+}
+
+func isFormulaSigil(c byte) bool {
+	switch c {
+	case '=', '+', '-', '@':
+		return true
+	}
+	return false
 }

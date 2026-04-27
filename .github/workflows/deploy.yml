@@ -18,7 +18,14 @@ jobs:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
         env:
-          AUTH_MODE: ${{ vars.AUTH_MODE }}
+          # AUTH_MODE defaults to 'identity' if vars.AUTH_MODE is unset
+          # or empty in the repo settings. Required because the game
+          # server now log.Fatalfs on an empty AUTH_MODE (issue #71 #14:
+          # fail-closed instead of silently dropping to ModeOpen). The
+          # docker-compose ${AUTH_MODE:-identity} substitution would
+          # also catch this, but defaulting at the workflow layer means
+          # the deploy log explicitly shows what was sent.
+          AUTH_MODE: ${{ vars.AUTH_MODE || 'identity' }}
           QUEUE_ENABLED: ${{ vars.QUEUE_ENABLED }}
           MAX_CONCURRENT: ${{ vars.MAX_CONCURRENT }}
           BEHIND_TLS: ${{ vars.BEHIND_TLS }}
