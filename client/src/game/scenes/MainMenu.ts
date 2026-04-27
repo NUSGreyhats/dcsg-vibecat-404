@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { getSync } from "../net/runContext";
+import { getSync, resetSync } from "../net/runContext";
 import { CONTROL_BINDINGS } from "./utils/Controls";
 import {
   clearCachedPlayerId,
@@ -10,7 +10,6 @@ import { WS_URL } from "../constants";
 import {
   ACCENT_PRIMARY,
   BUTTON_HOVER_COLOR,
-  BUTTON_IDLE_COLOR,
   DEEP_NAVY,
   DEPTH_SPLASH,
   ERROR,
@@ -19,6 +18,8 @@ import {
   FONT_SIZE_CAPTION,
   FONT_SIZE_SMALL,
   MID_BLUE,
+  SUCCESS,
+  TEXT_DIM,
   TEXT_MUTED,
   TEXT_PRIMARY,
   WARNING,
@@ -70,31 +71,62 @@ const SPONSORS: ReadonlyArray<SponsorSpec> = [
 export class MainMenu extends Phaser.Scene {
   private usernameInput?: HTMLInputElement;
   private passwordInput?: HTMLInputElement;
+  private statusDot?: Phaser.GameObjects.Arc;
   private statusText?: Phaser.GameObjects.Text;
   private startButton?: HTMLButtonElement;
   private submitting = false;
-  private promptAfterAuth = false;
   private resizeHandlers: Array<() => void> = [];
   private sponsorLogoEls: HTMLImageElement[] = [];
   private sponsorHoverRects: Phaser.GameObjects.Rectangle[] = [];
   private controlsTexts: Phaser.GameObjects.Text[] = [];
+  private loginTexts: Phaser.GameObjects.Text[] = [];
+  private readyTexts: Phaser.GameObjects.GameObject[] = [];
+  private readyEnterKey?: Phaser.Input.Keyboard.Key;
+  private readyPlayerName = "";
+  private readyActive = false;
 
   private static readonly PANEL_WIDTH = 460;
+  private static readonly PANEL_MIN_WIDTH = 340;
   private static readonly PANEL_HEIGHT = 200;
   private static readonly PANEL_MARGIN = 40;
   private static readonly PANEL_PADDING = 20;
-  private static readonly INPUT_WIDTH =
-    MainMenu.PANEL_WIDTH - MainMenu.PANEL_PADDING * 2;
   // Inline label column: "Username:" / "Password:" sit to the left of
   // each input, same row.
   private static readonly LABEL_COLUMN_WIDTH = 110;
   private static readonly LABEL_GAP = 8;
-  private static readonly ROW_INPUT_WIDTH =
-    MainMenu.INPUT_WIDTH - MainMenu.LABEL_COLUMN_WIDTH - MainMenu.LABEL_GAP;
   private static readonly SPONSOR_PANEL_HEIGHT = 140;
   private static readonly SPONSOR_PANEL_GAP = 12;
   private static readonly SPONSOR_CARD_HEIGHT = 92;
   private static readonly SPONSOR_CARD_GAP = 10;
+  private getPanelLayout() {
+    const margin = Math.min(MainMenu.PANEL_MARGIN, Math.max(16, this.scale.width * 0.05));
+    const panelWidth = Phaser.Math.Clamp(
+      this.scale.width - margin * 2,
+      MainMenu.PANEL_MIN_WIDTH,
+      MainMenu.PANEL_WIDTH,
+    );
+    const inputWidth = panelWidth - MainMenu.PANEL_PADDING * 2;
+    const labelColumnWidth = panelWidth < 400 ? 92 : MainMenu.LABEL_COLUMN_WIDTH;
+    const rowInputWidth = inputWidth - labelColumnWidth - MainMenu.LABEL_GAP;
+    const panelX = this.scale.width - panelWidth - margin;
+    const stackBottom = this.scale.height - margin;
+    const sponsorTop = stackBottom - MainMenu.SPONSOR_PANEL_HEIGHT;
+    const loginBottom = sponsorTop - MainMenu.SPONSOR_PANEL_GAP;
+    const loginTop = loginBottom - MainMenu.PANEL_HEIGHT;
+    const panelY = loginTop + 30;
+    const contentX = panelX + MainMenu.PANEL_PADDING;
+
+    return {
+      panelWidth,
+      inputWidth,
+      labelColumnWidth,
+      rowInputWidth,
+      panelX,
+      sponsorTop,
+      panelY,
+      contentX,
+    };
+  }
   private setModalActive(active: boolean): void {
     if (this.usernameInput) this.usernameInput.disabled = active;
     if (this.passwordInput) this.passwordInput.disabled = active;
@@ -126,23 +158,14 @@ export class MainMenu extends Phaser.Scene {
         .setDepth(DEPTH_SPLASH);
     }
 
-    const panelX = w - MainMenu.PANEL_WIDTH - MainMenu.PANEL_MARGIN;
-    // Stack = login + gap + sponsors, pinned to the bottom with PANEL_MARGIN.
-    const stackBottom = h - MainMenu.PANEL_MARGIN;
-    const sponsorTop =
-      stackBottom - MainMenu.SPONSOR_PANEL_HEIGHT;
-    const loginBottom = sponsorTop - MainMenu.SPONSOR_PANEL_GAP;
-    const loginTop = loginBottom - MainMenu.PANEL_HEIGHT;
-    // panelY is the content reference (30 px below the panel top); keep
-    // the existing layout math centered on it.
-    const panelY = loginTop + 30;
-    const contentX = panelX + MainMenu.PANEL_PADDING;
+    const layout = this.getPanelLayout();
+    const { panelX, panelY, panelWidth, inputWidth, labelColumnWidth, rowInputWidth, sponsorTop, contentX } = layout;
 
     this.add
       .rectangle(
         panelX,
         panelY - 30,
-        MainMenu.PANEL_WIDTH,
+        panelWidth,
         MainMenu.PANEL_HEIGHT,
         DEEP_NAVY,
         0.85,
@@ -150,21 +173,23 @@ export class MainMenu extends Phaser.Scene {
       .setStrokeStyle(2, MID_BLUE)
       .setOrigin(0, 0);
 
-    const inputX = contentX + MainMenu.LABEL_COLUMN_WIDTH + MainMenu.LABEL_GAP;
+    const inputX = contentX + labelColumnWidth + MainMenu.LABEL_GAP;
     // Vertically-center the 18 px label against the 32 px input.
     const labelOffsetY = 7;
     const usernameRowY = panelY - 10;
     const passwordRowY = usernameRowY + 42;
 
-    this.add.text(contentX, usernameRowY + labelOffsetY, "Username:", {
-      fontFamily: FONT_FAMILY,
-      fontSize: FONT_SIZE_BODY,
-      color: hex(TEXT_PRIMARY),
-    });
+    this.loginTexts.push(
+      this.add.text(contentX, usernameRowY + labelOffsetY, "Username:", {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_BODY,
+        color: hex(TEXT_PRIMARY),
+      }),
+    );
     this.usernameInput = this.mountTextInput(
       inputX,
       usernameRowY,
-      MainMenu.ROW_INPUT_WIDTH,
+      rowInputWidth,
       {
         type: "text",
         placeholder: "username",
@@ -173,15 +198,17 @@ export class MainMenu extends Phaser.Scene {
       },
     );
 
-    this.add.text(contentX, passwordRowY + labelOffsetY, "Password:", {
-      fontFamily: FONT_FAMILY,
-      fontSize: FONT_SIZE_BODY,
-      color: hex(TEXT_PRIMARY),
-    });
+    this.loginTexts.push(
+      this.add.text(contentX, passwordRowY + labelOffsetY, "Password:", {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_BODY,
+        color: hex(TEXT_PRIMARY),
+      }),
+    );
     this.passwordInput = this.mountTextInput(
       inputX,
       passwordRowY,
-      MainMenu.ROW_INPUT_WIDTH,
+      rowInputWidth,
       {
         type: "password",
         placeholder: "password",
@@ -190,72 +217,59 @@ export class MainMenu extends Phaser.Scene {
       },
     );
 
-    this.startButton = this.mountButton(contentX, panelY + 78, "[ Log In ]");
+    this.startButton = this.mountButton(
+      contentX + inputWidth,
+      panelY + 78,
+      "[ Log In ]",
+      true,
+    );
 
-    this.statusText = this.add.text(
-      contentX,
-      panelY + 120,
-      "Enter credentials to play.",
-      {
+    this.statusDot = this.add.circle(w - 132, h - 18, 4, TEXT_MUTED);
+    this.statusText = this.add
+      .text(w - 120, h - 18, "Idle", {
         fontFamily: FONT_FAMILY,
         fontSize: FONT_SIZE_SMALL,
         color: hex(TEXT_MUTED),
-        wordWrap: { width: MainMenu.INPUT_WIDTH },
-      },
-    );
-
-    const registerLink = this.add
-      .text(contentX, panelY + 146, "No account? [ Register → ]", {
-        fontFamily: FONT_FAMILY,
-        fontSize: FONT_SIZE_SMALL,
-        color: hex(ACCENT_PRIMARY),
+        wordWrap: { width: inputWidth - 34 },
       })
-      .setOrigin(0, 0)
-      .setInteractive({ useHandCursor: true });
-    registerLink.on("pointerover", () =>
-      registerLink.setColor(hex(TEXT_PRIMARY)),
-    );
-    registerLink.on("pointerout", () =>
-      registerLink.setColor(hex(ACCENT_PRIMARY)),
-    );
-    registerLink.on("pointerdown", () => {
-      this.hideLoginForm();
-      this.setModalActive(true);
-      this.scene.launch("RegisterMenu");
-      this.scene.pause();
-    });
+      .setOrigin(0, 0.5);
 
-    const leaderboardLink = this.add
-      .text(
-        contentX + MainMenu.INPUT_WIDTH,
-        panelY + 146,
-        "[ Leaderboard ↗ ]",
+    this.loginTexts.push(
+      ...this.makePanelActionRow(contentX, panelY + 140, inputWidth, [
         {
-          fontFamily: FONT_FAMILY,
-          fontSize: FONT_SIZE_SMALL,
-          color: hex(ACCENT_PRIMARY),
+          label: "[ Register → ]",
+          onClick: () => {
+            this.hideLoginForm();
+            this.setModalActive(true);
+            this.scene.launch("RegisterMenu");
+            this.scene.pause();
+          },
         },
-      )
-      .setOrigin(1, 0)
-      .setInteractive({ useHandCursor: true });
-    leaderboardLink.on("pointerover", () =>
-      leaderboardLink.setColor(hex(TEXT_PRIMARY)),
+        {
+          label: "[ Source ↓ ]",
+          onClick: () => window.open("/source.tar.gz", "_blank", "noopener,noreferrer"),
+        },
+        {
+          label: "[ Leaderboard ↗ ]",
+          onClick: () => window.open("/leaderboard", "_blank", "noopener,noreferrer"),
+        },
+      ]),
     );
-    leaderboardLink.on("pointerout", () =>
-      leaderboardLink.setColor(hex(ACCENT_PRIMARY)),
-    );
-    leaderboardLink.on("pointerdown", () => {
-      window.open("/leaderboard", "_blank", "noopener,noreferrer");
-    });
 
     this.drawControlsPanel(h);
 
-    this.drawSponsorsPanel(panelX, sponsorTop);
+    this.drawSponsorsPanel(panelX, sponsorTop, panelWidth, inputWidth);
 
     const sync = getSync();
     sync.state.on("authOk", this.onAuthOk, this);
     sync.state.on("runStarted", this.onRunStarted, this);
     sync.state.on("error", this.onError, this);
+
+    const kb = this.input.keyboard;
+    if (kb) {
+      this.readyEnterKey = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER, false);
+      this.readyEnterKey.on("down", this.onReadyEnter, this);
+    }
 
     this.events.on("shutdown", this.cleanup, this);
     this.events.on("resume", this.onResume, this);
@@ -274,12 +288,17 @@ export class MainMenu extends Phaser.Scene {
    * that currently show a placeholder glyph. When a sponsor's `imageKey` is
    * populated, the scene will draw the image in place of the glyph.
    */
-  private drawSponsorsPanel(panelX: number, panelTop: number): void {
+  private drawSponsorsPanel(
+    panelX: number,
+    panelTop: number,
+    panelWidth: number,
+    inputWidth: number,
+  ): void {
     this.add
       .rectangle(
         panelX,
         panelTop,
-        MainMenu.PANEL_WIDTH,
+        panelWidth,
         MainMenu.SPONSOR_PANEL_HEIGHT,
         DEEP_NAVY,
         0.85,
@@ -299,7 +318,7 @@ export class MainMenu extends Phaser.Scene {
     );
 
     const count = SPONSORS.length;
-    const innerWidth = MainMenu.INPUT_WIDTH;
+    const innerWidth = inputWidth;
     const cardWidth =
       (innerWidth - MainMenu.SPONSOR_CARD_GAP * (count - 1)) / count;
     const cardsY = panelTop + 32;
@@ -443,31 +462,24 @@ export class MainMenu extends Phaser.Scene {
     const sync = getSync();
     if (sync.isConnected()) return true;
 
-    this.statusText?.setText("Connecting to game server...");
-    this.statusText?.setColor(hex(TEXT_MUTED));
+    this.setStatus("Connecting", WARNING);
     try {
       await sync.connect(WS_URL);
       return true;
     } catch (err) {
       console.error("[MainMenu] connect failed", err);
-      this.statusText?.setText(
-        "Could not connect to the game server. Refresh to retry.",
-      );
-      this.statusText?.setColor(hex(ERROR));
+      this.setStatus("Connection failed. Refresh to retry.", ERROR);
       return false;
     }
   }
 
   private async resumeCachedSession(playerId: string): Promise<void> {
     this.hideLoginForm();
-    this.statusText?.setText("Resuming session...");
-    this.statusText?.setColor(hex(TEXT_MUTED));
+    this.setStatus("Resuming", WARNING);
     this.submitting = true;
-    this.promptAfterAuth = true;
 
     if (!(await this.connectForAuth())) {
       this.submitting = false;
-      this.promptAfterAuth = false;
       this.showLoginForm();
       return;
     }
@@ -479,6 +491,7 @@ export class MainMenu extends Phaser.Scene {
     if (this.usernameInput) this.usernameInput.style.display = "none";
     if (this.passwordInput) this.passwordInput.style.display = "none";
     if (this.startButton) this.startButton.style.display = "none";
+    for (const text of this.loginTexts) text.setVisible(false);
     // Drop focus off the now-hidden form controls so Space goes to the
     // queue handler instead of re-firing the login button.
     if (
@@ -494,6 +507,200 @@ export class MainMenu extends Phaser.Scene {
     if (this.usernameInput) this.usernameInput.style.display = "";
     if (this.passwordInput) this.passwordInput.style.display = "";
     if (this.startButton) this.startButton.style.display = "";
+    for (const text of this.loginTexts) text.setVisible(true);
+    this.clearReadyView();
+    this.readyActive = false;
+    this.setStatus("Idle", TEXT_MUTED);
+  }
+
+  private showReadyView(displayName: string): void {
+    this.hideLoginForm();
+    this.clearReadyView();
+    this.readyActive = true;
+    this.readyPlayerName = displayName;
+
+    const { panelY, contentX, inputWidth } = this.getPanelLayout();
+    const buttonY = panelY + 43;
+    const footerY = panelY + 140;
+
+    const cat = this.add.text(contentX, panelY - 8, "Cat", {
+      fontFamily: FONT_FAMILY,
+      fontSize: FONT_SIZE_BODY,
+      color: hex(TEXT_PRIMARY),
+    });
+    const name = this.add.text(contentX + 42, panelY - 10, displayName, {
+      fontFamily: FONT_FAMILY,
+      fontSize: FONT_SIZE_BODY,
+      color: hex(ACCENT_PRIMARY),
+    });
+    const comma = this.add.text(name.x + name.displayWidth, panelY - 8, ",", {
+      fontFamily: FONT_FAMILY,
+      fontSize: FONT_SIZE_BODY,
+      color: hex(TEXT_PRIMARY),
+    });
+    const prompt = this.add.text(
+      comma.x + comma.displayWidth + 8,
+      panelY - 8,
+      "proceed.",
+      {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_BODY,
+        color: hex(TEXT_PRIMARY),
+      },
+    );
+    const startWidth = Math.floor(inputWidth * 0.46) + 10;
+    const startX = contentX + (inputWidth - startWidth) / 2;
+    const start = this.makeReadyPrimaryButton(startX, buttonY, startWidth, 46, "START", () =>
+      this.startAuthenticatedRun(),
+    );
+    const hint = this.add
+      .text(contentX + inputWidth / 2, buttonY + 51, "Press [ Enter ] or click Start to begin.", {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_SMALL,
+        color: hex(TEXT_MUTED),
+        wordWrap: { width: inputWidth },
+      })
+      .setOrigin(0.5, 0);
+    const actions = this.makePanelActionRow(contentX, footerY, inputWidth, [
+      { label: "[ ← Log Out ]", onClick: () => this.logoutReadySession() },
+      {
+        label: "[ Source ↓ ]",
+        onClick: () => window.open("/source.tar.gz", "_blank", "noopener,noreferrer"),
+      },
+      {
+        label: "[ Leaderboard ↗ ]",
+        onClick: () => window.open("/leaderboard", "_blank", "noopener,noreferrer"),
+      },
+    ]);
+
+    this.readyTexts.push(
+      cat,
+      name,
+      comma,
+      prompt,
+      hint,
+      ...start,
+      ...actions,
+    );
+    this.setStatus("Authenticated", SUCCESS);
+  }
+
+  private setStatus(message: string, color: number): void {
+    const visible = message.length > 0;
+    this.statusDot?.setVisible(visible);
+    this.statusText?.setVisible(visible);
+    if (!visible) return;
+    const displayColor = this.darkenStatusColor(color);
+    this.statusDot?.setFillStyle(displayColor);
+    this.statusText?.setText(message);
+    this.statusText?.setColor(hex(displayColor));
+  }
+
+  private darkenStatusColor(color: number): number {
+    if (color === SUCCESS) return 0x1f7f35;
+    if (color === WARNING) return 0xb88716;
+    if (color === ERROR) return 0x9f202a;
+    return TEXT_DIM;
+  }
+
+  private clearReadyView(): void {
+    for (const obj of this.readyTexts) obj.destroy();
+    this.readyTexts = [];
+  }
+
+  private makeReadyPrimaryButton(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    label: string,
+    onClick: () => void,
+  ): Phaser.GameObjects.GameObject[] {
+    const bg = this.add
+      .rectangle(x, y, width, height, ACCENT_PRIMARY, 0)
+      .setOrigin(0, 0)
+      .setStrokeStyle(2, TEXT_PRIMARY)
+      .setInteractive({ useHandCursor: true });
+    const text = this.add
+      .text(x + width / 2, y + height / 2, label, {
+        fontFamily: FONT_FAMILY,
+        fontSize: "20px",
+        color: hex(ACCENT_PRIMARY),
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    text.setLetterSpacing(4);
+
+    const setHover = (active: boolean): void => {
+      bg.setFillStyle(ACCENT_PRIMARY, active ? 1 : 0);
+      bg.setStrokeStyle(2, TEXT_PRIMARY);
+      text.setColor(active ? hex(DEEP_NAVY) : hex(ACCENT_PRIMARY));
+    };
+
+    bg.on("pointerover", () => setHover(true));
+    bg.on("pointerout", () => setHover(false));
+    text.on("pointerover", () => setHover(true));
+    text.on("pointerout", () => setHover(false));
+    bg.on("pointerdown", onClick);
+    text.on("pointerdown", onClick);
+
+    return [bg, text];
+  }
+
+  private makePanelActionRow(
+    x: number,
+    y: number,
+    width: number,
+    actions: ReadonlyArray<{ label: string; onClick: () => void }>,
+  ): Phaser.GameObjects.Text[] {
+    const columns = [width / 6, width / 2 - 5, (width * 5) / 6];
+    return actions.map((action, i) =>
+      this.makeReadyAction(x + columns[i], y, action.label, action.onClick, "center"),
+    );
+  }
+
+  private makeReadyAction(
+    x: number,
+    y: number,
+    label: string,
+    onClick: () => void,
+    align: "left" | "center" | "right" = "left",
+  ): Phaser.GameObjects.Text {
+    const originX = align === "right" ? 1 : align === "center" ? 0.5 : 0;
+    const text = this.add
+      .text(x, y, label, {
+        fontFamily: FONT_FAMILY,
+        fontSize: FONT_SIZE_SMALL,
+        color: hex(TEXT_PRIMARY),
+      })
+      .setOrigin(originX, 0)
+      .setInteractive({ useHandCursor: true });
+    text.on("pointerover", () => text.setColor(hex(ACCENT_PRIMARY)));
+    text.on("pointerout", () => text.setColor(hex(TEXT_PRIMARY)));
+    text.on("pointerdown", onClick);
+    return text;
+  }
+
+  private onReadyEnter(): void {
+    if (!this.readyActive || this.submitting) return;
+    const active = document.activeElement;
+    if (active === this.usernameInput || active === this.passwordInput) return;
+    this.startAuthenticatedRun();
+  }
+
+  private startAuthenticatedRun(): void {
+    if (this.submitting) return;
+    this.submitting = true;
+    this.readyActive = false;
+    this.clearReadyView();
+    this.setStatus("Starting", WARNING);
+    getSync().sendStartRun();
+  }
+
+  private logoutReadySession(): void {
+    clearCachedPlayerId();
+    resetSync();
+    this.scene.restart();
   }
 
   private drawControlsPanel(sceneHeight: number): void {
@@ -515,7 +722,7 @@ export class MainMenu extends Phaser.Scene {
       this.add.text(actionX, panelTop + 10, "// controls", {
         fontFamily: FONT_FAMILY,
         fontSize: FONT_SIZE_CAPTION,
-        color: hex(TEXT_PRIMARY),
+        color: hex(MID_BLUE),
       }),
       this.add
         .text(actionX, rowY, "Action", {
@@ -640,6 +847,7 @@ export class MainMenu extends Phaser.Scene {
     sceneX: number,
     sceneY: number,
     label: string,
+    rightAligned = false,
   ): HTMLButtonElement {
     const canvas = this.game.canvas;
     const parent = canvas.parentElement ?? document.body;
@@ -654,13 +862,14 @@ export class MainMenu extends Phaser.Scene {
       padding: "0",
       border: "none",
       background: "transparent",
-      color: BUTTON_IDLE_COLOR,
+      color: hex(ACCENT_PRIMARY),
       cursor: "pointer",
       outline: "none",
+      whiteSpace: "nowrap",
     } as Partial<CSSStyleDeclaration>);
 
     const setHover = (on: boolean) => {
-      btn.style.color = on ? BUTTON_HOVER_COLOR : BUTTON_IDLE_COLOR;
+      btn.style.color = on ? BUTTON_HOVER_COLOR : hex(ACCENT_PRIMARY);
     };
     btn.addEventListener("focus", () => setHover(true));
     btn.addEventListener("blur", () => setHover(false));
@@ -682,6 +891,7 @@ export class MainMenu extends Phaser.Scene {
       btn.style.left = `${rect.left - parentRect.left + sceneX * scaleX}px`;
       btn.style.top = `${rect.top - parentRect.top + sceneY * scaleX}px`;
       btn.style.fontSize = `${16 * scaleX}px`;
+      btn.style.transform = rightAligned ? "translateX(-100%)" : "";
     };
     place();
     window.addEventListener("resize", place);
@@ -696,14 +906,12 @@ export class MainMenu extends Phaser.Scene {
     const username = this.usernameInput?.value.trim() ?? "";
     const password = this.passwordInput?.value ?? "";
     if (!username || !password) {
-      this.statusText?.setText("Enter your username and password.");
-      this.statusText?.setColor(hex(ERROR));
+      this.setStatus("Missing username or password", ERROR);
       return;
     }
 
     this.submitting = true;
-    this.statusText?.setText("Logging in...");
-    this.statusText?.setColor(hex(TEXT_MUTED));
+    this.setStatus("Logging in", WARNING);
 
     try {
       const res = await fetch("/api/login", {
@@ -715,10 +923,7 @@ export class MainMenu extends Phaser.Scene {
         const body = (await res.json().catch(() => ({}))) as {
           error?: string;
         };
-        this.statusText?.setText(
-          body.error ?? `Login failed (HTTP ${res.status}).`,
-        );
-        this.statusText?.setColor(hex(ERROR));
+        this.setStatus(body.error ?? `Login failed (HTTP ${res.status})`, ERROR);
         this.submitting = false;
         return;
       }
@@ -738,28 +943,9 @@ export class MainMenu extends Phaser.Scene {
         viaQueue = await this.waitForQueueAdmission(body.player_id, password);
       } catch (err) {
         console.error("[MainMenu] queue: failed", err);
-        this.statusText?.setText(
-          err instanceof Error ? err.message : "Queue error.",
-        );
-        this.statusText?.setColor(hex(ERROR));
+        this.setStatus(err instanceof Error ? err.message : "Queue error", ERROR);
         this.submitting = false;
         return;
-      }
-
-      // Always show the fullscreen start prompt after auth. When queue is
-      // enabled, this follows admission; when queue is disabled, it still
-      // gives the player an explicit start confirmation instead of auto-
-      // launching straight into the run.
-      if (viaQueue) {
-        const ready = await this.showReadyPrompt();
-        if (!ready) {
-          this.statusText?.setText(
-            "Forfeit — didn't start in time. Log in again to re-queue.",
-          );
-          this.statusText?.setColor(hex(ERROR));
-          this.submitting = false;
-          return;
-        }
       }
 
       if (!(await this.connectForAuth())) {
@@ -767,19 +953,16 @@ export class MainMenu extends Phaser.Scene {
         return;
       }
 
-      this.statusText?.setText("Authenticating...");
-      this.statusText?.setColor(hex(TEXT_MUTED));
+      this.setStatus("Authenticating", WARNING);
       // Cache the last authenticated id so explicit logout can clear any
       // stale local session state. WS auth is still performed only after
       // login + queue admission; pre-auth sockets can go idle behind the
       // queue and leave the client stuck with an unsent AUTH packet.
       setCachedPlayerId(body.player_id);
-      this.promptAfterAuth = !viaQueue;
       getSync().sendAuth(body.player_id);
     } catch (err) {
       console.error("[MainMenu] login failed", err);
-      this.statusText?.setText("Network error. Try again.");
-      this.statusText?.setColor(hex(ERROR));
+      this.setStatus("Network error. Try again", ERROR);
       this.submitting = false;
     }
   }
@@ -889,8 +1072,7 @@ export class MainMenu extends Phaser.Scene {
       position > 0
         ? `In queue: ${this.formatOrdinal(position)} in line · ${wait} wait`
         : `Queue status: Checking admission… · ${wait} wait`;
-    this.statusText?.setText(message);
-    this.statusText?.setColor(hex(WARNING));
+    this.setStatus(message, WARNING);
   }
 
   /**
@@ -913,137 +1095,9 @@ export class MainMenu extends Phaser.Scene {
     }
   }
 
-  /**
-   * showReadyPrompt mounts a fullscreen overlay with a START button
-   * and a 50 s countdown after a queue admission, so the speedrun
-   * timer never starts without an explicit player action. Resolves
-   * with `true` on click / Enter / Space, `false` on countdown
-   * expiry. The 50 s window leaves ~10 s of margin against the
-   * lobby's 60 s StartGrace AFK eviction.
-   */
-  private async showReadyPrompt(): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-      const overlay = document.createElement("div");
-      Object.assign(overlay.style, {
-        position: "fixed",
-        inset: "0",
-        background: "rgba(13, 18, 34, 0.92)",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: "9999",
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        color: "#f5f0e6",
-      });
-
-      const title = document.createElement("div");
-      title.textContent = "YOU'RE UP";
-      Object.assign(title.style, {
-        fontSize: "64px",
-        letterSpacing: "8px",
-        color: "#ffdd33",
-        marginBottom: "16px",
-      });
-
-      const sub = document.createElement("div");
-      sub.textContent = "Click START or press SPACE / ENTER when ready.";
-      Object.assign(sub.style, {
-        fontSize: "16px",
-        color: "#8a8679",
-        marginBottom: "32px",
-      });
-
-      const btn = document.createElement("button");
-      btn.textContent = "START";
-      Object.assign(btn.style, {
-        fontSize: "24px",
-        padding: "16px 48px",
-        background: "transparent",
-        color: "#ffdd33",
-        border: "2px solid #ffdd33",
-        cursor: "pointer",
-        fontFamily: "inherit",
-        letterSpacing: "8px",
-        fontWeight: "bold",
-      });
-
-      const countdown = document.createElement("div");
-      Object.assign(countdown.style, {
-        marginTop: "32px",
-        color: "#8a8679",
-        fontSize: "13px",
-      });
-
-      overlay.append(title, sub, btn, countdown);
-      document.body.appendChild(overlay);
-
-      // Client gives 50 s; lobby's StartGrace is 60 s. The 10 s
-      // margin covers polling lag (the player may not learn they're
-      // admitted until up to 2 s after the lobby tick) plus the
-      // few-hundred-ms WS auth + start_run round trip that gets
-      // them into /internal/live-games and stops the AFK timer.
-      const graceMs = 50_000;
-      const startedAt = Date.now();
-      let interval: number | undefined;
-      const cleanup = (val: boolean) => {
-        if (interval !== undefined) window.clearInterval(interval);
-        window.removeEventListener("keydown", onKey);
-        overlay.remove();
-        resolve(val);
-      };
-      const onKey = (ev: KeyboardEvent) => {
-        // Space reports as ev.key " " on modern browsers but "Spacebar"
-        // on legacy Edge/IE; ev.code is consistently "Space" everywhere.
-        // Match all three so the START prompt is keyboard-operable
-        // wherever the page loads.
-        if (
-          ev.key === "Enter" ||
-          ev.code === "Space" ||
-          ev.key === " " ||
-          ev.key === "Spacebar"
-        ) {
-          ev.preventDefault();
-          cleanup(true);
-        }
-      };
-      window.addEventListener("keydown", onKey);
-      btn.addEventListener("click", () => cleanup(true));
-      interval = window.setInterval(() => {
-        const remaining = Math.max(0, graceMs - (Date.now() - startedAt));
-        countdown.textContent = `Auto-forfeit in ${Math.ceil(remaining / 1000)}s`;
-        if (remaining <= 0) cleanup(false);
-      }, 250);
-      btn.focus();
-    });
-  }
-
   private onAuthOk(_displayName: string): void {
-    if (this.promptAfterAuth) {
-      this.promptAfterAuth = false;
-      this.hideLoginForm();
-      void this.showReadyPrompt().then((ready) => {
-        if (!ready) {
-          this.statusText?.setText(
-            "Forfeit — didn't start in time. Refresh to requeue.",
-          );
-          this.statusText?.setColor(hex(ERROR));
-          this.submitting = false;
-          return;
-        }
-
-        this.statusText?.setText("Starting run...");
-        this.statusText?.setColor(hex(TEXT_MUTED));
-        this.submitting = true;
-        getSync().sendStartRun();
-      });
-      return;
-    }
-
-    this.statusText?.setText("Starting run...");
-    this.statusText?.setColor(hex(TEXT_MUTED));
-    this.submitting = true;
-    getSync().sendStartRun();
+    this.submitting = false;
+    this.showReadyView(_displayName);
   }
 
   private onRunStarted(): void {
@@ -1059,10 +1113,10 @@ export class MainMenu extends Phaser.Scene {
       clearCachedPlayerId();
       this.showLoginForm();
     }
-    this.statusText?.setText(`Error: ${err.message}`);
-    this.statusText?.setColor(hex(ERROR));
+    this.readyActive = false;
+    this.clearReadyView();
+    this.setStatus(`Error: ${err.message}`, ERROR);
     this.submitting = false;
-    this.promptAfterAuth = false;
   }
 
   private cleanup(): void {
@@ -1071,6 +1125,8 @@ export class MainMenu extends Phaser.Scene {
     sync.state.off("runStarted", this.onRunStarted, this);
     sync.state.off("error", this.onError, this);
     this.events.off("resume", this.onResume, this);
+    this.readyEnterKey?.off("down", this.onReadyEnter, this);
+    this.readyEnterKey = undefined;
     for (const fn of this.resizeHandlers) {
       window.removeEventListener("resize", fn);
       this.scale.off("resize", fn);
@@ -1090,6 +1146,9 @@ export class MainMenu extends Phaser.Scene {
     for (const text of this.controlsTexts) text.destroy();
     this.controlsTexts = [];
 
+    this.clearReadyView();
+    this.loginTexts = [];
+
     for (const rect of this.sponsorHoverRects) rect.destroy();
     this.sponsorHoverRects = [];
 
@@ -1098,7 +1157,8 @@ export class MainMenu extends Phaser.Scene {
     // the next mount and silently swallow the first onStart click.
     // Reset to the fresh-instance defaults.
     this.submitting = false;
-    this.promptAfterAuth = false;
+    this.readyPlayerName = "";
+    this.readyActive = false;
   }
 }
 
