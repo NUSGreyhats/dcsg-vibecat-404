@@ -10,6 +10,7 @@ export interface WeaponStats {
   bulletTextureKey: string;
   bulletBodyRadius: number;
   spriteKey: string;
+  ammoMax: number;
 }
 
 export const WEAPON_STATS: Record<WeaponId, WeaponStats> = {
@@ -23,6 +24,7 @@ export const WEAPON_STATS: Record<WeaponId, WeaponStats> = {
     bulletTextureKey: "bullet",
     bulletBodyRadius: 4,
     spriteKey: "weapon_pistol",
+    ammoMax: 9999,
   },
   rifle: {
     id: "rifle",
@@ -34,6 +36,7 @@ export const WEAPON_STATS: Record<WeaponId, WeaponStats> = {
     bulletTextureKey: "bullet_lmg",
     bulletBodyRadius: 5,
     spriteKey: "weapon_rifle",
+    ammoMax: 30,
   },
   shotgun: {
     id: "shotgun",
@@ -45,6 +48,7 @@ export const WEAPON_STATS: Record<WeaponId, WeaponStats> = {
     bulletTextureKey: "bullet_matador",
     bulletBodyRadius: 7,
     spriteKey: "weapon_shotgun",
+    ammoMax: 8,
   },
 };
 

@@ -60,3 +60,32 @@ func TestBuildAuthCheckTokenRejectsMissingAllowlistEntry(t *testing.T) {
 		t.Fatal("missing allowlist entry: got nil error")
 	}
 }
+
+// Token-mode regression: an allowlisted player without an identity.db
+// row must be rejected with a "player not registered" error, not silently
+// fall through to writing the raw player_id onto leaderboard rows.
+func TestBuildAuthCheckTokenRejectsAllowlistedWithoutIdentity(t *testing.T) {
+	dir := t.TempDir()
+	identityDB, err := identity.OpenDB(filepath.Join(dir, "identity.db"))
+	if err != nil {
+		t.Fatalf("open identity db: %v", err)
+	}
+	defer identityDB.Close()
+
+	playerID := "f71060260bea88bef40261b02d8f58c0"
+	allowlistPath := filepath.Join(dir, "allowlist.json")
+	if err := os.WriteFile(allowlistPath, []byte(`{"allowed":["`+playerID+`"]}`), 0o644); err != nil {
+		t.Fatalf("write allowlist: %v", err)
+	}
+
+	name, err := buildAuthCheck(auth.ModeToken, identityDB, auth.NewAllowlist(allowlistPath))(playerID)
+	if err == nil {
+		t.Fatalf("allowlisted but unregistered: got nil error, name=%q", name)
+	}
+	if name != "" {
+		t.Fatalf("display name = %q, want empty", name)
+	}
+	if err.Error() != "player not registered" {
+		t.Fatalf("error = %q, want %q", err.Error(), "player not registered")
+	}
+}
