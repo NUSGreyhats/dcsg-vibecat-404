@@ -32,7 +32,7 @@ LISTEN_ADDR=":9000" AUTH_MODE=identity go run ./cmd/server
 ```
 
 WebSocket endpoint: `ws://localhost:8080/ws?player_id=<any-hex-id>`.
-Spectator endpoint: `ws://localhost:8080/ws/spectate?player_id=<id>`.
+Spectator endpoint: `ws://localhost:8080/ws/spectate?run_id=<uuid>` (run_id is minted by the engine on initRun and surfaced via `/api/live`).
 
 ### Build (don't run) the client
 

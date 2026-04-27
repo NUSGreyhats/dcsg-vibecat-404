@@ -375,12 +375,11 @@ func (s *Service) sendTelegram(ctx context.Context, text string) error {
 // in which case we 401 so a stale fetch doesn't get HTML back.
 //
 // Mutating requests (anything but GET / HEAD) additionally require the
-// Origin header's host to match the request Host. SameSite=Strict on
-// admin_session blocks most cross-site requests already; the Origin
-// check is the explicit second layer for the cases SameSite misses
-// (subdomains, Lax/Strict ambiguities in older browsers, etc.) and
-// closes the issue 71 #9 CSRF gap on /admin/leaderboard/{flag,unflag},
-// /admin/replay/:id/ticket, and the admin DELETE routes.
+// Origin header's host to match the request Host. SameSite=Lax (the
+// spec'd posture in foundations/04-lobby.md) already blocks the cookie
+// on cross-site form POSTs, but Origin-checking is the explicit second
+// layer that closes the issue 71 #9 CSRF gap on /admin/leaderboard/
+// {flag,unflag}, /admin/replay/:id/ticket, and the admin DELETE routes.
 func (s *Service) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.Enabled() {
@@ -557,11 +556,7 @@ func (s *Service) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   int(SessionTTL.Seconds()),
 		HttpOnly: true,
 		Secure:   s.secureCookie(r),
-		// Strict so the admin_session cookie is never carried on
-		// cross-site navigations / form posts. Combined with the Wrap
-		// middleware's Origin check this closes the issue 71 #9 CSRF
-		// gap on /admin/* mutating routes.
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 	})
 	// Clear admin_login — it's been consumed.
 	http.SetCookie(w, &http.Cookie{
@@ -585,9 +580,7 @@ func (s *Service) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   s.secureCookie(r),
-		// Match the Strict attribute used at issuance — Chrome/Safari
-		// refuse to clear a Strict cookie via a Lax Set-Cookie.
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 	})
 	if strings.Contains(r.Header.Get("Accept"), "text/html") {
 		http.Redirect(w, r, "/admin/login", http.StatusSeeOther)

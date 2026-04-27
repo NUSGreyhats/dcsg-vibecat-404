@@ -125,9 +125,9 @@ Spectators connect to the game server on a **separate WS path** from players. Th
 
 ### Connection
 
-- **Path:** `/ws/spectate?player_id=<hex>`
-- **Handshake:** none. The accept loop inspects the query param; if the target player is actively running (and caps allow — see [04-lobby.md#caps-and-abuse-resistance](./04-lobby.md#caps-and-abuse-resistance) and [05-server-runtime.md#accept-path](./05-server-runtime.md#accept-path)), the upgrade succeeds. Otherwise HTTP `503` with `Retry-After`.
-- **Auth:** none. Live spectating is intentionally public; the `player_id` is effectively public once the run is listed on `/api/live`.
+- **Path:** `/ws/spectate?run_id=<uuid>`
+- **Handshake:** none. The accept loop inspects the query param; if a live run with that `run_id` is registered (and caps allow — see [04-lobby.md#caps-and-abuse-resistance](./04-lobby.md#caps-and-abuse-resistance) and [05-server-runtime.md#accept-path](./05-server-runtime.md#accept-path)), the upgrade succeeds. Otherwise HTTP `503` with `Retry-After`.
+- **Auth:** none. Live spectating is intentionally public; the `run_id` is the per-run public handle minted by the engine in `initRun`. `player_id` is the WS bearer credential and is **not** exposed on the spectator surface or on `/api/live` — see issue #71 #1.
 - **No `C2S_AUTH` / `C2S_START_RUN`** — those are player-only.
 
 ### Packet flow to spectators

@@ -113,7 +113,6 @@ rampLoop:
 		}()
 		for s := 0; s < cfg.spectatorsPerGame; s++ {
 			wg.Add(1)
-			specPID := pid
 			go func() {
 				defer wg.Done()
 				select {
@@ -121,7 +120,7 @@ rampLoop:
 					return
 				case <-time.After(cfg.spectatorStartLag):
 				}
-				runSpectator(deadline, cfg, m, specPID)
+				runSpectator(deadline, cfg, m)
 			}()
 		}
 	}

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the client-side variant that renders a live player's run **without participating in it** — the read-only Phaser viewer served at `/spectate/:player_id`. Implemented in #23 alongside server-side spectator fan-out (see [foundations/02-protocol.md#spectator-protocol](../foundations/02-protocol.md#spectator-protocol) and [foundations/05-server-runtime.md#spectator-fan-out](../foundations/05-server-runtime.md#spectator-fan-out)).
+Defines the client-side variant that renders a live player's run **without participating in it** — the read-only Phaser viewer served at `/spectate/:run_id`. Implemented in #23 alongside server-side spectator fan-out (see [foundations/02-protocol.md#spectator-protocol](../foundations/02-protocol.md#spectator-protocol) and [foundations/05-server-runtime.md#spectator-fan-out](../foundations/05-server-runtime.md#spectator-fan-out)).
 
 ## Why a separate client mode
 
@@ -36,7 +36,7 @@ graph TB
     end
 
     subgraph Reverse proxy
-        WS["ws(s)://host/ws/spectate?player_id=…"]
+        WS["ws(s)://host/ws/spectate?run_id=…"]
     end
 
     HTML --> MAIN --> PHASER
@@ -53,7 +53,7 @@ graph TB
 
 | Area                       | Player client                                                      | Spectator client                                                              |
 | -------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| WebSocket URL              | `/ws`                                                              | `/ws/spectate?player_id=<hex>` (from the URL path)                            |
+| WebSocket URL              | `/ws`                                                              | `/ws/spectate?run_id=<hex>` (from the URL path)                            |
 | First frames received      | `S2C_AUTH_OK` → `S2C_RUN_STARTED`                                   | **Catchup sequence**: `S2C_RUN_STARTED` + most-recent `S2C_ROOM_LOAD` + most-recent `S2C_STATE`, then live stream. See [foundations/02-protocol.md#catchup-snapshot-on-attach](../foundations/02-protocol.md#catchup-snapshot-on-attach). |
 | C2S packets sent           | All 8 C2S types                                                    | **None**. `SpectatorSync` has no `send*` methods. Any accidental outbound frame is a programming error. |
 | `seq` continuity           | Starts at 1, increments per C2S                                    | Not applicable (no C2S). Inbound `seq` is per-spectator from the server's reset. |
@@ -125,7 +125,7 @@ sequenceDiagram
     participant Sync as SpectatorSync
     participant Srv as Game server
 
-    S->>Sync: connect("/ws/spectate?player_id=…")
+    S->>Sync: connect("/ws/spectate?run_id=…")
     Sync->>Srv: WS upgrade
     Srv-->>Sync: open
     Note over Srv: gameLoop enqueues catchup on register
@@ -182,10 +182,10 @@ sequenceDiagram
 
     User->>Lobby: GET /spectate
     Lobby-->>User: HTML selector (cached /api/live)
-    User->>Lobby: click tile → /spectate/:player_id
+    User->>Lobby: click tile → /spectate/:run_id
     Lobby-->>User: HTML viewer (hosts Phaser bundle)
     User->>Client: page load → startSpectator(...)
-    Client->>Srv: WS /ws/spectate?player_id=<id>
+    Client->>Srv: WS /ws/spectate?run_id=<id>
     Srv-->>Client: catchup: RUN_STARTED + ROOM_LOAD + STATE
     loop Live feed
         Srv-->>Client: S2C_STATE (and sticky events)
@@ -215,8 +215,8 @@ When a spectator connects and any cap is exceeded, the server returns HTTP `503`
 
 Shipped in #23. Files:
 
-- `client/src/spectate-main.ts` — entry that reads `/spectate/:player_id` from `window.location.pathname` and the optional `?name=…` query, then calls `startSpectator`.
-- `client/src/game/spectate-main.ts` — Phaser config with the spectator scene list (`Boot`, `Preloader`, `SpectateConnecting`, `SpectateGame`, `GameHUD`, `SpectateEnd`). Seeds the registry with `nextScene = "SpectateConnecting"` and the player_id / display_name in `callbacks.preBoot`.
+- `client/src/spectate-main.ts` — entry that reads `/spectate/:run_id` from `window.location.pathname` and the optional `?name=…` query, then calls `startSpectator`.
+- `client/src/game/spectate-main.ts` — Phaser config with the spectator scene list (`Boot`, `Preloader`, `SpectateConnecting`, `SpectateGame`, `GameHUD`, `SpectateEnd`). Seeds the registry with `nextScene = "SpectateConnecting"` and the run_id / display_name in `callbacks.preBoot`.
 - `client/src/game/net/SpectatorSync.ts` — read-only sync, no `send*` methods. Owns the same `GameState` class as the player.
 - `client/src/game/scenes/SpectateConnecting.ts` — opens the WS, transitions on the first catchup `STATE`. Cap-503 retry loop: 3 attempts at 5 s spacing; final failure → `SpectateEnd`.
 - `client/src/game/scenes/SpectateGame.ts` — structural copy of `Game.ts` with all input wiring stripped. Adds an absence-based prune of `enemies` / `pickups` so dead mobs / consumed pickups from the cached `S2C_ROOM_LOAD` are despawned for spectators that attached after they died (which is everyone, since `S2C_ENTITY_DIED` events for pre-attach kills aren't replayed).
@@ -228,7 +228,7 @@ Player-client surfaces touched:
 - `runContext` exposes `getSpectatorSync` / `resetSpectatorSync` / `setActiveState` / `getActiveState`. `GameHUD` now reads `getActiveState` so it works for both flows; player flow defaults to `getSync().state`.
 - `Player` gains a `useSnapshotAim` constructor flag. When true, `applySnapshot` reads the new `aim_angle` field (radians) from `PlayerSnapshot` and `tick()` skips its cursor read. Player flow defaults to off — local cursor still wins for the actual player.
 
-Vite multi-entry: `client/index.html` (player) + `client/spectate.html` (spectator) both build into `dist/`. Caddy serves `/spectate/:player_id` viewer URLs by rewriting to `/spectate.html` (single non-empty path-segment matcher, with `<base href="/">` in the HTML for asset resolution).
+Vite multi-entry: `client/index.html` (player) + `client/spectate.html` (spectator) both build into `dist/`. Caddy serves `/spectate/:run_id` viewer URLs by rewriting to `/spectate.html` (single non-empty path-segment matcher, with `<base href="/">` in the HTML for asset resolution).
 
 ## Implementation notes
 

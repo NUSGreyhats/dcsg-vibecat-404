@@ -102,8 +102,8 @@ graph TB
 | Area                       | Spectator client                                                     | Replay client                                                                                  |
 | -------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | Visibility                 | Public — any browser can spectate                                    | **Admin-only** — gated by `admin_session` cookie + WS ticket                                   |
-| URL                        | `/spectate/:player_id`                                               | `/admin/replay/:replay_id/view`                                                                |
-| WebSocket URL              | `/ws/spectate?player_id=<hex>`                                       | `/ws/replay?replay_id=<uuid>&ticket=<signed>`                                                  |
+| URL                        | `/spectate/:run_id`                                                  | `/admin/replay/:replay_id/view`                                                                |
+| WebSocket URL              | `/ws/spectate?run_id=<uuid>`                                         | `/ws/replay?replay_id=<uuid>&ticket=<signed>`                                                  |
 | First frames               | Catchup: cached `RUN_STARTED` + `ROOM_LOAD` + `STATE` (mid-run)      | Canonical `RUN_STARTED` from `T0`, then `STATE`/`ROOM_LOAD`/etc. as the recorded run unfolds   |
 | C2S allowed                | None — any frame closes the WS (`SPECTATOR_READ_ONLY`)              | Only `C2S_REPLAY_CONTROL`. Game-affecting types close the WS (`REPLAY_READ_ONLY`)              |
 | Pacing                     | Wall-clock — server fans out at 20 Hz                                | Replay-engine driven — client controls speed via `C2S_REPLAY_CONTROL`                          |

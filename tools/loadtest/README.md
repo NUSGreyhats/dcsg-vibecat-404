@@ -36,14 +36,14 @@ means the engine is falling behind).
 | --- | --- | --- |
 | `-server` | `ws://127.0.0.1:8080` | WS base URL (no trailing path) |
 | `-players` | `10` | concurrent synthetic players |
-| `-spectators-per-game` | `0` | extra `/ws/spectate` viewers per player |
+| `-spectators-per-game` | `0` | extra `/ws/spectate` viewers per player. Each viewer polls `/api/live` to discover a public `run_id` then attaches; no 1:1 mapping to a specific player (issue #71 #1). |
 | `-ramp` | `5s` | linear ramp window for player connect launches |
 | `-duration` | `30s` | total test duration; `SIGINT` also stops |
 | `-input-hz` | `10` | `C2S_INPUT` rate per player |
 | `-no-shoot` | `false` | suppress randomized `C2S_SHOOT` packets |
 | `-id-prefix` | `loadtest-` | prefix for synthetic player_ids |
 | `-report-interval` | `5s` | periodic stats line cadence (`0` disables) |
-| `-spectator-lag` | `2s` | delay after a player connects before its spectators attach |
+| `-spectator-lag` | `2s` | delay before each spectator polls `/api/live` for a run_id |
 
 ## Auth mode caveat
 

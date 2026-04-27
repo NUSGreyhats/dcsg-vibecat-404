@@ -19,7 +19,7 @@
     # leaderboard webapp (#22), and the spectator selector page +
     # live-games feed (#23). Replay download moved under /admin/replay/
     # (Phase 4) so only moderators can pull input logs. The
-    # /spectate/:player_id viewer page lands in Phase 3b alongside the
+    # /spectate/:run_id viewer page lands in Phase 3b alongside the
     # spectator client bundle.
     @lobby_api path /api/register /api/login /api/verify /api/health /api/leaderboard /api/live /api/queue/*
     handle @lobby_api {
@@ -66,7 +66,7 @@
         reverse_proxy game-server:8080
     }
 
-    # Spectator viewer URLs (/spectate/:player_id) serve the spectator
+    # Spectator viewer URLs (/spectate/:run_id) serve the spectator
     # bundle's spectate.html. The matcher is tight (single non-empty path
     # segment after /spectate/) so a deep request like /spectate/abc/assets/x.js
     # falls through to the static file_server instead of being rewritten

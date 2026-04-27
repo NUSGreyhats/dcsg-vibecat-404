@@ -163,11 +163,11 @@ graph TD
 
 ### Accept path
 
-- Upgrade endpoint: `/ws/spectate?player_id=<hex>`. No `C2S_AUTH` handshake — `player_id` comes from the URL.
+- Upgrade endpoint: `/ws/spectate?run_id=<uuid>`. No `C2S_AUTH` handshake — `run_id` comes from the URL. `run_id` is the public per-run handle minted by the engine in `initRun`; `player_id` (the WS bearer credential) is intentionally not in this URL — see issue #71 #1.
 - Accept-loop checks:
   1. Global spectator count `< SPECTATOR_GLOBAL` (default 200).
-  2. Target player is actively playing (there is a gameLoop for `player_id`).
-  3. That player's spectator count `< SPECTATOR_PER_GAME` (default 50).
+  2. A run with `run_id` is currently registered with `spectator.Engines`.
+  3. That run's spectator count `< SPECTATOR_PER_GAME` (default 50).
 - On pass: send a `registerCh` message to the target gameLoop with the new spectator's `outCh`; gameLoop appends to its registry and immediately enqueues a **catchup packet** (current `S2C_STATE` + last `S2C_ROOM_LOAD`) so the viewer renders without waiting for the next tick.
 - On fail: HTTP `503` with `Retry-After: 5`, WS upgrade refused.
 
@@ -178,11 +178,12 @@ graph TD
 
 ### Internal endpoint
 
-- `GET /internal/live-games` → returns the list consumed by the lobby's selector cache. Loopback-only / shared-secret-gated (same surface as `/internal/slot-status`).
+- `GET /internal/live-games` → returns the list consumed by the lobby's selector cache. Loopback-only / shared-secret-gated (same surface as `/internal/slot-status`; `INTERNAL_SECRET` env enforces the `X-Internal-Secret` header on top of the private-peer rule).
   ```jsonc
   [
     {
-      "player_id": "a3f9…",
+      "run_id": "0f8d…-…",
+      "player_id": "a3f9…",   // INTERNAL ONLY: lobby strips this before /api/live
       "display_name": "aluminum-fox",
       "room_index": 3,
       "elapsed_ms": 42718,
@@ -191,7 +192,7 @@ graph TD
     }
   ]
   ```
-- Populated by a **registry aggregator goroutine**. Each gameLoop writes a per-tick summary onto a shared `summaryCh` (buffered `MAX_CONCURRENT`, non-blocking); the aggregator maintains a map keyed by `player_id` and serves `/internal/live-games` reads off it. No direct cross-goroutine reads into any gameLoop's state.
+- Populated by a **registry aggregator goroutine**. Each gameLoop writes a per-tick summary onto a shared `summaryCh` (buffered `MAX_CONCURRENT`, non-blocking); the aggregator maintains a map keyed by `run_id` and serves `/internal/live-games` reads off it. The companion `spectator.Engines` registry — the run_id → RegisterCh map used by `/ws/spectate` — is keyed the same way. No direct cross-goroutine reads into any gameLoop's state.
 
 ### Caps and configuration
 
