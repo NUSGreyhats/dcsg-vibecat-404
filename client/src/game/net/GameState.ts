@@ -49,10 +49,21 @@ export class GameState extends Phaser.Events.EventEmitter {
         break;
       }
       case S2CType.RUN_STARTED: {
-        const data = envelope.data as { seed: number; room: RoomData };
+        const data = envelope.data as {
+          seed: number;
+          room: RoomData;
+          display_name?: string;
+        };
         this.seed = data.seed;
         this.roomData = data.room;
         this.currentRoom = data.room.room_index;
+        // Spectator catchup: AUTH_OK is player-only, so the name only
+        // arrives here. The server tags every RUN_STARTED so a spectator
+        // who deep-linked /spectate/:id without ?name= still gets the
+        // display name without a separate /api/live fetch.
+        if (data.display_name) {
+          this.displayName = data.display_name;
+        }
         this.runStarted = true;
         this.runFinished = false;
         this.runOutcome = undefined;

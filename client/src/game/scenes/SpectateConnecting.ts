@@ -103,7 +103,11 @@ export class SpectateConnecting extends Phaser.Scene {
       sync.state.off("state", onState);
       sync.state.off("error", onError);
       sync.state.off("disconnect", onDisconnect);
-      this.scene.start("SpectateGame", { displayName: this.displayName });
+      // RUN_STARTED arrives before the first STATE in the catchup sequence,
+      // so by now sync.state.displayName is the server-canonical name.
+      // Prefer it over the URL hint, which is missing on direct-link visits.
+      const displayName = sync.state.displayName || this.displayName;
+      this.scene.start("SpectateGame", { displayName });
       this.scene.launch("GameHUD");
     };
     const onError = (err: { code: string; message: string }) => {

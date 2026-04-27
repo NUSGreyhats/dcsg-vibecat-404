@@ -119,6 +119,7 @@ type LeaderboardEntry struct {
 	Splits      []SplitData `json:"splits"`
 	Seed        int64       `json:"seed"`
 	ReplayID    string      `json:"replay_id"`
+	SubmittedAt string      `json:"submitted_at"`
 }
 
 type AuthOkData struct {
@@ -126,8 +127,9 @@ type AuthOkData struct {
 }
 
 type RunStartedData struct {
-	Seed int64    `json:"seed"`
-	Room RoomData `json:"room"`
+	Seed        int64    `json:"seed"`
+	Room        RoomData `json:"room"`
+	DisplayName string   `json:"display_name,omitempty"`
 }
 
 type StateData struct {

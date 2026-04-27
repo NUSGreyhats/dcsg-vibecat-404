@@ -85,11 +85,18 @@ export class SpectateGame extends Phaser.Scene {
     this.add.existing(this.player);
 
     // Spectator badge — top-center, semi-muted so it doesn't fight the HUD.
+    // Cap the name length so a 60-char display name doesn't overflow the
+    // canvas; wordWrap+maxLines is the belt-and-braces clamp.
+    const rawName = this.displayName || "anonymous";
+    const trimmedName =
+      rawName.length > 28 ? rawName.slice(0, 27) + "…" : rawName;
     this.add
-      .text(this.scale.width / 2, 4, `SPECTATING: ${this.displayName || "anonymous"}`, {
+      .text(this.scale.width / 2, 4, `SPECTATING: ${trimmedName}`, {
         fontFamily: FONT_FAMILY,
         fontSize: FONT_SIZE_CAPTION,
         color: hex(ACCENT_PRIMARY),
+        wordWrap: { width: this.scale.width - 16, useAdvancedWrap: true },
+        maxLines: 1,
       })
       .setOrigin(0.5, 0)
       .setScrollFactor(0)

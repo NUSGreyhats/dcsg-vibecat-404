@@ -67,6 +67,13 @@ Open with `I`. You can hold items picked up during the run and use them when it 
 
 ## Leaderboard
 
-When you finish, your time goes on the public leaderboard. Shave seconds off however you can — **be creative**.
+When you finish, your time goes on the public leaderboard. Lower is better — but the way you get there is the whole point: **the game is intentionally buggy, and you're meant to exploit those bugs.** Protocol quirks, off-by-ones, unchecked state — all fair game. The fastest runs aren't clean playthroughs.
+
+So please don't report regular bugs to us — they're features. The two things we *do* want to hear about:
+
+- **Infra problems** — the site is down, you can't register, the leaderboard won't load, your run dropped because the server crashed.
+- **Unintended game-breakers** — an instant-solve that skips the run entirely, or anything that breaks the leaderboard for everyone else.
+
+If you hit one of those, ping an organizer. Everything else, keep to yourself and post the time.
 
 Good luck.

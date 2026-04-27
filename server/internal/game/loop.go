@@ -301,8 +301,9 @@ func (e *Engine) initRun(startTime int64) bool {
 	placePlayerSpawn(e.player, 1)
 
 	e.send(protocol.S2CRunStarted, protocol.RunStartedData{
-		Seed: startTime,
-		Room: roomData,
+		Seed:        startTime,
+		Room:        roomData,
+		DisplayName: e.DisplayName,
 	})
 	// Make the engine reachable from /ws/spectate. We delayed this from
 	// the AUTH handshake so spectators only ever attach to engines with
