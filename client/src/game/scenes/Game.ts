@@ -148,6 +148,27 @@ export class Game extends Phaser.Scene {
    * The server populates `unlockedDoors` only after the room is cleared,
    * so the arrow only appears once the level is done.
    */
+  /**
+   * Server-confirmed shot fx. Fires once per new player-owned projectile
+   * we see, so muzzle flash and camera shake never play for shots the
+   * server rejected (out-of-window timestamps, ammo races, etc).
+   */
+  private playerProjectileSpawned(snap: ProjSnapshot): void {
+    if (!this.player) return;
+    const sp = getSync().state.player;
+    if (!sp) return;
+    const id = weaponFromServerId(sp.weapon_id);
+    const fx = WEAPON_FX[id];
+    const barrelLen = 22;
+    const bx = this.player.x + Math.cos(snap.angle) * barrelLen;
+    const by = this.player.y + Math.sin(snap.angle) * barrelLen;
+    spawnMuzzleFlash(this, bx, by, snap.angle, {
+      length: fx.muzzleLength,
+      thickness: fx.muzzleThickness,
+    });
+    cameraShake(this, fx.shakeMs, fx.shakeIntensity);
+  }
+
   private updateExitArrow(): void {
     const g = this.exitArrow;
     if (!g || !this.player) return;
@@ -223,18 +244,10 @@ export class Game extends Phaser.Scene {
           const stacks = sp.fire_rate_stacks ?? 0;
           this.nextShootAt = now + baseCd / rateMult / (1 + 0.1 * stacks);
 
-          // Muzzle flash + camera shake fire on every shot. The
-          // nextShootAt gate above already throttles this — no
-          // separate fx cooldown needed.
-          const fx = WEAPON_FX[id];
-          const barrelLen = 22;
-          const bx = this.player.x + Math.cos(angle) * barrelLen;
-          const by = this.player.y + Math.sin(angle) * barrelLen;
-          spawnMuzzleFlash(this, bx, by, angle, {
-            length: fx.muzzleLength,
-            thickness: fx.muzzleThickness,
-          });
-          cameraShake(this, fx.shakeMs, fx.shakeIntensity);
+          // Muzzle flash + camera shake fire when the server confirms
+          // the shot — see playerProjectileSpawned() below. Firing them
+          // locally would mislead the player on rejected packets (out
+          // of window, ammo race, etc).
         }
       }
     } else {
@@ -324,6 +337,7 @@ export class Game extends Phaser.Scene {
         bullet = new Bullet(this, p);
         this.add.existing(bullet);
         this.projectiles.set(p.proj_id, bullet);
+        if (p.owner === 0) this.playerProjectileSpawned(p);
       }
       bullet.applySnapshot(p);
     }
