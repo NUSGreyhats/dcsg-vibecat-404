@@ -10,10 +10,6 @@ on:
     # exposed here on purpose; they stay in repo Secrets so they aren't
     # echoed into the workflow log or surfaced in the trigger UI.
     inputs:
-      DOMAIN:
-        description: "DOMAIN (e.g. game.example.com) — blank uses repo Variable; empty = HTTP only"
-        required: false
-        default: ""
       AUTH_MODE:
         description: "AUTH_MODE (open|identity|token) — blank uses repo Variable"
         required: false
@@ -54,7 +50,7 @@ jobs:
           # the repo Variable. GitHub's `&&` / `||` short-circuit on
           # truthy strings, so `inputs.X != '' && inputs.X || vars.X`
           # cleanly resolves to "input if provided, else variable."
-          DOMAIN: ${{ inputs.DOMAIN != '' && inputs.DOMAIN || vars.DOMAIN }}
+          DOMAIN: ${{ vars.DOMAIN }}
           AUTH_MODE: ${{ inputs.AUTH_MODE != '' && inputs.AUTH_MODE || vars.AUTH_MODE }}
           QUEUE_ENABLED: ${{ inputs.QUEUE_ENABLED != '' && inputs.QUEUE_ENABLED || vars.QUEUE_ENABLED }}
           MAX_CONCURRENT: ${{ inputs.MAX_CONCURRENT != '' && inputs.MAX_CONCURRENT || vars.MAX_CONCURRENT }}

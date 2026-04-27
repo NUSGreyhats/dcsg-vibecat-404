@@ -7,10 +7,6 @@ on:
     # any of these at trigger time when you want the prod cutover
     # posture (AUTH_MODE=token + QUEUE_ENABLED=true + MAX_CONCURRENT=4).
     inputs:
-      DOMAIN:
-        description: "Public hostname (e.g. game.example.com) — enables automatic HTTPS via Let's Encrypt"
-        required: false
-        default: ""
       AUTH_MODE:
         description: "AUTH_MODE (open|identity|token)"
         required: false
@@ -49,7 +45,7 @@ jobs:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
         env:
-          DOMAIN: ${{ inputs.DOMAIN }}
+          DOMAIN: ${{ vars.DOMAIN_PROD }}
           AUTH_MODE: ${{ inputs.AUTH_MODE }}
           QUEUE_ENABLED: ${{ inputs.QUEUE_ENABLED }}
           MAX_CONCURRENT: ${{ inputs.MAX_CONCURRENT }}
