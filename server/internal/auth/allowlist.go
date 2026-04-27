@@ -87,6 +87,12 @@ func (a *Allowlist) Has(playerID string) bool {
 //
 // A missing file is treated as the empty set (not an error) — in prod the
 // lobby may not have seeded the file yet.
+//
+// Read or parse errors fail closed: a.ids is replaced with an empty set
+// so previously-cached entries can't keep authenticating after the file
+// goes corrupt or unreadable. Without this, a successful read followed
+// by a permission/parse failure would leave stale ids in memory and
+// they'd continue to pass Has indefinitely.
 func (a *Allowlist) refresh(force bool) error {
 	if !force && a.ids != nil && time.Since(a.read) <= a.ttl {
 		return nil
@@ -98,12 +104,14 @@ func (a *Allowlist) refresh(force bool) error {
 			a.read = time.Now()
 			return nil
 		}
+		a.ids = map[string]struct{}{}
 		return err
 	}
 	var parsed struct {
 		Allowed []string `json:"allowed"`
 	}
 	if err := json.Unmarshal(data, &parsed); err != nil {
+		a.ids = map[string]struct{}{}
 		return err
 	}
 	ids := make(map[string]struct{}, len(parsed.Allowed))

@@ -94,17 +94,19 @@ type OverrideMaxFunc func() (int, bool)
 // Advancer ties together the queue store, live-games snapshot, slot
 // poll, and the on-disk allowlist.
 type Advancer struct {
-	db            *sql.DB
-	live          *livegames.Poller
-	gameServerURL string
-	allowlistPath string
-	client        *http.Client
-	now           func() time.Time
-	overrideMax   OverrideMaxFunc
+	db             *sql.DB
+	live           *livegames.Poller
+	gameServerURL  string
+	internalSecret string
+	allowlistPath  string
+	client         *http.Client
+	now            func() time.Time
+	overrideMax    OverrideMaxFunc
 
-	mu       sync.Mutex
-	admitted map[string]*admission // keyed by player_id
-	written  []string              // last allowlist contents we wrote (sorted)
+	mu          sync.Mutex
+	admitted    map[string]*admission // keyed by player_id
+	written     []string              // last allowlist contents we wrote (sorted)
+	hasWritten  bool                  // true once writeAllowlistLocked has produced a file at least once this process
 }
 
 // New constructs the advancer. It does not create the allowlist file;
@@ -114,16 +116,17 @@ type Advancer struct {
 //
 // overrideMax may be nil. When non-nil it's consulted on each tick
 // before /internal/slot-status; ok=true wins, including n=0 (pause).
-func New(db *sql.DB, live *livegames.Poller, gameServerURL, allowlistPath string, overrideMax OverrideMaxFunc) *Advancer {
+func New(db *sql.DB, live *livegames.Poller, gameServerURL, internalSecret, allowlistPath string, overrideMax OverrideMaxFunc) *Advancer {
 	return &Advancer{
-		db:            db,
-		live:          live,
-		gameServerURL: gameServerURL,
-		allowlistPath: allowlistPath,
-		client:        &http.Client{Timeout: time.Second},
-		now:           time.Now,
-		overrideMax:   overrideMax,
-		admitted:      map[string]*admission{},
+		db:             db,
+		live:           live,
+		gameServerURL:  gameServerURL,
+		internalSecret: internalSecret,
+		allowlistPath:  allowlistPath,
+		client:         &http.Client{Timeout: time.Second},
+		now:            time.Now,
+		overrideMax:    overrideMax,
+		admitted:       map[string]*admission{},
 	}
 }
 
@@ -164,8 +167,18 @@ func (a *Advancer) ForceFree(playerID string) bool {
 	return true
 }
 
-// Start launches the advancer goroutine.
+// Start launches the advancer goroutine. Before the first tick we
+// force-write an empty allowlist so any stale on-disk file from a
+// previous lobby process is cleared. Otherwise, restart-with-empty-
+// queue would leave the previously admitted ids on disk indefinitely
+// (the next tick's writeAllowlistLocked compares an empty in-memory
+// set to its empty `written` slice and short-circuits the write).
 func (a *Advancer) Start(ctx context.Context) {
+	a.mu.Lock()
+	if err := a.writeAllowlistLocked(); err != nil {
+		log.Printf("advancer: startup allowlist write: %v", err)
+	}
+	a.mu.Unlock()
 	go a.run(ctx)
 }
 
@@ -176,6 +189,16 @@ func (a *Advancer) run(ctx context.Context) {
 		a.tick(ctx)
 		select {
 		case <-ctx.Done():
+			// Best-effort: clear the allowlist on graceful shutdown so
+			// admitted-but-not-yet-played players don't keep their slot
+			// across restarts. The game server will then reject any of
+			// their reconnect attempts in token mode.
+			a.mu.Lock()
+			a.admitted = map[string]*admission{}
+			if err := a.writeAllowlistLocked(); err != nil {
+				log.Printf("advancer: shutdown allowlist clear: %v", err)
+			}
+			a.mu.Unlock()
 			return
 		case <-t.C:
 		}
@@ -258,14 +281,17 @@ func (a *Advancer) step(ctx context.Context, now time.Time, max int, live []live
 }
 
 // writeAllowlistLocked atomically rewrites a.allowlistPath if the
-// admittedSet has changed since the last write. Caller must hold a.mu.
+// admittedSet has changed since the last write — or if we haven't
+// written anything yet this process (covers the cold-start case where
+// `admitted` and `written` are both empty but a stale on-disk file may
+// exist from a previous lobby process). Caller must hold a.mu.
 func (a *Advancer) writeAllowlistLocked() error {
 	ids := make([]string, 0, len(a.admitted))
 	for id := range a.admitted {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	if equalStrings(ids, a.written) {
+	if a.hasWritten && equalStrings(ids, a.written) {
 		return nil
 	}
 	body, err := json.Marshal(struct {
@@ -299,6 +325,7 @@ func (a *Advancer) writeAllowlistLocked() error {
 		return fmt.Errorf("rename: %w", err)
 	}
 	a.written = ids
+	a.hasWritten = true
 	return nil
 }
 
@@ -316,6 +343,9 @@ func (a *Advancer) fetchMax(ctx context.Context) int {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.gameServerURL+"/internal/slot-status", nil)
 	if err != nil {
 		return fallbackMax
+	}
+	if a.internalSecret != "" {
+		req.Header.Set("X-Internal-Secret", a.internalSecret)
 	}
 	resp, err := a.client.Do(req)
 	if err != nil {

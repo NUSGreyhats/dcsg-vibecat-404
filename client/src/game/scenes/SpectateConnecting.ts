@@ -28,7 +28,7 @@ const RETRY_MAX_ATTEMPTS = 3;
  */
 export class SpectateConnecting extends Phaser.Scene {
   private statusText?: Phaser.GameObjects.Text;
-  private playerId = "";
+  private runId = "";
   private displayName = "";
   private attempt = 0;
   private retryTimer?: Phaser.Time.TimerEvent;
@@ -38,15 +38,15 @@ export class SpectateConnecting extends Phaser.Scene {
     super({ key: "SpectateConnecting" });
   }
 
-  init(data: { playerId?: string; displayName?: string }): void {
+  init(data: { runId?: string; displayName?: string }): void {
     // Init data is preferred when present (e.g. when re-entering the
     // scene from SpectateEnd), but on the initial Preloader → here
     // transition there's none, so we fall back to the registry that the
     // boot script populates.
-    const regId = this.registry.get("spectatorPlayerId") as string | undefined;
+    const regId = this.registry.get("spectatorRunId") as string | undefined;
     const regName = this.registry.get("spectatorDisplayName") as string | undefined;
-    this.playerId = data.playerId ?? regId ?? "";
-    this.displayName = data.displayName || regName || this.playerId;
+    this.runId = data.runId ?? regId ?? "";
+    this.displayName = data.displayName || regName || this.runId;
     this.attempt = 0;
     this.transitioned = false;
   }
@@ -80,8 +80,8 @@ export class SpectateConnecting extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    if (!this.playerId) {
-      this.endWithError("missing player_id in URL");
+    if (!this.runId) {
+      this.endWithError("missing run_id in URL");
       return;
     }
 
@@ -135,7 +135,7 @@ export class SpectateConnecting extends Phaser.Scene {
     sync.state.on("disconnect", onDisconnect);
 
     const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${wsProto}//${window.location.host}/ws/spectate?player_id=${encodeURIComponent(this.playerId)}`;
+    const url = `${wsProto}//${window.location.host}/ws/spectate?run_id=${encodeURIComponent(this.runId)}`;
     this.statusText?.setText(
       this.attempt === 1
         ? "Connecting…"

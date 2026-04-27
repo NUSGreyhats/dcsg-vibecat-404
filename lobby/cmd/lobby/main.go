@@ -37,6 +37,7 @@ import (
 	"github.com/greyhats/defcon-game/lobby/internal/settings"
 	"github.com/greyhats/defcon-game/lobby/web"
 	"github.com/greyhats/defcon-game/pkg/identity"
+	"github.com/greyhats/defcon-game/pkg/netutil"
 	"github.com/greyhats/defcon-game/pkg/replayauth"
 )
 
@@ -51,6 +52,15 @@ const avgTurnMs = 180_000
 // payloads are tiny ({player_id, password}); 4 KiB is well over real
 // payloads but stops a long body from chewing memory.
 const maxQueueBodyBytes = 4 * 1024
+
+// maxAdminBodyBytes caps incoming JSON for /admin/* mutating endpoints
+// (e.g. flag/unflag). Bodies carry a replay_id (~32 hex) plus an
+// optional reason; 2 KiB is well over realistic payloads.
+const maxAdminBodyBytes = 2 * 1024
+
+// maxFlagReasonBytes caps the stored moderation reason to keep one
+// large admin POST from inflating game.db. Plenty for a one-line note.
+const maxFlagReasonBytes = 512
 
 // playerIDPattern is the canonical 32-hex-character shape produced by
 // identity.NewPlayerID. Queue endpoints reject anything else early so
@@ -75,6 +85,22 @@ func main() {
 	telegramChatID := os.Getenv("TELEGRAM_ADMIN_CHAT_ID")
 	adminSessionSecret := []byte(os.Getenv("ADMIN_SESSION_SECRET"))
 	queueEnabled := strings.EqualFold(os.Getenv("QUEUE_ENABLED"), "true")
+	// INTERNAL_SECRET — shared bearer for /internal/* requests to the
+	// game server. Threaded into the live-games poller and the
+	// slot-status fetcher in the advancer. Empty disables the header
+	// (matches game server's default — relies on private-peer gating
+	// only). Operator should set this in any prod deploy.
+	internalSecret := os.Getenv("INTERNAL_SECRET")
+	if internalSecret == "" {
+		log.Printf("WARN: INTERNAL_SECRET unset — /internal/* polls won't carry an auth header.")
+	}
+	// BEHIND_TLS=1 tells adminauth to issue Secure cookies regardless of
+	// what the request looks like. Set in any prod deploy where TLS is
+	// terminated upstream (Caddy on the host, Cloudflare, etc.) so a
+	// proxy that omits X-Forwarded-Proto can't silently downgrade the
+	// admin_session cookie to non-Secure.
+	behindTLS := strings.EqualFold(os.Getenv("BEHIND_TLS"), "true") ||
+		os.Getenv("BEHIND_TLS") == "1"
 
 	identityDB, err := identity.OpenDB(identityDBPath)
 	if err != nil {
@@ -109,9 +135,10 @@ func main() {
 	}
 
 	authSvc, err := adminauth.New(lobbyDB, adminauth.Config{
-		BotToken:      telegramBotToken,
-		ChatID:        telegramChatID,
-		SessionSecret: adminSessionSecret,
+		BotToken:           telegramBotToken,
+		ChatID:             telegramChatID,
+		SessionSecret:      adminSessionSecret,
+		ForceSecureCookies: behindTLS,
 	})
 	if err != nil {
 		log.Fatalf("adminauth: %v", err)
@@ -119,13 +146,20 @@ func main() {
 
 	identitySvc := identity.NewService(identityDB)
 
+	// Per-IP rate limit on /api/queue/{join,leave}. 1 s mirrors
+	// /api/login and is intentionally tight: both queue endpoints
+	// run bcrypt password verification, which is exactly the CPU
+	// load we don't want unauthenticated traffic to be able to
+	// trigger at line rate. See bug #4 in issue 71.
+	queueLimit := identity.NewRateLimiter(1 * time.Second)
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	// Live-games poller — pulls /internal/live-games from the game server
 	// every 2 s and caches the response. Backs /api/live and the
 	// /spectate selector page.
-	livePoller := livegames.New(gameServerURL)
+	livePoller := livegames.New(gameServerURL, internalSecret)
 	livePoller.Start(ctx)
 
 	// Queue + slot advancer (Phase 5). Both are kept off when
@@ -155,7 +189,7 @@ func main() {
 			}
 			return n, true
 		}
-		adv = advancer.New(queueDB, livePoller, gameServerURL, allowlistPath, overrideMax)
+		adv = advancer.New(queueDB, livePoller, gameServerURL, internalSecret, allowlistPath, overrideMax)
 		adv.Start(ctx)
 	}
 
@@ -217,7 +251,7 @@ func main() {
 			http.Error(w, "queue disabled", http.StatusServiceUnavailable)
 			return
 		}
-		queueJoinHandler(w, r, queueDB, identityDB, adv)
+		queueJoinHandler(w, r, queueDB, identityDB, adv, queueLimit)
 	})
 	mux.HandleFunc("/api/queue/status/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -239,7 +273,7 @@ func main() {
 		}
 		switch r.Method {
 		case http.MethodDelete:
-			queueLeaveHandler(w, r, queueDB, identityDB)
+			queueLeaveHandler(w, r, queueDB, identityDB, queueLimit)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -249,15 +283,17 @@ func main() {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		// Verbatim cache — the game-server's spectator.Summary JSON shape
-		// is the contract here. If the cache hasn't populated yet (or the
-		// game server is down), this is the empty slice.
+		// Strip player_id before serving — it's the WS bearer credential
+		// in token mode and used to be observable on this endpoint and on
+		// every spectator URL (issue 71 #1). RunID is the public-facing
+		// per-run handle clients build /spectate links from.
 		entries := livePoller.Snapshot()
-		if entries == nil {
-			entries = []livegames.Entry{}
+		out := make([]livegames.PublicEntry, 0, len(entries))
+		for _, e := range entries {
+			out = append(out, e.Public())
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(entries)
+		_ = json.NewEncoder(w).Encode(out)
 	})
 	// /admin/login + /admin/verify + /admin/logout are public — they
 	// have to be reachable to bootstrap a session. They internally
@@ -391,9 +427,16 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
+		Addr:    addr,
+		Handler: mux,
+		// Slowloris hardening — without these a slow client can hold a
+		// handler goroutine open indefinitely. Lobby has no WebSocket
+		// endpoints; all routes are short-lived JSON / HTML so the
+		// 30 s caps are well above legit traffic.
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {
@@ -433,13 +476,16 @@ func adminFlagHandler(w http.ResponseWriter, r *http.Request, db *sql.DB, flag b
 		ReplayID string `json:"replay_id"`
 		Reason   string `json:"reason"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAdminBodyBytes)).Decode(&body); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
 	if body.ReplayID == "" {
 		http.Error(w, "replay_id required", http.StatusBadRequest)
 		return
+	}
+	if len(body.Reason) > maxFlagReasonBytes {
+		body.Reason = body.Reason[:maxFlagReasonBytes]
 	}
 	var err error
 	if flag {
@@ -465,7 +511,16 @@ func adminFlagHandler(w http.ResponseWriter, r *http.Request, db *sql.DB, flag b
 // for game-server slot), we return 200 with position=0 so the client
 // can short-circuit straight to the play page rather than getting a
 // confusing "already queued" error.
-func queueJoinHandler(w http.ResponseWriter, r *http.Request, queueDB, identityDB *sql.DB, adv *advancer.Advancer) {
+func queueJoinHandler(w http.ResponseWriter, r *http.Request, queueDB, identityDB *sql.DB, adv *advancer.Advancer, limiter *identity.RateLimiter) {
+	// Per-IP rate limit BEFORE any decode/lookup/bcrypt. This is a
+	// public endpoint that runs bcrypt on every accepted request, so
+	// without throttling a single attacker can pin a CPU core or
+	// online-brute-force a known player_id. We also skip the dummy
+	// bcrypt path on rate-limit so abusive traffic does no work.
+	if !limiter.Allow(netutil.ClientIP(r)) {
+		http.Error(w, "slow down", http.StatusTooManyRequests)
+		return
+	}
 	var body struct {
 		PlayerID string `json:"player_id"`
 		Password string `json:"password"`
@@ -565,7 +620,12 @@ func queueStatusHandler(w http.ResponseWriter, r *http.Request, queueDB *sql.DB,
 // queueLeaveHandler is DELETE /api/queue/:player_id. Body is JSON
 // `{"password": "..."}`. Self-removal only — there is no admin override
 // here; admins use /admin/queue.
-func queueLeaveHandler(w http.ResponseWriter, r *http.Request, queueDB, identityDB *sql.DB) {
+func queueLeaveHandler(w http.ResponseWriter, r *http.Request, queueDB, identityDB *sql.DB, limiter *identity.RateLimiter) {
+	// Per-IP rate limit BEFORE bcrypt — same reasoning as queueJoinHandler.
+	if !limiter.Allow(netutil.ClientIP(r)) {
+		http.Error(w, "slow down", http.StatusTooManyRequests)
+		return
+	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/queue/")
 	if !validPlayerID(id) {
 		http.Error(w, "invalid player_id", http.StatusBadRequest)
@@ -834,11 +894,27 @@ func adminWinnersCSV(w http.ResponseWriter, gameDB, identityDB *sql.DB) {
 		_ = cw.Write([]string{
 			win.ReplayID,
 			win.PlayerID,
-			win.DisplayName,
-			win.Contact,
+			csvSafe(win.DisplayName),
+			csvSafe(win.Contact),
 			strconv.FormatInt(win.TotalMs, 10),
 			win.SubmittedAt,
 		})
 	}
 	cw.Flush()
+}
+
+// csvSafe defuses spreadsheet formula injection in user-controlled cell
+// values. Excel/Sheets/LibreOffice treat a cell beginning with '=', '+',
+// '-', '@', tab, or CR as a formula and will execute it on open. Prefix
+// such cells with a single quote so the spreadsheet renders the literal
+// text. OWASP CSV-injection guidance.
+func csvSafe(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + s
+	}
+	return s
 }

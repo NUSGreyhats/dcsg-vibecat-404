@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/greyhats/defcon-game/server/internal/protocol"
 )
@@ -38,13 +39,30 @@ func (s *Service) Start(ctx context.Context) {
 	go s.run(ctx)
 }
 
-// Submit is non-blocking-ish: sends on the 128-buffered inCh. Returns false
-// if the channel is full.
+// SubmitTimeout caps how long Submit blocks on a full inCh before
+// returning false. Bounded so the engine's finishRun path doesn't pin
+// the player goroutine if the leaderboard worker stalls, but long
+// enough that a transient burst of completions just queues instead of
+// silently dropping (issue 71 #16). Tunable from tests via package
+// variable rather than channel-resize.
+var SubmitTimeout = 250 * time.Millisecond
+
+// Submit blocks up to SubmitTimeout trying to land run on inCh. Returns
+// false on timeout (caller should surface this to the player so they
+// know the run wasn't recorded). The 128-deep buffer plus the timeout
+// gives the worker time to catch up under realistic burst load.
 func (s *Service) Submit(run *CompletedRun) bool {
 	select {
 	case s.inCh <- run:
 		return true
 	default:
+	}
+	t := time.NewTimer(SubmitTimeout)
+	defer t.Stop()
+	select {
+	case s.inCh <- run:
+		return true
+	case <-t.C:
 		return false
 	}
 }

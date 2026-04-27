@@ -10,7 +10,7 @@ import { hex, CANVAS_BG } from "./ui/tokens";
 
 export type SpectatorBootArgs = {
   parentId: string;
-  playerId: string;
+  runId: string;
   displayName?: string;
 };
 
@@ -20,8 +20,9 @@ export type SpectatorBootArgs = {
  * input-bearing scenes — and seeds the registry so Preloader transitions
  * to SpectateConnecting instead of MainMenu.
  *
- * Player_id and display_name are stashed in the Phaser registry by
- * preBoot; SpectateConnecting.init reads them on first entry.
+ * run_id and display_name are stashed in the Phaser registry by preBoot;
+ * SpectateConnecting.init reads them on first entry. run_id replaces the
+ * previous player_id wiring (issue 71 #1).
  */
 export function startSpectator(args: SpectatorBootArgs): Phaser.Game {
   const config: Phaser.Types.Core.GameConfig = {
@@ -47,7 +48,7 @@ export function startSpectator(args: SpectatorBootArgs): Phaser.Game {
     callbacks: {
       preBoot: (game) => {
         game.registry.set("nextScene", "SpectateConnecting");
-        game.registry.set("spectatorPlayerId", args.playerId);
+        game.registry.set("spectatorRunId", args.runId);
         game.registry.set("spectatorDisplayName", args.displayName ?? "");
       },
     },

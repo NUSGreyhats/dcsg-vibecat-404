@@ -34,13 +34,14 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/greyhats/defcon-game/pkg/netutil"
 )
 
 // Config bundles the env-driven parameters. An empty BotToken or
@@ -58,6 +59,13 @@ type Config struct {
 	// HTTPClient sends Telegram requests. nil → http.DefaultClient
 	// with a 5 s timeout.
 	HTTPClient *http.Client
+	// ForceSecureCookies forces Secure=true on every admin cookie
+	// regardless of what the request looks like. Set in prod (where
+	// the operator knows TLS is terminated upstream) so that a
+	// misconfigured proxy that omits X-Forwarded-Proto can't silently
+	// downgrade admin session cookies to non-Secure. Threaded from
+	// the BEHIND_TLS env var by main.
+	ForceSecureCookies bool
 }
 
 // Service is the adminauth root. Construct via New, then call Wrap to
@@ -98,13 +106,16 @@ const (
 	cookieSession = "admin_session"
 )
 
-// isSecureRequest reports whether response cookies should carry
-// Secure. True when the connection is TLS or the immediate proxy
-// terminated TLS upstream and forwarded X-Forwarded-Proto. Used by
-// both issuance and deletion paths so the Set-Cookie attributes
-// match — some browsers refuse to clear a Secure-issued cookie via
-// a non-Secure Set-Cookie.
-func isSecureRequest(r *http.Request) bool {
+// secureCookie reports whether response cookies should carry Secure.
+// Returns true if the operator forced it on (BEHIND_TLS=1), if the
+// connection itself is TLS, or if the immediate proxy terminated TLS
+// upstream and forwarded X-Forwarded-Proto. Used by both issuance and
+// deletion paths so the Set-Cookie attributes match — some browsers
+// refuse to clear a Secure-issued cookie via a non-Secure Set-Cookie.
+func (s *Service) secureCookie(r *http.Request) bool {
+	if s.cfg.ForceSecureCookies {
+		return true
+	}
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
@@ -362,6 +373,14 @@ func (s *Service) sendTelegram(ctx context.Context, text string) error {
 // cookie. Failed checks redirect to /admin/login, except when the
 // request looks like an XHR/JSON call (Accept doesn't include text/html),
 // in which case we 401 so a stale fetch doesn't get HTML back.
+//
+// Mutating requests (anything but GET / HEAD) additionally require the
+// Origin header's host to match the request Host. SameSite=Strict on
+// admin_session blocks most cross-site requests already; the Origin
+// check is the explicit second layer for the cases SameSite misses
+// (subdomains, Lax/Strict ambiguities in older browsers, etc.) and
+// closes the issue 71 #9 CSRF gap on /admin/leaderboard/{flag,unflag},
+// /admin/replay/:id/ticket, and the admin DELETE routes.
 func (s *Service) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.Enabled() {
@@ -377,8 +396,39 @@ func (s *Service) Wrap(next http.Handler) http.Handler {
 			s.unauthorized(w, r)
 			return
 		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			if !sameOrigin(r) {
+				http.Error(w, "cross-origin admin request rejected", http.StatusForbidden)
+				return
+			}
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// sameOrigin reports whether the Origin header's host matches r.Host.
+// Returns false if Origin is missing — mutating admin requests must
+// carry it (every modern browser does on POST/DELETE, and curl-style
+// callers can set it explicitly). Falls back to Referer's host when
+// Origin is absent; some older corporate proxies strip Origin but not
+// Referer, and admins shouldn't be locked out by that.
+func sameOrigin(r *http.Request) bool {
+	want := r.Host
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		return u.Host == want
+	}
+	if ref := r.Header.Get("Referer"); ref != "" {
+		u, err := url.Parse(ref)
+		if err != nil {
+			return false
+		}
+		return u.Host == want
+	}
+	return false
 }
 
 func (s *Service) unauthorized(w http.ResponseWriter, r *http.Request) {
@@ -393,7 +443,7 @@ func (s *Service) unauthorized(w http.ResponseWriter, r *http.Request) {
 		Path:     "/admin",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   isSecureRequest(r),
+		Secure:   s.secureCookie(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
@@ -416,7 +466,7 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "admin disabled", http.StatusServiceUnavailable)
 		return
 	}
-	ip := clientIP(r)
+	ip := netutil.ClientIP(r)
 	if !s.rl.allow(ip) {
 		http.Error(w, "rate limit", http.StatusTooManyRequests)
 		return
@@ -445,7 +495,7 @@ func (s *Service) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		Expires:  s.now().Add(otpTTL),
 		MaxAge:   int(otpTTL.Seconds()),
 		HttpOnly: true,
-		Secure:   isSecureRequest(r),
+		Secure:   s.secureCookie(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -464,15 +514,22 @@ func (s *Service) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no pending login", http.StatusBadRequest)
 		return
 	}
+	// Cap the body before any parsing. FormValue triggers ParseForm
+	// which would otherwise read up to defaultMaxMemory (10 MiB) of
+	// form data into memory. 1 KiB is well above any real OTP payload
+	// (form: "otp=123456" ≈ 10 B; JSON: ~16 B). Wrapping r.Body once
+	// covers both the FormValue and the JSON fallback paths.
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
 	otp := strings.TrimSpace(r.FormValue("otp"))
 	if otp == "" {
-		// Fall back to JSON body for fetch() callers. 1 KiB cap is
-		// well above any real {"otp":"123456"} payload (~16 bytes)
-		// and stops a long body from chewing memory.
+		// Fall back to JSON body for fetch() callers. r.Body is at EOF
+		// after FormValue if the request was form-encoded, so this only
+		// reads anything for non-form (JSON) requests, which is exactly
+		// what we want.
 		var body struct {
 			OTP string `json:"otp"`
 		}
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body)
+		_ = json.NewDecoder(r.Body).Decode(&body)
 		otp = strings.TrimSpace(body.OTP)
 	}
 	if otp == "" {
@@ -499,8 +556,12 @@ func (s *Service) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		Expires:  exp,
 		MaxAge:   int(SessionTTL.Seconds()),
 		HttpOnly: true,
-		Secure:   isSecureRequest(r),
-		SameSite: http.SameSiteLaxMode,
+		Secure:   s.secureCookie(r),
+		// Strict so the admin_session cookie is never carried on
+		// cross-site navigations / form posts. Combined with the Wrap
+		// middleware's Origin check this closes the issue 71 #9 CSRF
+		// gap on /admin/* mutating routes.
+		SameSite: http.SameSiteStrictMode,
 	})
 	// Clear admin_login — it's been consumed.
 	http.SetCookie(w, &http.Cookie{
@@ -509,7 +570,7 @@ func (s *Service) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		Path:     "/admin",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   isSecureRequest(r),
+		Secure:   s.secureCookie(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -523,8 +584,10 @@ func (s *Service) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/admin",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   isSecureRequest(r),
-		SameSite: http.SameSiteLaxMode,
+		Secure:   s.secureCookie(r),
+		// Match the Strict attribute used at issuance — Chrome/Safari
+		// refuse to clear a Strict cookie via a Lax Set-Cookie.
+		SameSite: http.SameSiteStrictMode,
 	})
 	if strings.Contains(r.Header.Get("Accept"), "text/html") {
 		http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
@@ -564,40 +627,6 @@ func randomDigits(n int) (string, error) {
 	return string(out), nil
 }
 
-// clientIP returns the originating client IP, honouring X-Forwarded-For
-// only when the immediate peer is private (loopback or RFC1918) — i.e.
-// a trusted reverse proxy. From the public internet, XFF is attacker-
-// controlled and would let a single client trivially bypass the
-// per-IP rate limit by rotating the header. Mirrors the gating used in
-// server/cmd/server/main.go:isPrivatePeer.
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	if !isPrivatePeer(host) {
-		return host
-	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// First entry is the originating client per RFC 7239.
-		if comma := strings.IndexByte(xff, ','); comma >= 0 {
-			return strings.TrimSpace(xff[:comma])
-		}
-		return strings.TrimSpace(xff)
-	}
-	return host
-}
-
-// isPrivatePeer reports whether host is a loopback or RFC1918 address.
-// Anything else is "public" and we don't trust its X-Forwarded-For.
-func isPrivatePeer(host string) bool {
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	return ip.IsLoopback() || ip.IsPrivate()
-}
-
 // ----- rate limiter ------------------------------------------------------
 
 type loginRateLimiter struct {
@@ -634,5 +663,28 @@ func (r *loginRateLimiter) allow(ip string) bool {
 		return false
 	}
 	r.hits[ip] = append(kept, now)
+	r.gcLocked(cutoff)
 	return true
+}
+
+// gcLocked drops keys whose entire hit list is older than cutoff.
+// Inline with the existing lock so a churn of distinct IPs (or a
+// pre-netutil XFF spoof) can't grow the map without bound. The size
+// gate keeps tiny deployments off the scan path.
+func (r *loginRateLimiter) gcLocked(cutoff time.Time) {
+	if len(r.hits) < 64 {
+		return
+	}
+	for ip, stamps := range r.hits {
+		live := false
+		for _, t := range stamps {
+			if t.After(cutoff) {
+				live = true
+				break
+			}
+		}
+		if !live {
+			delete(r.hits, ip)
+		}
+	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -19,11 +20,12 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/greyhats/defcon-game/pkg/identity"
+	"github.com/greyhats/defcon-game/pkg/netutil"
+	"github.com/greyhats/defcon-game/pkg/replayauth"
 	"github.com/greyhats/defcon-game/server/internal/auth"
 	"github.com/greyhats/defcon-game/server/internal/game"
 	"github.com/greyhats/defcon-game/server/internal/leaderboard"
 	"github.com/greyhats/defcon-game/server/internal/protocol"
-	"github.com/greyhats/defcon-game/pkg/replayauth"
 	"github.com/greyhats/defcon-game/server/internal/replay"
 	"github.com/greyhats/defcon-game/server/internal/spectator"
 )
@@ -45,6 +47,30 @@ func main() {
 	// Empty value disables /ws/replay (returns 503 admin disabled), which
 	// is correct in dev where AUTH_MODE=identity and admin isn't configured.
 	adminSecret := []byte(os.Getenv("ADMIN_SESSION_SECRET"))
+	// INTERNAL_SECRET is a shared bearer string between the lobby and
+	// the game server's /internal/* endpoints. When set, gateInternal
+	// requires X-Internal-Secret to match before checking the private-
+	// peer rule. Defense-in-depth so a same-network compromise (a
+	// malicious sibling container, a Caddy path-confusion bug) can't
+	// reach /internal/* on its own. When empty the secret is not
+	// enforced; a startup warning logs it.
+	internalSecret := os.Getenv("INTERNAL_SECRET")
+	if internalSecret == "" {
+		log.Printf("WARN: INTERNAL_SECRET unset — /internal/* relies on private-peer gating only. Set this in prod.")
+	}
+	// WS_ALLOWED_ORIGINS is a comma-separated list of host patterns
+	// (coder/websocket OriginPatterns shape, e.g. "play.example.com,
+	// *.example.com,localhost:8000"). When set, /ws and /ws/spectate
+	// reject browser upgrades whose Origin doesn't match — closes the
+	// cross-site WebSocket vector flagged in issue 71 #2. When empty,
+	// origin checking is disabled (the historical posture); a startup
+	// warning is logged so prod operators notice.
+	wsAllowedOrigins := parseOrigins(os.Getenv("WS_ALLOWED_ORIGINS"))
+	if len(wsAllowedOrigins) == 0 {
+		log.Printf("WARN: WS_ALLOWED_ORIGINS unset — accepting any Origin on /ws and /ws/spectate. Set this in prod to block cross-site WebSocket upgrades.")
+	} else {
+		log.Printf("WS origin allowlist: %s", strings.Join(wsAllowedOrigins, ", "))
+	}
 
 	db, err := leaderboard.OpenDB(dbPath)
 	if err != nil {
@@ -58,7 +84,10 @@ func main() {
 	}
 	defer identityDB.Close()
 
-	mode := auth.ModeFromEnv()
+	mode, err := auth.ModeFromEnv()
+	if err != nil {
+		log.Fatalf("auth mode: %v", err)
+	}
 	switch mode {
 	case auth.ModeOpen:
 		log.Printf("auth mode: open")
@@ -106,16 +135,16 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handleWS(ctx, w, r, sem, authCheck, lbSvc, liveReg, engineReg)
+		handleWS(ctx, w, r, sem, authCheck, lbSvc, liveReg, engineReg, wsAllowedOrigins)
 	})
 	mux.HandleFunc("/ws/spectate", func(w http.ResponseWriter, r *http.Request) {
-		handleSpectateWS(ctx, w, r, engineReg, specCaps)
+		handleSpectateWS(ctx, w, r, engineReg, specCaps, wsAllowedOrigins)
 	})
 	mux.HandleFunc("/ws/replay", func(w http.ResponseWriter, r *http.Request) {
-		handleReplayWS(ctx, w, r, db, adminSecret, replayCaps)
+		handleReplayWS(ctx, w, r, db, adminSecret, replayCaps, wsAllowedOrigins)
 	})
 	mux.HandleFunc("/internal/slot-status", func(w http.ResponseWriter, r *http.Request) {
-		if !gateInternal(w, r) {
+		if !gateInternal(w, r, internalSecret) {
 			return
 		}
 		used := len(sem)
@@ -123,7 +152,7 @@ func main() {
 		_, _ = w.Write([]byte(`{"used":` + strconv.Itoa(used) + `,"max":` + strconv.Itoa(maxConcurrent) + `}`))
 	})
 	mux.HandleFunc("/internal/live-games", func(w http.ResponseWriter, r *http.Request) {
-		if !gateInternal(w, r) {
+		if !gateInternal(w, r, internalSecret) {
 			return
 		}
 		// Polled every 2 s by the lobby and cached in-process. Returns
@@ -145,9 +174,17 @@ func main() {
 	// game.db via the leaderboard goroutine started below.
 
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
+		Addr:    addr,
+		Handler: mux,
+		// HTTP-side timeouts. WebSocket connections are hijacked by
+		// coder/websocket on Accept, so these only apply to /health,
+		// /internal/*, and the upgrade handshake itself — they don't
+		// kill in-flight WS sessions. Without them a slow client could
+		// hold a handler goroutine open indefinitely (slowloris).
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {
@@ -202,7 +239,7 @@ func lookupDisplayName(identityDB *sql.DB, playerID string) (string, error) {
 	return p.DisplayName, nil
 }
 
-func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem chan struct{}, authCheck func(string) (string, error), lb *leaderboard.Service, liveReg *spectator.LiveRegistry, engineReg *spectator.Engines) {
+func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem chan struct{}, authCheck func(string) (string, error), lb *leaderboard.Service, liveReg *spectator.LiveRegistry, engineReg *spectator.Engines, originPatterns []string) {
 	select {
 	case sem <- struct{}{}:
 	default:
@@ -211,14 +248,16 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 	}
 	releaseSlot := func() { <-sem }
 
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
-	})
+	conn, err := acceptWS(w, r, originPatterns)
 	if err != nil {
 		releaseSlot()
 		log.Printf("ws accept: %v", err)
 		return
 	}
+	// Cap any single inbound frame. All legitimate C2S packets fit
+	// comfortably; an oversized frame is treated as protocol abuse and
+	// closes the connection at conn.Read time.
+	conn.SetReadLimit(game.MaxClientFrameBytes)
 
 	connCtx, cancel := context.WithCancel(ctx)
 
@@ -253,9 +292,14 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 		}
 		conn.Close(websocket.StatusNormalClosure, "bye")
 
+		// Leaderboard registry is keyed by player_id (the WS-auth
+		// identity), but live-games and spectator routing are keyed
+		// by the public run_id minted in initRun. Use each accordingly.
 		if engine.PlayerID != "" {
 			lb.Unregister(engine.PlayerID)
-			liveReg.Remove(engine.PlayerID)
+		}
+		if rid := engine.RunID(); rid != "" {
+			liveReg.Remove(rid)
 		}
 	}()
 }
@@ -279,12 +323,25 @@ const SpectatorPingTimeout = 10 * time.Second
 // ticks of slack while still preventing zombie pending accepts.
 const SpectatorRegisterTimeout = 1 * time.Second
 
+// WSWriteTimeout caps each WebSocket write. A peer that can't accept a
+// frame inside this window is treated as dead — closing the connection
+// frees the writer goroutine and any backing buffers. Game and replay
+// writers can otherwise be pinned indefinitely by a slow-reading peer
+// (the websocket library queues frames until the underlying TCP buffer
+// drains).
+const WSWriteTimeout = 5 * time.Second
+
+// InternalSecretHeader is the request header carrying the shared
+// /internal/* bearer secret between lobby and game server. Caller and
+// callee resolve the value from INTERNAL_SECRET env.
+const InternalSecretHeader = "X-Internal-Secret"
+
 // gateInternal enforces that /internal/* endpoints are only callable
-// by trusted private peers (loopback or docker-network private IPs).
-// Returns true if the request should proceed; otherwise writes a 403
-// or 405 response and returns false. Replies non-GET with 405 to keep
-// the surface area tight.
-func gateInternal(w http.ResponseWriter, r *http.Request) bool {
+// by trusted private peers (loopback or docker-network private IPs)
+// AND, when secret is non-empty, by callers that present a matching
+// X-Internal-Secret header. Returns true if the request should proceed;
+// otherwise writes a 403 or 405 response and returns false.
+func gateInternal(w http.ResponseWriter, r *http.Request, secret string) bool {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return false
@@ -293,21 +350,30 @@ func gateInternal(w http.ResponseWriter, r *http.Request) bool {
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	if !isPrivatePeer(host) {
+	if !netutil.IsPrivatePeer(host) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return false
+	}
+	if secret != "" {
+		// Constant-time compare so a side-channel can't reveal the
+		// secret one byte at a time.
+		got := r.Header.Get(InternalSecretHeader)
+		if subtle.ConstantTimeCompare([]byte(got), []byte(secret)) != 1 {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return false
+		}
 	}
 	return true
 }
 
-func handleSpectateWS(ctx context.Context, w http.ResponseWriter, r *http.Request, engineReg *spectator.Engines, caps *spectator.Caps) {
-	playerID := r.URL.Query().Get("player_id")
-	if playerID == "" {
-		http.Error(w, "player_id required", http.StatusBadRequest)
+func handleSpectateWS(ctx context.Context, w http.ResponseWriter, r *http.Request, engineReg *spectator.Engines, caps *spectator.Caps, originPatterns []string) {
+	runID := r.URL.Query().Get("run_id")
+	if runID == "" {
+		http.Error(w, "run_id required", http.StatusBadRequest)
 		return
 	}
 
-	if !caps.AllowIP(clientIP(r), time.Now()) {
+	if !caps.AllowIP(netutil.ClientIP(r), time.Now()) {
 		w.Header().Set("Retry-After", "60")
 		http.Error(w, "rate limited", http.StatusTooManyRequests)
 		return
@@ -325,10 +391,10 @@ func handleSpectateWS(ctx context.Context, w http.ResponseWriter, r *http.Reques
 	// so the slot would be released for the entire spectator session
 	// (defeating the cap).
 
-	registerCh, ok := engineReg.Lookup(playerID)
+	registerCh, ok := engineReg.Lookup(runID)
 	if !ok {
 		caps.ReleaseGlobal()
-		http.Error(w, "no live run for player_id", http.StatusNotFound)
+		http.Error(w, "no live run for run_id", http.StatusNotFound)
 		return
 	}
 
@@ -380,9 +446,7 @@ func handleSpectateWS(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
-	})
+	wsConn, err := acceptWS(w, r, originPatterns)
 	if err != nil {
 		log.Printf("spectate accept: %v", err)
 		bestEffortDeregister()
@@ -451,6 +515,11 @@ func handleSpectateWS(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		defer caps.ReleaseGlobal()
 		defer wsConn.Close(websocket.StatusNormalClosure, "bye")
 		defer bestEffortDeregister()
+		// Mark the Conn closed so the engine's per-tick prune drops it
+		// even if the deregister send above hits a full channel. Issue
+		// 71 #15: without this, a saturated RegisterCh leaks per-game
+		// spectator slots until the run ends.
+		defer conn.MarkClosed()
 		for {
 			select {
 			case <-connCtx.Done():
@@ -463,7 +532,10 @@ func handleSpectateWS(ctx context.Context, w http.ResponseWriter, r *http.Reques
 				if err != nil {
 					continue
 				}
-				if err := wsConn.Write(connCtx, websocket.MessageText, raw); err != nil {
+				writeCtx, writeCancel := context.WithTimeout(connCtx, WSWriteTimeout)
+				err = wsConn.Write(writeCtx, websocket.MessageText, raw)
+				writeCancel()
+				if err != nil {
 					return
 				}
 			}
@@ -488,7 +560,7 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 //     - pinger: 30s keepalive (mirrors spectator).
 //
 // All four goroutines share connCtx; cancel from any one tears the rest down.
-func handleReplayWS(parent context.Context, w http.ResponseWriter, r *http.Request, db *sql.DB, adminSecret []byte, caps *spectator.Caps) {
+func handleReplayWS(parent context.Context, w http.ResponseWriter, r *http.Request, db *sql.DB, adminSecret []byte, caps *spectator.Caps, originPatterns []string) {
 	if len(adminSecret) < 16 {
 		http.Error(w, "admin disabled", http.StatusServiceUnavailable)
 		return
@@ -509,7 +581,7 @@ func handleReplayWS(parent context.Context, w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if !caps.AllowIP(clientIP(r), time.Now()) {
+	if !caps.AllowIP(netutil.ClientIP(r), time.Now()) {
 		w.Header().Set("Retry-After", "60")
 		http.Error(w, "rate limited", http.StatusTooManyRequests)
 		return
@@ -545,9 +617,7 @@ func handleReplayWS(parent context.Context, w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
-	})
+	wsConn, err := acceptWS(w, r, originPatterns)
 	if err != nil {
 		caps.ReleaseGlobal()
 		log.Printf("replay: accept: %v", err)
@@ -648,7 +718,10 @@ func handleReplayWS(parent context.Context, w http.ResponseWriter, r *http.Reque
 				if err != nil {
 					continue
 				}
-				if err := wsConn.Write(connCtx, websocket.MessageText, raw); err != nil {
+				writeCtx, writeCancel := context.WithTimeout(connCtx, WSWriteTimeout)
+				err = wsConn.Write(writeCtx, websocket.MessageText, raw)
+				writeCancel()
+				if err != nil {
 					return
 				}
 			}
@@ -670,44 +743,6 @@ func writeReplayError(ctx context.Context, ws *websocket.Conn, code, msg string)
 		return
 	}
 	_ = ws.Write(ctx, websocket.MessageText, raw)
-}
-
-// clientIP returns the best-effort source IP for rate-limit bookkeeping.
-// Honours X-Forwarded-For only when the immediate peer is on a trusted
-// private network (loopback or RFC1918) — typical Caddy-in-front-of-app
-// case in our docker-compose setup. If the immediate peer is itself a
-// public address (e.g. someone bypassed the reverse proxy and hit the
-// game server directly), XFF is ignored so a malicious header can't
-// evade the per-IP rate limit by pretending to be a different IP each
-// hit. Falls back to the RemoteAddr host on any parsing failure.
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	if !isPrivatePeer(host) {
-		return host
-	}
-	if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
-		if i := strings.IndexByte(xf, ','); i > 0 {
-			return strings.TrimSpace(xf[:i])
-		}
-		return strings.TrimSpace(xf)
-	}
-	return host
-}
-
-// isPrivatePeer reports whether the given hostname/IP is a loopback or
-// RFC1918 (private) address — the set of peers we trust to set
-// X-Forwarded-For and to call /internal/* endpoints. Both the lobby
-// service (docker bridge network) and any reverse proxy (Caddy) fall in
-// this set; arbitrary internet peers do not.
-func isPrivatePeer(host string) bool {
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 func connReader(ctx context.Context, conn *websocket.Conn, inCh chan<- []byte, cancel context.CancelFunc) {
@@ -741,11 +776,48 @@ func connWriter(ctx context.Context, conn *websocket.Conn, outCh <-chan protocol
 				log.Printf("marshal: %v", err)
 				continue
 			}
-			if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
+			writeCtx, writeCancel := context.WithTimeout(ctx, WSWriteTimeout)
+			err = conn.Write(writeCtx, websocket.MessageText, raw)
+			writeCancel()
+			if err != nil {
 				return
 			}
 		}
 	}
+}
+
+// parseOrigins splits a comma-separated WS_ALLOWED_ORIGINS env value
+// into the OriginPatterns slice that coder/websocket expects. Trims
+// whitespace; drops empty entries so a trailing comma doesn't widen
+// the allowlist to "" (which would silently match nothing).
+func parseOrigins(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// acceptWS centralises the websocket.Accept call so all three WS
+// endpoints share Origin handling. When origins is nil/empty,
+// InsecureSkipVerify=true preserves the historical accept-anything
+// posture (a startup warning logs it). When set, OriginPatterns
+// constrains which Origin headers browser upgrades may carry; non-
+// browser callers (no Origin header) are still accepted.
+func acceptWS(w http.ResponseWriter, r *http.Request, origins []string) (*websocket.Conn, error) {
+	opts := &websocket.AcceptOptions{}
+	if len(origins) == 0 {
+		opts.InsecureSkipVerify = true
+	} else {
+		opts.OriginPatterns = origins
+	}
+	return websocket.Accept(w, r, opts)
 }
 
 func envDefault(k, def string) string {

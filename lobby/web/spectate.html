@@ -126,7 +126,7 @@
         for (const e of entries) {
           const a = document.createElement('a');
           a.className = 'tile';
-          a.href = '/spectate/' + encodeURIComponent(e.player_id) +
+          a.href = '/spectate/' + encodeURIComponent(e.run_id) +
                    '?name=' + encodeURIComponent(e.display_name);
           a.innerHTML = (
             '<div class="name">' + escape(e.display_name) + '</div>' +

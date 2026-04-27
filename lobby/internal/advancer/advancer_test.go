@@ -26,7 +26,7 @@ func newAdvancerTest(t *testing.T) (*Advancer, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	a := New(db, nil, "http://unused", allowlistPath, nil)
+	a := New(db, nil, "http://unused", "", allowlistPath, nil)
 	return a, allowlistPath
 }
 

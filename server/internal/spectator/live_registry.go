@@ -45,10 +45,10 @@ func (r *LiveRegistry) Start(ctx context.Context) {
 }
 
 // Update pushes a fresh summary for an engine, replacing any prior entry
-// for the same PlayerID. Non-blocking; if the channel is full the update
+// for the same RunID. Non-blocking; if the channel is full the update
 // is dropped. The next tick's update will overwrite anyway.
 func (r *LiveRegistry) Update(s Summary) {
-	if s.PlayerID == "" {
+	if s.RunID == "" {
 		return
 	}
 	select {
@@ -57,16 +57,16 @@ func (r *LiveRegistry) Update(s Summary) {
 	}
 }
 
-// Remove drops the entry for playerID. Called when the engine exits
+// Remove drops the entry for runID. Called when the engine exits
 // (run complete, disconnect, error). Non-blocking; if removeCh is full the
 // caller retries on the next exit path — but since each engine only calls
 // Remove once at shutdown, this should never block under expected load.
-func (r *LiveRegistry) Remove(playerID string) {
-	if playerID == "" {
+func (r *LiveRegistry) Remove(runID string) {
+	if runID == "" {
 		return
 	}
 	select {
-	case r.removeCh <- playerID:
+	case r.removeCh <- runID:
 	default:
 	}
 }
@@ -87,7 +87,7 @@ func (r *LiveRegistry) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case s := <-r.updateCh:
-			state[s.PlayerID] = s
+			state[s.RunID] = s
 			r.publish(state)
 		case id := <-r.removeCh:
 			if _, ok := state[id]; ok {

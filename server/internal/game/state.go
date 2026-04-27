@@ -72,6 +72,12 @@ type RunState struct {
 	Splits       []protocol.SplitData
 	InputLog     []InputRecord
 	RunsUsed     uint8
+
+	// inputBytes tracks the cumulative size of accepted packet Data
+	// payloads in InputLog. Used to enforce MaxInputLogBytes so a flood
+	// of packets can't grow per-run memory or game.db without bound.
+	// Unexported and untagged so it stays out of any JSON marshalling.
+	inputBytes int64
 }
 
 type PlayerState struct {

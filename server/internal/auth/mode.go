@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"os"
 	"strings"
 )
@@ -19,15 +20,22 @@ const (
 	ModeIdentity Mode = 2
 )
 
-// ModeFromEnv reads AUTH_MODE from the environment. "token" → ModeToken,
-// "identity" → ModeIdentity, anything else (including unset) → ModeOpen.
-func ModeFromEnv() Mode {
-	switch strings.ToLower(os.Getenv("AUTH_MODE")) {
+// ModeFromEnv reads AUTH_MODE from the environment. Recognized values:
+// "open", "token", "identity". Empty or unrecognized values return an
+// error so a typo (AUTH_MODE=tokne) fails closed at startup instead of
+// silently downgrading to ModeOpen and disabling auth in prod.
+func ModeFromEnv() (Mode, error) {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_MODE")))
+	switch v {
+	case "open":
+		return ModeOpen, nil
 	case "token":
-		return ModeToken
+		return ModeToken, nil
 	case "identity":
-		return ModeIdentity
+		return ModeIdentity, nil
+	case "":
+		return 0, fmt.Errorf("AUTH_MODE not set: must be one of open, token, identity")
 	default:
-		return ModeOpen
+		return 0, fmt.Errorf("AUTH_MODE=%q invalid: must be one of open, token, identity", v)
 	}
 }

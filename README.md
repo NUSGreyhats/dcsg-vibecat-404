@@ -82,8 +82,25 @@ export TELEGRAM_BOT_TOKEN='<bot token from @BotFather>'
 export TELEGRAM_ADMIN_CHAT_ID='<numeric chat id, e.g. -100123456789 for groups>'
 export ADMIN_SESSION_SECRET='<≥16 random bytes; rotate to invalidate sessions>'
 
+# Tell the lobby that TLS is terminated upstream so admin cookies are
+# always issued Secure (see "Production TLS" below).
+export BEHIND_TLS=1
+
 docker compose up -d --build
 ```
+
+### Production TLS
+
+**The compose stack does not terminate TLS.** The bundled Caddy `client` container has `auto_https off` and publishes plain HTTP on `:80`. That's fine for local dev and for branch worktrees that aren't internet-exposed. **Do not point a public DNS name at this stack without a TLS-terminating front layer in front of it.**
+
+Recommended topology for prod:
+
+- A separate Caddy / nginx / Cloudflare Tunnel on the host (or upstream) terminates TLS for your domain and proxies to `http://127.0.0.1:80` (the published `client` container).
+- Configure that proxy to set `X-Forwarded-Proto: https` on every forwarded request — the lobby uses it to decide cookie `Secure` attributes.
+- Set `BEHIND_TLS=1` in the lobby's environment (see above) as a belt-and-braces: even if the upstream proxy ever drops `X-Forwarded-Proto`, admin cookies will still be issued with `Secure`.
+- Force HTTPS at the upstream layer (HTTP→HTTPS redirect + HSTS).
+
+Rationale: admin OTP exchanges, admin session cookies, player passwords, and bearer `player_id`s all flow through the lobby and game server. Without TLS in front, all of them are exposed on the wire.
 
 What you get:
 
@@ -113,6 +130,8 @@ docker logs <project>-lobby-1 | tail -1
 | `ADMIN_SESSION_SECRET` | _(empty)_          | Shared with lobby. Game server validates replay-viewer tickets minted by `/admin/replay/:id/ticket`. Empty disables `/ws/replay` (returns 503). |
 | `REPLAY_GLOBAL`    | `16`                   | Cap on concurrent replay viewers on the game server. Small by design — admin-only. |
 | `REPLAY_PER_IP`    | `5`                    | Per-IP new-connect rate per minute on `/ws/replay`.                      |
+| `WS_ALLOWED_ORIGINS` | _(empty)_            | Comma-separated browser-Origin allowlist for `/ws`, `/ws/spectate`, `/ws/replay` (e.g. `play.example.com,*.example.com`). Empty accepts any Origin and logs a warning — set in any internet-facing deploy. |
+| `INTERNAL_SECRET`  | _(empty)_              | Shared bearer for `/internal/*` requests from the lobby. When set, `/internal/slot-status` and `/internal/live-games` require `X-Internal-Secret: <value>` in addition to the private-peer gate. Must match the lobby's value. |
 
 ### `lobby`
 
@@ -129,6 +148,8 @@ docker logs <project>-lobby-1 | tail -1
 | `TELEGRAM_BOT_TOKEN`      | _(empty)_              | From [@BotFather](https://t.me/BotFather). Empty disables `/admin/*` (503). |
 | `TELEGRAM_ADMIN_CHAT_ID`  | _(empty)_              | Where OTPs are sent. Group or single user.                               |
 | `ADMIN_SESSION_SECRET`    | _(empty)_              | HMAC key for admin session cookies; ≥ 16 raw bytes. Rotate to log everyone out. |
+| `BEHIND_TLS`              | _(empty)_              | `1` / `true` ⇒ admin cookies are issued with `Secure` regardless of the request. Set in any deploy where TLS is terminated upstream — see "Production TLS". |
+| `INTERNAL_SECRET`         | _(empty)_              | Mirror of game-server `INTERNAL_SECRET`. Sent as `X-Internal-Secret` on `/internal/{slot-status,live-games}` polls. Must match or polls 403. |
 
 ## Telegram bot setup (one-time)
 

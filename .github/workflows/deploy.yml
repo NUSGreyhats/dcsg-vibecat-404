@@ -21,9 +21,12 @@ jobs:
           AUTH_MODE: ${{ vars.AUTH_MODE }}
           QUEUE_ENABLED: ${{ vars.QUEUE_ENABLED }}
           MAX_CONCURRENT: ${{ vars.MAX_CONCURRENT }}
+          BEHIND_TLS: ${{ vars.BEHIND_TLS }}
+          WS_ALLOWED_ORIGINS: ${{ vars.WS_ALLOWED_ORIGINS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
           ADMIN_SESSION_SECRET: ${{ secrets.ADMIN_SESSION_SECRET }}
+          INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
         with:
           host: ${{ secrets.DO_HOST }}
           username: ${{ secrets.DO_USER }}
@@ -37,7 +40,7 @@ jobs:
           # writing a .env file to disk on the droplet. Operational
           # toggles come from repo Variables (visible in CI logs);
           # credentials come from repo Secrets (masked).
-          envs: AUTH_MODE,QUEUE_ENABLED,MAX_CONCURRENT,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,ADMIN_SESSION_SECRET
+          envs: AUTH_MODE,QUEUE_ENABLED,MAX_CONCURRENT,BEHIND_TLS,WS_ALLOWED_ORIGINS,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,ADMIN_SESSION_SECRET,INTERNAL_SECRET
           script: |
             set -euo pipefail
 

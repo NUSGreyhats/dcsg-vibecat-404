@@ -22,6 +22,18 @@ services:
       # disables /ws/replay (returns 503 — same posture as lobby's
       # /admin/* with admin auth unconfigured).
       ADMIN_SESSION_SECRET: "${ADMIN_SESSION_SECRET:-}"
+      # Comma-separated origin allowlist for /ws, /ws/spectate,
+      # /ws/replay. Set to your prod domain (e.g. "play.example.com,
+      # *.example.com") to block cross-site WebSocket upgrades from
+      # malicious pages. Empty (default) accepts any Origin and logs
+      # a startup warning — fine for local dev, dangerous on the
+      # public internet.
+      WS_ALLOWED_ORIGINS: "${WS_ALLOWED_ORIGINS:-}"
+      # Shared-secret bearer for /internal/* requests from the lobby
+      # (see lobby's INTERNAL_SECRET env). Empty disables the header
+      # check; in any prod deploy set this to a long random string so
+      # /internal/* needs both private-peer + matching header.
+      INTERNAL_SECRET: "${INTERNAL_SECRET:-}"
     volumes:
       - game-data:/data
     # Bind to loopback only: all browser traffic goes through the Caddy
@@ -59,6 +71,17 @@ services:
       QUEUE_ENABLED: "${QUEUE_ENABLED:-false}"
       LOBBY_DB: "/data/lobby.db"
       ALLOWLIST_PATH: "/data/allowlist.json"
+      # Set BEHIND_TLS=1 in any prod deploy where TLS is terminated
+      # upstream (Caddy on the host, Cloudflare, etc.). Forces Secure=
+      # true on admin cookies regardless of X-Forwarded-Proto, so a
+      # misconfigured proxy can't silently issue cleartext-transmittable
+      # admin sessions. The compose stack itself does NOT terminate TLS;
+      # see README "Production TLS" for the topology this expects.
+      BEHIND_TLS: "${BEHIND_TLS:-}"
+      # Mirror of game-server's INTERNAL_SECRET — sent as the
+      # X-Internal-Secret header on /internal/{slot-status,live-games}
+      # polls. Must match the game-server value or polls will 403.
+      INTERNAL_SECRET: "${INTERNAL_SECRET:-}"
       # Stripped source baked into the lobby image as a single tarball
       # by the strip stage in lobby/Dockerfile. /source serves an HTML
       # download page; /source.tar.gz streams the file. Override only

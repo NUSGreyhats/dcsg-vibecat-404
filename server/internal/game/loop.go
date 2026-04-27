@@ -3,6 +3,7 @@ package game
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"math"
 	"math/rand"
@@ -20,6 +21,40 @@ import (
 // docs/specs/foundations/04-lobby.md. Per-game enforcement lives on the
 // engine because it's the only goroutine that knows the current count.
 const SpectatorPerGame = 50
+
+// MaxInputLogRecords caps the number of packets recorded per run. A
+// 5-minute run at 20 Hz with ~5 packets/tick lands well under 30k; this
+// limit is generous (allows ~30 min of saturated packet traffic) but
+// stops a misbehaving client from growing per-run memory or game.db
+// without bound. On overflow the run is force-failed (no leaderboard
+// submit), which also frees the MAX_CONCURRENT slot.
+const MaxInputLogRecords = 100_000
+
+// MaxInputLogBytes caps the cumulative size (in bytes of packet Data
+// payloads) recorded per run. JSON-marshalling adds base64 overhead on
+// top, so the on-disk blob is roughly 4/3 of this. 4 MiB is well above
+// any honest run.
+const MaxInputLogBytes int64 = 4 * 1024 * 1024
+
+// MaxClientFrameBytes is the per-message read limit applied to the
+// player WebSocket via conn.SetReadLimit. All legitimate C2S packets
+// (envelope + payload) are well under 1 KiB; 4 KiB gives generous
+// headroom while preventing a single oversized frame from forcing a
+// large allocation in the WS reader.
+const MaxClientFrameBytes int64 = 4 * 1024
+
+// AuthDeadline caps how long a freshly-accepted WS may sit before
+// sending C2S_AUTH. Without it, an attacker can open MAX_CONCURRENT
+// connections, never authenticate, and starve real players. 5 s is
+// well above any real round-trip; bots either auth immediately or get
+// dropped and free their slot.
+const AuthDeadline = 5 * time.Second
+
+// StartDeadline caps the post-AUTH wait for C2S_START_RUN. Real clients
+// send AUTH and START as a tight pair (one driven by the next), but
+// the player UI may show an "are you sure?" prompt between AUTH and
+// START. 30 s is generous for that and still bounds idle slot holds.
+const StartDeadline = 30 * time.Second
 
 // SpectatorCatchupGrace is the post-run flush window during which the
 // engine keeps spectator outChs open so the final S2C_RUN_COMPLETE has
@@ -41,13 +76,20 @@ type Engine struct {
 	// May be nil — engines run fine without a live registry; the
 	// /internal/live-games endpoint just won't see them.
 	Live *spectator.LiveRegistry
-	// Engines is the global player_id → RegisterCh registry. The engine
-	// self-registers on auth and unregisters on run end. May be nil in
-	// tests; the engine just won't be reachable from /ws/spectate.
+	// Engines is the global run_id → RegisterCh registry. The engine
+	// self-registers on initRun (once a RunID has been minted) and
+	// unregisters on run end. May be nil in tests; the engine just
+	// won't be reachable from /ws/spectate.
 	Engines *spectator.Engines
 
 	PlayerID    string
 	DisplayName string
+
+	// runID is the public, non-credential identifier for the current
+	// run. Generated in initRun, used as the key in Engines and
+	// LiveRegistry so player_id (the WS bearer credential) never has
+	// to leave the server. Empty before initRun.
+	runID string
 
 	// ReplayMode disables liveness-only checks (Ts ±2s window, ±30min
 	// SeedWindow), and skips Submit/Live/Engines registration so a
@@ -109,8 +151,8 @@ func NewEngine(in <-chan []byte, out chan<- protocol.S2CEnvelope, submit func(*l
 // registry removal is the caller's responsibility (main.go).
 func (e *Engine) Run(ctx context.Context) {
 	defer func() {
-		if e.Engines != nil && e.PlayerID != "" {
-			e.Engines.Unregister(e.PlayerID)
+		if e.Engines != nil && e.runID != "" {
+			e.Engines.Unregister(e.runID)
 		}
 		// Belt-and-braces: if Run exits without finishRun (e.g. ctx cancel
 		// during handshake or pre-finish disconnect), close any spectators
@@ -175,7 +217,7 @@ func (e *Engine) fanOutToSpectators(typ uint8, data any) {
 		return
 	}
 	for _, sp := range e.spectators {
-		if sp.Closed {
+		if sp.Closed() {
 			continue
 		}
 		sp.Seq++
@@ -191,13 +233,28 @@ func (e *Engine) sendError(code, msg string) {
 	e.send(protocol.S2CError, protocol.ErrorData{Code: code, Message: msg})
 }
 
-// handshake blocks on AUTH and then START_RUN. Returns true when the run
-// has been initialized and the tick loop may begin.
+// handshake blocks on AUTH and then START_RUN. Each phase is bounded
+// by a deadline (AuthDeadline / StartDeadline) so an idle attacker
+// can't pin a MAX_CONCURRENT slot indefinitely. Returns true when the
+// run has been initialized and the tick loop may begin.
 func (e *Engine) handshake(ctx context.Context) bool {
-	if !e.awaitAuth(ctx) {
+	authCtx, cancel := context.WithTimeout(ctx, AuthDeadline)
+	defer cancel()
+	if !e.awaitAuth(authCtx) {
+		if errors.Is(authCtx.Err(), context.DeadlineExceeded) {
+			e.sendError("auth_timeout", "C2S_AUTH not received within deadline")
+		}
 		return false
 	}
-	return e.awaitStartRun(ctx)
+	startCtx, cancel2 := context.WithTimeout(ctx, StartDeadline)
+	defer cancel2()
+	if !e.awaitStartRun(startCtx) {
+		if errors.Is(startCtx.Err(), context.DeadlineExceeded) {
+			e.sendError("start_timeout", "C2S_START_RUN not received within deadline")
+		}
+		return false
+	}
+	return true
 }
 
 func (e *Engine) awaitAuth(ctx context.Context) bool {
@@ -292,6 +349,12 @@ func (e *Engine) initRun(startTime int64) bool {
 			return false
 		}
 	}
+	// Mint a public RunID for spectator wiring. Replay mode reuses the
+	// player_id slot internally but never publishes (Engines/Live are
+	// skipped below) so leaving runID empty for replays is fine.
+	if !e.ReplayMode {
+		e.runID = uuid.NewString()
+	}
 	e.run = &RunState{
 		Status:       RunRunning,
 		PlayerID:     e.PlayerID,
@@ -329,10 +392,15 @@ func (e *Engine) initRun(startTime int64) bool {
 	// ReplayMode skips this — a replayed run is not visible to spectators
 	// and does not appear in /api/live.
 	if e.Engines != nil && !e.ReplayMode {
-		e.Engines.Register(e.PlayerID, e.RegisterCh)
+		e.Engines.Register(e.runID, e.RegisterCh)
 	}
 	return true
 }
+
+// RunID exposes the public per-run identifier minted by initRun. Empty
+// before initRun. main.go uses this to drive LiveRegistry.Remove on
+// connection teardown without re-keying off the credential player_id.
+func (e *Engine) RunID() string { return e.runID }
 
 // RunReplay drives the engine using a caller-supplied advance function
 // instead of an internal time.Ticker. Used by the replay package; see
@@ -499,16 +567,17 @@ func (e *Engine) stepTick(now time.Time) {
 // ReplayMode skips this — replays are not live games and must not appear
 // in the public spectator selector.
 func (e *Engine) publishLiveSummary() {
-	if e.Live == nil || e.run == nil || e.PlayerID == "" || e.ReplayMode {
+	if e.Live == nil || e.run == nil || e.runID == "" || e.ReplayMode {
 		return
 	}
 	live := 0
 	for _, sp := range e.spectators {
-		if !sp.Closed {
+		if !sp.Closed() {
 			live++
 		}
 	}
 	e.Live.Update(spectator.Summary{
+		RunID:          e.runID,
 		PlayerID:       e.PlayerID,
 		DisplayName:    e.DisplayName,
 		RoomIndex:      e.run.CurrentRoom,
@@ -518,11 +587,22 @@ func (e *Engine) publishLiveSummary() {
 	})
 }
 
-// drainSpectatorRegister applies any pending register/deregister verbs.
-// Runs at the start of stepTick so a spectator who joined since the last
-// tick gets the catchup sequence before the next physics step lands a
-// fresh S2C_STATE on top of it.
+// drainSpectatorRegister applies any pending register/deregister verbs
+// AND prunes any *Conn whose writer goroutine has flipped Closed
+// behind our back (disconnect mid-run, often via a deregister send that
+// dropped on a full RegisterCh). Without this prune, dead Conns would
+// linger in e.spectators until run end, eating per-game cap and
+// inflating the spectator_count surfaced on /api/live.
 func (e *Engine) drainSpectatorRegister() {
+	if len(e.spectators) > 0 {
+		alive := e.spectators[:0]
+		for _, sp := range e.spectators {
+			if !sp.Closed() {
+				alive = append(alive, sp)
+			}
+		}
+		e.spectators = alive
+	}
 	for {
 		select {
 		case req := <-e.RegisterCh:
@@ -547,7 +627,7 @@ func (e *Engine) handleRegister(req spectator.Req) {
 	}
 	live := 0
 	for _, sp := range e.spectators {
-		if !sp.Closed {
+		if !sp.Closed() {
 			live++
 		}
 	}
@@ -615,8 +695,12 @@ func (e *Engine) closeSpectators() {
 	go func() {
 		time.Sleep(SpectatorCatchupGrace)
 		for _, sp := range conns {
-			if !sp.Closed {
-				sp.Closed = true
+			// MarkClosed is CAS-based — true means we won the race
+			// against a concurrently-exiting WS writer and must
+			// close(OutCh) ourselves. False means the writer flipped
+			// it first; the writer no longer reads OutCh either way,
+			// so leaving it unclosed is harmless.
+			if sp.MarkClosed() {
 				close(sp.OutCh)
 			}
 		}
@@ -643,6 +727,11 @@ func (e *Engine) drainInput(now time.Time) {
 }
 
 func (e *Engine) dispatch(raw []byte, now time.Time) {
+	// If a prior packet in this same drain pass already terminated the
+	// run (e.g. via recordInput overflow), don't process anything else.
+	if e.run.Status.IsTerminal() {
+		return
+	}
 	env, err := protocol.DecodeEnvelope(raw)
 	if err != nil {
 		e.sendError("bad_envelope", err.Error())
@@ -662,13 +751,21 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 		e.lastClientTs = env.Ts
 	}
 
-	e.run.InputLog = append(e.run.InputLog, InputRecord{
-		Tick: e.tick,
-		Type: env.Type,
-		Seq:  env.Seq,
-		Ts:   env.Ts,
-		Data: append([]byte(nil), env.Data...),
-	})
+	// Reject unknown / out-of-phase packet types before recording so
+	// noise traffic can't pad the input log. Pre-run packets (AUTH,
+	// START_RUN) are handled by the handshake and never reach here.
+	switch env.Type {
+	case protocol.C2SInput, protocol.C2SShoot, protocol.C2SSwitchWeapon,
+		protocol.C2SInteract, protocol.C2SEnterDoor, protocol.C2SUseItem,
+		protocol.C2SShopPurchase:
+		// known runtime packet; fall through to record + dispatch
+	default:
+		return
+	}
+
+	if !e.recordInput(env, now) {
+		return
+	}
 
 	switch env.Type {
 	case protocol.C2SInput:
@@ -714,6 +811,31 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 		}
 		HandleShopPurchase(e.player, pkt.ItemID)
 	}
+}
+
+// recordInput appends a validated runtime packet to the run's InputLog
+// and updates the cumulative byte counter. Returns false (and force-
+// fails the run) if the per-run record or byte cap has been hit, so
+// callers can early-return without dispatching the packet.
+func (e *Engine) recordInput(env *protocol.Envelope, now time.Time) bool {
+	dataLen := int64(len(env.Data))
+	if len(e.run.InputLog) >= MaxInputLogRecords ||
+		e.run.inputBytes+dataLen > MaxInputLogBytes {
+		log.Printf("run %s force-ended: input log cap (records=%d bytes=%d)",
+			e.PlayerID, len(e.run.InputLog), e.run.inputBytes)
+		e.sendError("input_log_overflow", "per-run input log capacity exceeded")
+		e.finishRun(now, e.currentElapsed(now), RunFailed)
+		return false
+	}
+	e.run.InputLog = append(e.run.InputLog, InputRecord{
+		Tick: e.tick,
+		Type: env.Type,
+		Seq:  env.Seq,
+		Ts:   env.Ts,
+		Data: append([]byte(nil), env.Data...),
+	})
+	e.run.inputBytes += dataLen
+	return true
 }
 
 // dispatchUseItem runs both the audit parser (BUG-09 parser half) and the
@@ -880,7 +1002,12 @@ func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {
 		}
 		if e.Submit != nil {
 			if !e.Submit(cr) {
-				log.Printf("completedCh full, dropping run %s", replayID)
+				// Bounded blocking + drop. Surface this to the player
+				// as a terminal envelope so the client can show a
+				// "your run wasn't recorded — please retry" instead of
+				// silently failing under load (issue 71 #16).
+				log.Printf("leaderboard: submit dropped for replay %s player %s", replayID, e.PlayerID)
+				e.sendError("submit_failed", "leaderboard backlog — your run was not recorded")
 			}
 		}
 	}
@@ -899,8 +1026,8 @@ func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {
 	// any incoming /ws/spectate request should hit the 404-no-live-run
 	// path instead of attaching to a dying engine. Run's deferred
 	// Unregister is the belt for the disconnect-without-finishRun path.
-	if e.Engines != nil && e.PlayerID != "" {
-		e.Engines.Unregister(e.PlayerID)
+	if e.Engines != nil && e.runID != "" {
+		e.Engines.Unregister(e.runID)
 	}
 }
 

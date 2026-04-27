@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/greyhats/defcon-game/pkg/netutil"
 )
 
 // Service wires the identity HTTP endpoints against a shared DB.
@@ -69,7 +71,7 @@ func (s *Service) handleRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.RegisterLimit.Allow(ClientIP(r)) {
+	if !s.RegisterLimit.Allow(netutil.ClientIP(r)) {
 		writeJSON(w, http.StatusTooManyRequests, errResp{Error: "slow down"})
 		return
 	}
@@ -128,7 +130,7 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.LoginLimit.Allow(ClientIP(r)) {
+	if !s.LoginLimit.Allow(netutil.ClientIP(r)) {
 		writeJSON(w, http.StatusTooManyRequests, errResp{Error: "slow down"})
 		return
 	}
@@ -167,7 +169,7 @@ func (s *Service) handleVerify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !s.VerifyLimit.Allow(ClientIP(r)) {
+	if !s.VerifyLimit.Allow(netutil.ClientIP(r)) {
 		writeJSON(w, http.StatusTooManyRequests, errResp{Error: "slow down"})
 		return
 	}
