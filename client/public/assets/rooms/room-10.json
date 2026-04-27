@@ -537,6 +537,54 @@
                  "width":0,
                  "x":640,
                  "y":672
+                }, 
+                {
+                 "height":0,
+                 "id":74,
+                 "name":"Health",
+                 "point":true,
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":0,
+                 "x":128,
+                 "y":640
+                }, 
+                {
+                 "height":0,
+                 "id":75,
+                 "name":"Health",
+                 "point":true,
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":0,
+                 "x":1152,
+                 "y":640
+                }, 
+                {
+                 "height":0,
+                 "id":76,
+                 "name":"Ammo",
+                 "point":true,
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":0,
+                 "x":128,
+                 "y":128
+                }, 
+                {
+                 "height":0,
+                 "id":77,
+                 "name":"Ammo",
+                 "point":true,
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":0,
+                 "x":1152,
+                 "y":128
                 }],
          "opacity":1,
          "type":"objectgroup",
@@ -545,7 +593,7 @@
          "y":0
         }],
  "nextlayerid":5,
- "nextobjectid":74,
+ "nextobjectid":78,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.11.2",
