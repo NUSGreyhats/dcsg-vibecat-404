@@ -6,7 +6,6 @@ export const C2SType = {
   SWITCH_WEAPON: 0x05,
   INTERACT: 0x06,
   ENTER_DOOR: 0x07,
-  USE_ITEM: 0x08,
   SHOP_PURCHASE: 0x09,
   // Only valid on /ws/replay; rejected by /ws and /ws/spectate. See
   // docs/specs/foundations/08-leaderboard-replay.md#c2s_replay_control.
@@ -30,7 +29,7 @@ export const S2CType = {
 export type S2CType = (typeof S2CType)[keyof typeof S2CType];
 
 export type C2SEnvelope<T extends C2SType = C2SType> = {
-  type: T; // 0x01–0x08, uint8 range
+  type: T; // 0x01–0x0a, uint8 range
   seq: number; // uint32, monotonic per-connection, starts at 1
   ts: number; // client wallclock ms (Date.now())
   data: C2SDataFor<T>;
@@ -57,13 +56,11 @@ export type C2SDataFor<T extends C2SType> = T extends typeof C2SType.AUTH
             ? { target_id: number; claimed_type: number } // claimed_type: BUG-12 substrate
             : T extends typeof C2SType.ENTER_DOOR
               ? { door_id: number }
-              : T extends typeof C2SType.USE_ITEM
-                ? { item_name: string }
-                : T extends typeof C2SType.SHOP_PURCHASE
-                  ? { item_id: number } // uint8, 1-indexed into ShopCatalog
-                  : T extends typeof C2SType.REPLAY_CONTROL
-                    ? { action: ReplayControlAction; speed?: number }
-                    : never;
+              : T extends typeof C2SType.SHOP_PURCHASE
+                ? { item_id: number } // uint8, 1-indexed into ShopCatalog
+                : T extends typeof C2SType.REPLAY_CONTROL
+                  ? { action: ReplayControlAction; speed?: number }
+                  : never;
 
 export type S2CDataFor<T extends S2CType> = T extends typeof S2CType.AUTH_OK
   ? { display_name: string }
@@ -133,7 +130,6 @@ export type PlayerSnapshot = {
   hp: number; // int16 on server — client just mirrors
   weapon_id: number; // uint8
   ammo: number;
-  inventory: string[];
   coins: number; // int32, shop currency
   speed_stacks: number; // uint8, +10% move speed each
   fire_rate_stacks: number; // uint8, cooldown / (1 + 0.1 * stacks)

@@ -86,6 +86,10 @@ export function setCachedPlayerId(playerId: string): void {
   safeSet(PLAYER_ID_KEY, playerId);
 }
 
+export function getCachedPlayerId(): string | null {
+  return safeGet(PLAYER_ID_KEY);
+}
+
 export function clearCachedPlayerId(): void {
   try {
     localStorage.removeItem(PLAYER_ID_KEY);

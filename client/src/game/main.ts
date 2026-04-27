@@ -3,9 +3,9 @@ import { ROOM_WIDTH, ROOM_HEIGHT } from "./constants";
 import { Boot } from "./scenes/Boot";
 import { Preloader } from "./scenes/Preloader";
 import { MainMenu } from "./scenes/MainMenu";
+import { RegisterMenu } from "./scenes/RegisterMenu";
 import { Game as MainGame } from "./scenes/Game";
 import { GameHUD } from "./scenes/GameHUD";
-import { InventoryMenu } from "./scenes/InventoryMenu";
 import { ShopMenu } from "./scenes/ShopMenu";
 import { PauseMenu } from "./scenes/PauseMenu";
 import { WinScreen } from "./scenes/WinScreen";
@@ -35,9 +35,9 @@ export function startGame(parentId: string): Phaser.Game {
       Boot,
       Preloader,
       MainMenu,
+      RegisterMenu,
       MainGame,
       GameHUD,
-      InventoryMenu,
       ShopMenu,
       PauseMenu,
       WinScreen,

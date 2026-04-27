@@ -207,11 +207,6 @@ export class Game extends Phaser.Scene {
       }
     }
 
-    if (this.controls.inventoryPressed()) {
-      this.scene.launch("InventoryMenu");
-      this.scene.pause();
-    }
-
     if (this.controls.shopPressed()) {
       this.scene.launch("ShopMenu");
       this.scene.pause();
@@ -232,6 +227,7 @@ export class Game extends Phaser.Scene {
       const newHp = payload.player.hp;
       if (this.prevPlayerHp >= 0 && newHp < this.prevPlayerHp) {
         triggerHitstop(this, 60);
+        this.game.events.emit("playerDamaged");
       }
       this.prevPlayerHp = newHp;
       this.player.applySnapshot(payload.player);
@@ -347,6 +343,7 @@ export class Game extends Phaser.Scene {
 
   private onDoorUnlocked(doorId: number): void {
     this.doors.get(doorId)?.setUnlocked(true);
+    this.game.events.emit("doorUnlockedToast", getSync().state.currentRoom ?? 1);
   }
 
   private onEntityDied(entityId: number): void {
@@ -457,7 +454,7 @@ export class Game extends Phaser.Scene {
 
   /**
    * Tear down every overlay scene that may be sitting on top of the
-   * gameplay (HUD, pause menu, inventory) before launching the WinScreen.
+   * gameplay (HUD, pause menu) before launching the WinScreen.
    * Without stopping PauseMenu, a player who dies mid-pause sees the
    * pause modal layered over the run-failed screen.
    */
@@ -465,7 +462,6 @@ export class Game extends Phaser.Scene {
     // Stop PauseMenu first while the Game + GameHUD cameras are still
     // live so its blur post-FX teardown finds something to remove.
     this.scene.stop("PauseMenu");
-    this.scene.stop("InventoryMenu");
     this.scene.stop("GameHUD");
     this.scene.start("WinScreen", { outcome });
   }

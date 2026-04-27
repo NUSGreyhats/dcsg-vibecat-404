@@ -32,7 +32,7 @@ export const TEXT_MUTED = 0x8a8679;
 export const TEXT_DIM = 0x5a564c;
 export const ACCENT_PRIMARY = TRACER_YELLOW;
 export const ACCENT_WARM = MASK_RED;
-export const SUCCESS = 0x8de77a;
+export const SUCCESS = 0x2f9f45;
 export const WARNING = COIN_GOLD;
 export const ERROR = BLOOD_RED;
 

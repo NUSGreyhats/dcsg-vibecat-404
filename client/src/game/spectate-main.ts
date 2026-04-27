@@ -16,9 +16,9 @@ export type SpectatorBootArgs = {
 
 /**
  * Boots the spectator-mode Phaser bundle. Mirrors startGame in main.ts
- * but uses the spectator scene list — no MainMenu, no InventoryMenu, no
- * input-bearing scenes — and seeds the registry so Preloader transitions
- * to SpectateConnecting instead of MainMenu.
+ * but uses the spectator scene list — no MainMenu, no input-bearing
+ * scenes — and seeds the registry so Preloader transitions to
+ * SpectateConnecting instead of MainMenu.
  *
  * run_id and display_name are stashed in the Phaser registry by preBoot;
  * SpectateConnecting.init reads them on first entry. run_id replaces the

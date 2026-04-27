@@ -29,11 +29,20 @@ type ShopOffer = {
 // Mirrors server/internal/game/shop.go:ShopCatalog. IDs and costs must
 // match the server. Display names/blurbs are client-only flavor.
 const SHOP_CATALOG: ShopOffer[] = [
-  { id: 1, name: "Ammo",     cost: 5,  blurb: "Refill all weapons" },
-  { id: 2, name: "Speed",    cost: 10, blurb: "+10% move speed" },
+  { id: 1, name: "Ammo",      cost: 5,  blurb: "Refill all weapons" },
+  { id: 2, name: "Speed",     cost: 10, blurb: "+10% move speed" },
   { id: 3, name: "Fire Rate", cost: 15, blurb: "+10% fire rate" },
-  { id: 4, name: "Damage",   cost: 20, blurb: "+10% damage" },
+  { id: 4, name: "Damage",    cost: 20, blurb: "+10% damage" },
 ];
+
+// Panel needs to fit the longest formatted row at FONT_SIZE_BODY_EM (20px
+// monospace). Longest label is ~36 chars (~430px wide); 560 wide leaves
+// comfortable padding.
+const PANEL_WIDTH = 560;
+const PANEL_HEIGHT = 380;
+// Offset from panel center to the left edge of each row's text — keeps the
+// rows lined up inside the panel with ~24px of inner padding.
+const ROW_X_OFFSET = PANEL_WIDTH / 2 - 24;
 
 /**
  * Modal shop overlay. Pauses the Game scene while active.
@@ -56,9 +65,14 @@ export class ShopMenu extends Phaser.Scene {
     esc: Phaser.Input.Keyboard.Key;
     b: Phaser.Input.Keyboard.Key;
   };
+  private returnTo = "Game";
 
   constructor() {
     super({ key: "ShopMenu" });
+  }
+
+  init(data?: { returnTo?: string }): void {
+    this.returnTo = data?.returnTo ?? "Game";
   }
 
   create(): void {
@@ -70,7 +84,7 @@ export class ShopMenu extends Phaser.Scene {
       .setDepth(DEPTH_HUD_BG);
 
     this.panel = this.add
-      .rectangle(cx, cy, 480, 360, PANEL_FILL, 0.95)
+      .rectangle(cx, cy, PANEL_WIDTH, PANEL_HEIGHT, PANEL_FILL, 0.95)
       .setStrokeStyle(2, MID_BLUE)
       .setDepth(DEPTH_HUD_FILL);
 
@@ -106,15 +120,15 @@ export class ShopMenu extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(DEPTH_MODAL_TEXT);
 
-    this.renderRows();
+    this.buildRows();
 
     const kb = this.input.keyboard!;
     this.keys = {
-      up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
-      down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
-      enter: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER),
-      esc: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
-      b: kb.addKey(Phaser.Input.Keyboard.KeyCodes.B),
+      up: kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP, false),
+      down: kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN, false),
+      enter: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER, false),
+      esc: kb.addKey(Phaser.Input.Keyboard.KeyCodes.ESC, false),
+      b: kb.addKey(Phaser.Input.Keyboard.KeyCodes.B, false),
     };
 
     this.keys.up.on("down", () => this.move(-1));
@@ -128,45 +142,57 @@ export class ShopMenu extends Phaser.Scene {
 
   update(): void {
     const player = getSync().state.player;
+    const coins = player?.coins ?? 0;
     if (this.coinText) {
-      this.coinText.setText(`$ ${player?.coins ?? 0}`);
+      this.coinText.setText(`$ ${coins}`);
     }
-    this.refreshRowColors(player?.coins ?? 0);
+    this.refreshRows(coins, player);
   }
 
-  private renderRows(): void {
+  private buildRows(): void {
     const cx = this.scale.width / 2;
     const cy = this.scale.height / 2;
     for (const t of this.rowTexts) t.destroy();
     this.rowTexts = [];
 
     const startY = cy - 60;
-    const player = getSync().state.player;
-    const coins = player?.coins ?? 0;
     for (let i = 0; i < SHOP_CATALOG.length; i++) {
-      const offer = SHOP_CATALOG[i];
-      const stacks = stacksFor(offer.id, player);
-      const prefix = i === this.selected ? "> " : "  ";
-      // Ammo (id=1) is a one-shot refill — no stack count to display.
-      const tail = offer.id === 1 ? "" : `  (x${stacks})`;
-      const label = `${prefix}${offer.name.padEnd(10)} $${offer.cost}   ${offer.blurb}${tail}`;
       const txt = this.add
-        .text(cx - 220, startY + i * 32, label, {
+        .text(cx - ROW_X_OFFSET, startY + i * 32, "", {
           fontFamily: FONT_FAMILY,
           fontSize: FONT_SIZE_BODY_EM,
-          color: this.colorFor(i, offer.cost, coins),
+          color: hex(TEXT_PRIMARY),
         })
         .setOrigin(0, 0.5)
         .setDepth(DEPTH_MODAL_TEXT);
       this.rowTexts.push(txt);
     }
+
+    const player = getSync().state.player;
+    this.refreshRows(player?.coins ?? 0, player);
   }
 
-  private refreshRowColors(coins: number): void {
+  private refreshRows(
+    coins: number,
+    player: ReturnType<typeof getSync>["state"]["player"],
+  ): void {
     for (let i = 0; i < this.rowTexts.length; i++) {
       const offer = SHOP_CATALOG[i];
+      this.rowTexts[i].setText(this.labelFor(i, offer, player));
       this.rowTexts[i].setColor(this.colorFor(i, offer.cost, coins));
     }
+  }
+
+  private labelFor(
+    index: number,
+    offer: ShopOffer,
+    player: ReturnType<typeof getSync>["state"]["player"],
+  ): string {
+    const prefix = index === this.selected ? "> " : "  ";
+    // Ammo (id=1) is a one-shot refill — no stack count to display.
+    const tail = offer.id === 1 ? "" : `  x${stacksFor(offer.id, player)}`;
+    const cost = `$${offer.cost}`.padEnd(4);
+    return `${prefix}${offer.name.padEnd(10)} ${cost}  ${offer.blurb}${tail}`;
   }
 
   private colorFor(index: number, cost: number, coins: number): string {
@@ -178,7 +204,8 @@ export class ShopMenu extends Phaser.Scene {
   private move(delta: number): void {
     this.selected =
       (this.selected + delta + SHOP_CATALOG.length) % SHOP_CATALOG.length;
-    this.renderRows();
+    const player = getSync().state.player;
+    this.refreshRows(player?.coins ?? 0, player);
   }
 
   private buySelected(): void {
@@ -189,7 +216,7 @@ export class ShopMenu extends Phaser.Scene {
   }
 
   private close(): void {
-    this.scene.resume("Game");
+    this.scene.resume(this.returnTo);
     this.scene.stop();
   }
 
