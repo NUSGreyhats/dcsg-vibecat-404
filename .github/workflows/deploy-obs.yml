@@ -81,6 +81,12 @@ jobs:
             echo "==> docker compose up -d --build"
             docker compose -f obs/docker-compose.yml up -d --build --remove-orphans
 
+            # VM auto-reloads scrape.yml from inotify, but git's atomic
+            # rename-replace breaks the watch on the original inode.
+            # Force a restart so VM re-reads the file at startup.
+            echo "==> restart victoria-metrics to pick up scrape.yml changes"
+            docker compose -f obs/docker-compose.yml restart victoria-metrics
+
             echo "==> docker image prune"
             docker image prune -f >/dev/null
 
