@@ -100,36 +100,7 @@ func main() {
 
 	allowlist := auth.NewAllowlist(allowlistPath)
 
-	// Build the auth gate once so the WS handler doesn't re-derive it per
-	// connection. Identity and token modes both map the internal player_id
-	// back to the stored display_name so public surfaces (leaderboard,
-	// spectators) never show the raw 32-char session key. Token mode first
-	// checks the queue allowlist, then verifies the id still belongs to a
-	// registered identity.
-	authCheck := func(playerID string) (string, error) {
-		lookupDisplayName := func() (string, error) {
-			p, err := identity.Lookup(identityDB, playerID)
-			if err != nil {
-				if errors.Is(err, identity.ErrNotFound) {
-					return "", errors.New("player not registered")
-				}
-				return "", err
-			}
-			return p.DisplayName, nil
-		}
-
-		switch mode {
-		case auth.ModeIdentity:
-			return lookupDisplayName()
-		case auth.ModeToken:
-			if err := auth.Check(mode, allowlist, playerID); err != nil {
-				return "", err
-			}
-			return lookupDisplayName()
-		default:
-			return "", auth.Check(mode, allowlist, playerID)
-		}
-	}
+	authCheck := buildAuthCheck(mode, identityDB, allowlist)
 
 	sem := make(chan struct{}, maxConcurrent)
 
@@ -191,6 +162,44 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
+}
+
+// buildAuthCheck returns the WS-time auth gate. Token mode still gates on
+// the lobby-written allowlist, but also resolves the canonical display name
+// from identity.db so public surfaces never show raw player_id values.
+func buildAuthCheck(mode auth.Mode, identityDB *sql.DB, allowlist *auth.Allowlist) func(string) (string, error) {
+	return func(playerID string) (string, error) {
+		switch mode {
+		case auth.ModeIdentity:
+			return lookupDisplayName(identityDB, playerID)
+		case auth.ModeToken:
+			if err := auth.Check(mode, allowlist, playerID); err != nil {
+				return "", err
+			}
+			return lookupDisplayName(identityDB, playerID)
+		default:
+			return "", auth.Check(mode, allowlist, playerID)
+		}
+	}
+}
+
+// errAuthUnavailable is returned to the client when an identity.db lookup
+// fails for any reason other than ErrNotFound. The underlying driver/SQL
+// error is logged server-side; the client only sees a generic string so
+// internal storage details (locks, query context, file paths) don't leak
+// over the WS auth_failed envelope.
+var errAuthUnavailable = errors.New("auth unavailable")
+
+func lookupDisplayName(identityDB *sql.DB, playerID string) (string, error) {
+	p, err := identity.Lookup(identityDB, playerID)
+	if err != nil {
+		if errors.Is(err, identity.ErrNotFound) {
+			return "", errors.New("player not registered")
+		}
+		log.Printf("auth: identity lookup for %s: %v", playerID, err)
+		return "", errAuthUnavailable
+	}
+	return p.DisplayName, nil
 }
 
 func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem chan struct{}, authCheck func(string) (string, error), lb *leaderboard.Service, liveReg *spectator.LiveRegistry, engineReg *spectator.Engines) {
