@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log"
@@ -77,26 +78,7 @@ func main() {
 
 	allowlist := auth.NewAllowlist(allowlistPath)
 
-	// Build the auth gate once so the WS handler doesn't re-derive it per
-	// connection. Identity mode requires the player_id to be present in
-	// identity.db — i.e. the player must have registered — and returns
-	// the stored display_name so the leaderboard sees the human name
-	// rather than the raw hex ID.
-	authCheck := func(playerID string) (string, error) {
-		switch mode {
-		case auth.ModeIdentity:
-			p, err := identity.Lookup(identityDB, playerID)
-			if err != nil {
-				if errors.Is(err, identity.ErrNotFound) {
-					return "", errors.New("player not registered")
-				}
-				return "", err
-			}
-			return p.DisplayName, nil
-		default:
-			return "", auth.Check(mode, allowlist, playerID)
-		}
-	}
+	authCheck := buildAuthCheck(mode, identityDB, allowlist)
 
 	sem := make(chan struct{}, maxConcurrent)
 
@@ -155,6 +137,36 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
+}
+
+// buildAuthCheck returns the WS-time auth gate. Token mode still gates on
+// the lobby-written allowlist, but also resolves the canonical display name
+// from identity.db so public surfaces never show raw player_id values.
+func buildAuthCheck(mode auth.Mode, identityDB *sql.DB, allowlist *auth.Allowlist) func(string) (string, error) {
+	return func(playerID string) (string, error) {
+		switch mode {
+		case auth.ModeIdentity:
+			return lookupDisplayName(identityDB, playerID)
+		case auth.ModeToken:
+			if err := auth.Check(mode, allowlist, playerID); err != nil {
+				return "", err
+			}
+			return lookupDisplayName(identityDB, playerID)
+		default:
+			return "", auth.Check(mode, allowlist, playerID)
+		}
+	}
+}
+
+func lookupDisplayName(identityDB *sql.DB, playerID string) (string, error) {
+	p, err := identity.Lookup(identityDB, playerID)
+	if err != nil {
+		if errors.Is(err, identity.ErrNotFound) {
+			return "", errors.New("player not registered")
+		}
+		return "", err
+	}
+	return p.DisplayName, nil
 }
 
 func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem chan struct{}, authCheck func(string) (string, error), lb *leaderboard.Service, liveReg *spectator.LiveRegistry, engineReg *spectator.Engines) {
