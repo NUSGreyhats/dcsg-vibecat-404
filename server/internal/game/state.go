@@ -84,13 +84,6 @@ type PlayerState struct {
 	WeaponAmmo      map[uint8]int
 	SwapCooldownEnd time.Time
 	DamageTaken     int32
-	Inventory       []string
-
-	SpeedMultUntil  time.Time
-	SpeedMult       float32
-	DamageMultUntil time.Time
-	DamageMult      float32
-	ShieldUntil     time.Time
 
 	// Shop traits — permanent stackable buffs purchased from features/shop.md.
 	// Reset on death / new run. Effective multipliers are derived at read
@@ -118,9 +111,6 @@ func NewPlayerState() *PlayerState {
 		UnlockedWeapons: []uint8{1, 2, 3},
 		WeaponCooldown:  map[uint8]time.Time{},
 		WeaponAmmo:      map[uint8]int{},
-		Inventory:       []string{},
-		SpeedMult:       1,
-		DamageMult:      1,
 	}
 	for id, spec := range WeaponSpecs {
 		p.WeaponAmmo[id] = spec.AmmoStart

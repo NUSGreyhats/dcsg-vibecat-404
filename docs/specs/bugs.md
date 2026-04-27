@@ -10,11 +10,12 @@ Bugs are sourced from **real Go pitfalls and known vulnerability classes** — p
 
 ### Currently disabled
 
-**BUG-08, BUG-09, BUG-10 are currently DISABLED in the shipping code** — they let a player trivially short-circuit the run (skip rooms via smuggled debug items, instakill the boss via HP overflow). They may be reintroduced in a future round once we've thought about binding them more tightly. Their specs are preserved below so the stacking model and spec history stay readable.
+**BUG-08 is currently DISABLED in the shipping code** — it let a player trivially short-circuit the run (instakill the boss via HP overflow). It may be reintroduced in a future round once we've thought about binding it more tightly. Its spec is preserved below so the stacking model and spec history stay readable.
 
-The enabling pieces were removed in two passes:
-- `DebugItems` map, `ParseItemCommand` / `dispatchCommand`, and the `!skip_room` command path were deleted from `server/internal/game/items.go`. Only `AllowedItems` (health_potion, speed_boost, shield) now dispatches.
-- The `+30000` Heart pickup (BUG-08 payload) was removed from `rooms_data.go` along with speed/damage-boost pickups. Only health potion and ammo crate remain.
+The enabling piece was removed in one pass:
+- The `+30000` Heart pickup (BUG-08 payload) was removed from `rooms_data.go`. Only health potion and ammo crate remain.
+
+BUG-09 and BUG-10 were retired alongside the inventory system removal (see commit history). Their substrate (the `C2S_USE_ITEM` packet, `AllowedItems` dispatch, and the `inventory-items.md` spec) no longer exists, so the bugs are not reintroducible without rebuilding the inventory feature first.
 
 ## Index
 
@@ -28,14 +29,12 @@ The enabling pieces were removed in two passes:
 | BUG-06 | Concurrent Room Settle Race          | Goroutine timing                   | Hard       | ~3–5 s/room         | Active            | [foundations/05-server-runtime.md#bug-06-concurrent-room-settle-race](foundations/05-server-runtime.md#bug-06-concurrent-room-settle-race) |
 | BUG-07 | Damage Batch Overflow                | Same-tick batching                 | Medium     | ~2–3 s/room         | Active            | [features/combat-weapons.md#bug-07-damage-batch-overflow](features/combat-weapons.md#bug-07-damage-batch-overflow) |
 | BUG-08 | HP Integer Overflow                  | Go silent overflow (100go #18)     | Medium     | ~5–10 s/boss        | Disabled (may return) | [features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max](features/combat-weapons.md#bug-08-hp-integer-overflow-healing-past-max) |
-| BUG-09 | JSON Case-Insensitive Field Matching | Go parser footgun (Trail of Bits)  | Medium     | Unlock hidden items | Disabled (may return) | [foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling](foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling) (+ [features/inventory-items.md#bug-09-json-smuggling-dispatch-side-detail](features/inventory-items.md#bug-09-json-smuggling-dispatch-side-detail)) |
-| BUG-10 | Rune vs Byte Item Name Bypass        | Go rune/byte confusion (100go #36) | Medium     | ~3–5 s/room         | Disabled (may return) | [features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass](features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass) |
 | BUG-11 | Kill Log Race Condition              | Slice append data race (100go #69) | Hard       | ~5–8 s total        | Active            | [foundations/05-server-runtime.md#bug-11-kill-log-append-race](foundations/05-server-runtime.md#bug-11-kill-log-append-race) |
 | BUG-12 | Pickup Type Confusion                | Trust-the-client dispatch          | Easy       | ~10–20 s/run        | Active            | [features/shop.md#bug-12-pickup-type-confusion](features/shop.md#bug-12-pickup-type-confusion) |
 
 ## Stacking model
 
-With BUG-08/09/10 disabled, the reachable stack floor is ~1:20–1:30 rather than the documented ~1:02. The full chain is kept for reference; greyed-out nodes are currently unreachable.
+With BUG-08 disabled (and BUG-09/BUG-10 retired with the inventory system), the reachable stack floor is ~1:20–1:30 rather than the documented ~1:02. The full chain is kept for reference; greyed-out nodes are currently unreachable.
 
 ```mermaid
 graph TD
@@ -43,9 +42,7 @@ graph TD
     B03["BUG-03 Door Skip<br/>−15s → ~2:15"] --> B05
     B05["BUG-05 Interact Range<br/>−5s → ~2:10"] --> B04
     B04["BUG-04 Swap Cancel<br/>−8s → ~2:02"] --> B07
-    B07["BUG-07 Damage Burst<br/>−12s → ~1:50"] --> B09
-    B09["BUG-09 JSON Smuggling<br/>DISABLED"] --> B10
-    B10["BUG-10 Rune Bypass<br/>DISABLED"] --> B01
+    B07["BUG-07 Damage Burst<br/>−12s → ~1:50"] --> B01
     B01["BUG-01 Seed + Routing<br/>−15s"] --> B06
     B06["BUG-06 Settle Race<br/>−10s<br/>(synergy: BUG-01)"] --> B08
     B08["BUG-08 HP Overflow<br/>DISABLED"] --> B11
@@ -55,8 +52,6 @@ graph TD
     style HONEST fill:#e74c3c,color:#fff
     style B02 fill:#27ae60,color:#fff
     style B08 fill:#7f8c8d,color:#fff
-    style B09 fill:#7f8c8d,color:#fff
-    style B10 fill:#7f8c8d,color:#fff
     style B11 fill:#9b59b6,color:#fff
 ```
 
@@ -70,13 +65,11 @@ graph LR
     B07 -->|"multi-kill<br/>triggers"| B11
     B05["BUG-05<br/>Interact Range"] -->|"any pickup → coin<br/>without walking to it"| B12["BUG-12<br/>Pickup Type Confusion"]
     B12 -->|"funds damage/fire-rate stacks"| B07
-    B09["BUG-09<br/>JSON Smuggling"] -->|"instakill enables<br/>faster setup for"| B08["BUG-08<br/>HP Overflow"]
-    B04["BUG-04<br/>Swap Cancel"] -->|"faster DPS for"| B08
+    B04["BUG-04<br/>Swap Cancel"] -->|"faster DPS for"| B08["BUG-08<br/>HP Overflow"]
     B02["BUG-02<br/>Drift Stretch"] -->|"multiplier on<br/>all other savings"| B01 & B03["BUG-03"] & B06
 
     style B01 fill:#e74c3c,color:#fff
     style B11 fill:#9b59b6,color:#fff
-    style B09 fill:#3498db,color:#fff
     style B12 fill:#f39c12,color:#fff
 ```
 
@@ -86,7 +79,7 @@ graph LR
 | ------------------------------------------ | ------------------------------ | ----------------------------------------------------------------------- |
 | **Surface** (found by reading code)        | BUG-03, BUG-05                 | Missing checks obvious in stripped source                               |
 | **Protocol** (found by packet analysis)    | BUG-04, BUG-07, BUG-12         | Requires understanding tick batching / packet payload trust             |
-| **Language** (found by Go expertise)       | BUG-08, BUG-09, BUG-10, BUG-11 | Requires deep knowledge of Go's type system, parsers, concurrency model |
+| **Language** (found by Go expertise)       | BUG-08, BUG-11                 | Requires deep knowledge of Go's type system, parsers, concurrency model |
 | **Systems** (found by full-stack analysis) | BUG-01, BUG-02, BUG-06         | Requires understanding server architecture + building external tools    |
 
 ## Rules of engagement

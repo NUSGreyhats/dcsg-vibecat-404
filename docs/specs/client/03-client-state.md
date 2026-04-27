@@ -51,16 +51,6 @@ Field notes:
 - **`unlockedDoors` / `deadEntities`** — `Set<number>` grown monotonically within a room and cleared on `S2C_ROOM_LOAD`. Used by `Game` to drive door visuals and despawn stale entity sprites on the next tick.
 - **`lastError`** — the most recent error (S2C-reported or WS-close). Cleared only when overwritten. Scenes that need "clear on retry" semantics should do so locally after reading.
 
-### Inventory display
-
-`PlayerSnapshot.inventory: string[]` is the authoritative inventory list. `InventoryMenu` reads it at open time:
-
-```ts
-this.items = getSync().state.player?.inventory?.slice() ?? [];
-```
-
-The slice is deliberate: `InventoryMenu` uses a local copy so a live `S2C_STATE` mid-selection doesn't shift the highlighted index. When the user picks an item and presses Enter, the menu sends `C2S_USE_ITEM { item_name }` and the server-side effect reaches the client on the next `S2C_STATE` snapshot.
-
 ## Event emitter contract
 
 `GameState` extends `Phaser.Events.EventEmitter`. Every branch of `apply()` emits exactly one event **after** mutating state, so listeners always see a consistent snapshot.
