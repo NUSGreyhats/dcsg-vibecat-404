@@ -41,7 +41,7 @@ If `scene.input.keyboard` is null (Phaser's keyboard plugin disabled or unavaila
 | -------------------------- | ------------------------------------- | ---------------- | --------------------------------------- |
 | Movement                   | `W/A/S/D` + Arrow keys                | Held (per-frame) | `C2S_INPUT { dx, dy }` throttled to 50 ms |
 | Aim                        | Mouse position                        | Polled each frame | Used as `aimAngle` argument to `shoot` |
-| Shoot                      | Left mouse button (held)              | Polled per frame, throttled to weapon fire rate (½ rate while held — issue #62) | `C2S_SHOOT { aim_angle }` |
+| Shoot                      | Left mouse button (held)              | Polled per frame, throttled to weapon fire rate (~85% rate while held — issue #62) | `C2S_SHOOT { aim_angle }` |
 | Weapon slot 1/2/3          | `1`, `2`, `3` (just-pressed)          | Just-pressed     | `C2S_SWITCH_WEAPON { weapon_id }`       |
 | Interact                   | `E`                                   | Just-pressed     | `C2S_INTERACT { target_id, claimed_type }` or `C2S_ENTER_DOOR { door_id }` (whichever is nearest); `claimed_type` is the rendered pickup's type — see [features/shop.md BUG-12](../features/shop.md#bug-12-pickup-type-confusion) |
 | Open Inventory             | `I`                                   | Just-pressed     | `scene.launch("InventoryMenu")` (no C2S yet) |
@@ -75,8 +75,8 @@ shootHeld(): boolean {
 }
 ```
 
-- **Hold-to-shoot.** Holding the left mouse button fires continuously, but the local throttle applies `HOLD_FIRE_THROTTLE_MULT` (×2) to the per-shot cooldown when the button has not been released since the previous shot — so sustained holding tops out at half the weapon's max rate. The server cooldown is unchanged; this is a deliberate client-side nerf so spam-clicking can stay slightly ahead of hold-to-fire (issue #62). Releasing stops fire on the next frame.
-- **Single click = one shot.** A click is just one frame (or a few) of "held"; the first held frame fires immediately because the throttle gate is reset on release (see [Shoot throttle](#shoot-throttle) below). Each fresh click fires at the weapon's full rate — only the second-and-later shots in an unbroken hold get the ×2 throttle.
+- **Hold-to-shoot.** Holding the left mouse button fires continuously, but the local throttle applies `HOLD_FIRE_RATE_MULT` (0.85) to the rate when the button has not been released since the previous shot — so sustained holding tops out at ~85% of the weapon's max rate. The server cooldown is unchanged; this is a deliberate client-side nerf so spam-clicking can stay marginally ahead of hold-to-fire (issue #62). Releasing stops fire on the next frame.
+- **Single click = one shot.** A click is just one frame (or a few) of "held"; the first held frame fires immediately because the throttle gate is reset on release (see [Shoot throttle](#shoot-throttle) below). Each fresh click fires at the weapon's full rate — only the second-and-later shots in an unbroken hold get the rate-mult throttle.
 - **No edge detection needed.** The previous `shootPressed()` (frame-bounded just-pressed) was removed. Phaser's pointer API has no frame-bounded just-pressed for the main button, but we don't need one — first-frame-held is functionally equivalent for a hold-to-shoot model.
 
 ### Just-pressed for keyboard
@@ -123,14 +123,14 @@ No packet is sent when the player is idle (`dx = dy = 0`), **but** that's an opt
 While the left mouse button is held, `Game.handleInput` rate-limits outbound `C2S_SHOOT` to the equipped weapon's effective fire rate:
 
 ```ts
-const heldMult = this.shootReleasedSinceLastShot ? 1 : HOLD_FIRE_THROTTLE_MULT;
+const rateMult = this.shootReleasedSinceLastShot ? 1 : HOLD_FIRE_RATE_MULT;
 const id = weaponFromServerId(sp.weapon_id);
 const baseCd = WEAPON_STATS[id].cooldownMs;
 const stacks = sp.fire_rate_stacks ?? 0;
-this.nextShootAt = now + (baseCd * heldMult) / (1 + 0.1 * stacks);
+this.nextShootAt = now + baseCd / rateMult / (1 + 0.1 * stacks);
 ```
 
-The fire-rate stack math matches the server's (`server/internal/game/combat.go`). The `heldMult` factor is purely client-side: when the button has been held since the previous shot, the local cooldown is doubled so sustained hold-to-fire tops out at half the weapon's effective rate — but the server still accepts shots at the full rate, so spam-clicking faster than half-rate gets through (issue #62). On release, `nextShootAt` resets to 0 and `shootReleasedSinceLastShot` flips back to true, so the next click fires on the very next frame at full rate.
+The fire-rate stack math matches the server's (`server/internal/game/combat.go`). The `rateMult` factor is purely client-side: when the button has been held since the previous shot, the local cooldown is divided by `HOLD_FIRE_RATE_MULT` (0.85) so sustained hold-to-fire tops out at ~85% of the weapon's effective rate — but the server still accepts shots at the full rate, so spam-clicking faster than 85% rate gets through (issue #62). On release, `nextShootAt` resets to 0 and `shootReleasedSinceLastShot` flips back to true, so the next click fires on the very next frame at full rate.
 
 This is a **bandwidth shaper, not a server-policy gate**. The throttle's only job is to avoid spamming packets that are too early for the equipped weapon's current effective cooldown — at 60 fps a held button would otherwise emit ~60 `C2S_SHOOT`/sec for a shotgun whose 520 ms cooldown only accepts ~2/sec. So the client throttle matches the server's **per-weapon fire-rate acceptance rate** (for the equipped weapon, with current upgrade stacks), but it does **not** guarantee that every emitted shoot will be accepted. Specifically, the client does **not**:
 

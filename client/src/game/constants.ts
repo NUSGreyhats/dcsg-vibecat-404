@@ -20,11 +20,12 @@ export const WS_URL = (() => {
 // Tick intervals (server runs at 20 Hz).
 export const INPUT_SEND_INTERVAL_MS = 50;
 
-// Client-side shoot throttle multiplier applied when the fire button has
+// Client-side shoot rate multiplier applied when the fire button has
 // been held since the last shot (no release in between). Spam-clicking
 // fires at the weapon's full rate; holding self-throttles to
-// 1 / HOLD_FIRE_THROTTLE_MULT of the full rate. Server cooldown is
-// unchanged — this is a local nerf, not a server rule. See issue #62.
-export const HOLD_FIRE_THROTTLE_MULT = 2;
+// HOLD_FIRE_RATE_MULT of the full rate. Server cooldown is unchanged —
+// this is a local nerf so spam-clickers can keep a small (~15%) edge
+// over hold-to-fire, not a server rule. See issue #62.
+export const HOLD_FIRE_RATE_MULT = 0.85;
 
 export const WALK_ANIM_FRAMERATE = 8;

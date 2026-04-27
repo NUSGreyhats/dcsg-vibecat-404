@@ -5,7 +5,7 @@ import {
   ROOM_WIDTH,
   ROOM_HEIGHT,
   INPUT_SEND_INTERVAL_MS,
-  HOLD_FIRE_THROTTLE_MULT,
+  HOLD_FIRE_RATE_MULT,
 } from "../constants";
 import { Player } from "../entities/Player";
 import { Enemy } from "../entities/Enemy";
@@ -152,15 +152,15 @@ export class Game extends Phaser.Scene {
         if ((sp.ammo ?? 0) > 0) {
           const angle = this.controls.aimAngle(this.player.x, this.player.y);
           sync.sendShoot(angle);
-          const heldMult = this.shootReleasedSinceLastShot
+          const rateMult = this.shootReleasedSinceLastShot
             ? 1
-            : HOLD_FIRE_THROTTLE_MULT;
+            : HOLD_FIRE_RATE_MULT;
           this.shootReleasedSinceLastShot = false;
           this.player.triggerShootAnim();
           const id = weaponFromServerId(sp.weapon_id);
           const baseCd = WEAPON_STATS[id].cooldownMs;
           const stacks = sp.fire_rate_stacks ?? 0;
-          this.nextShootAt = now + (baseCd * heldMult) / (1 + 0.1 * stacks);
+          this.nextShootAt = now + baseCd / rateMult / (1 + 0.1 * stacks);
 
           // Muzzle flash + camera shake fire on every shot. The
           // nextShootAt gate above already throttles this — no
