@@ -186,7 +186,7 @@ export class WinScreen extends Phaser.Scene {
     getSync().state.off("leaderboard", this.onLeaderboard, this);
     this.resetHandlersAttached = false;
     resetSync();
-    this.scene.start("MainMenu");
+    this.scene.start("MainMenu", { autoStart: true });
   }
 
   private resetHandlersAttached = true;

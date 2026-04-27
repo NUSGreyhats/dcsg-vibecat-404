@@ -193,7 +193,7 @@ export function resetSync(): void {
 ```
 
 - One `WebSocket`, one `GameState` mirror. Scenes never hold their own refs to the WS.
-- `resetSync()` is called from `WinScreen` → "Play Again" so the next run starts from a fresh connection (fresh `seq`, fresh state). See [02-net-sync.md](./02-net-sync.md) for lifecycle.
+- `resetSync()` is called from `WinScreen` → "Play Again" so the next run starts from a fresh connection (fresh `seq`, fresh state). In queue-disabled/dev mode, MainMenu may immediately re-auth with the cached `player_id` after this reset; queue-enabled deployments require a fresh login + queue admission. See [02-net-sync.md](./02-net-sync.md) for lifecycle.
 
 Scenes read `getSync().state.*` for render-time data and emit outbound packets through the sync's `send*` helpers. See [03-client-state.md](./03-client-state.md) for the `GameState` contract.
 

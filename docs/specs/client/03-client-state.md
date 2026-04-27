@@ -146,7 +146,7 @@ There are three kinds of reset:
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `S2C_RUN_STARTED` (new run on same connection)                | Inside `apply()` — zero out `entities`, `projectiles`, `splits`, `unlockedDoors`, `deadEntities`, `totalMs`, `rank`. Keep `displayName`, `leaderboard`. |
 | `S2C_ROOM_LOAD` (room transition within a run)                | Zero out `entities`, `projectiles`, `unlockedDoors`, `deadEntities`. Keep `seed`, `player`, `leaderboard`, run-level totals. |
-| `resetSync()` (from `WinScreen` "Play Again")                  | Destroy the whole `GameStateSync` + `GameState`; next `getSync()` builds fresh. `seq` resets to 0 (first C2S will be 1). |
+| `resetSync()` (from `WinScreen` "Play Again")                  | Destroy the whole `GameStateSync` + `GameState`; next `getSync()` builds fresh. `seq` resets to 0 (first C2S will be 1). MainMenu may auto-auth with the cached `player_id` only when queueing is disabled. |
 
 No partial reset is ever triggered by scene code directly; all three paths are mechanical consequences of server packets or explicit "Play Again" intent.
 

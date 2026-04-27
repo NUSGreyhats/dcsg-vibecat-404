@@ -69,7 +69,7 @@ graph TD
     GAME -->|scene.launch + scene.pause| INV[InventoryMenu]
     INV -->|scene.resume + scene.stop| GAME
     GAME -->|scene.stop GameHUD<br/>scene.start WinScreen<br/>on runComplete| WIN[WinScreen]
-    WIN -->|resetSync + scene.start<br/>on 'Play Again'| MENU
+    WIN -->|resetSync + scene.start(MainMenu,{autoStart})<br/>on 'Play Again'| MENU
 
     style GAME fill:#2ecc71,color:#fff
     style WIN fill:#3498db,color:#fff
@@ -87,14 +87,14 @@ graph TD
 | ---------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------- |
 | `Boot`           | `create()` runs (after fallback pixel loaded)          | `scene.start("Preloader")`                                                       |
 | `Preloader`      | `load.on("complete")`                                  | `scene.start("MainMenu")` (this is in `create()` of `Preloader`; `preload()` hooks `progress` + `loaderror`) |
-| `MainMenu`       | user clicks "Start Run" + WebSocket open               | `sync.sendAuth(playerId)` → on `authOk` → `sync.sendStartRun()` → on `runStarted` → `scene.start("Game") + scene.launch("GameHUD")` |
+| `MainMenu`       | user clicks "Start Run" after login/queue admission, or safe Play Again auto-start | Open a fresh WS if needed; `sync.sendAuth(playerId)` → on `authOk` → `sync.sendStartRun()` → on `runStarted` → `scene.start("Game") + scene.launch("GameHUD")` |
 | `Game`           | `E` pressed near pickup → `sync.sendInteract`; near door → `sync.sendEnterDoor`. See [07-input-controls.md](./07-input-controls.md). | No scene transition; server drives room via `S2C_ROOM_LOAD` which reuses `Game`. |
 | `Game`           | `I` pressed                                            | `scene.launch("InventoryMenu"); scene.pause();`                                  |
 | `InventoryMenu`  | `Esc` / `I` / `Enter` after use                        | `scene.resume("Game"); scene.stop();`                                            |
 | `Game`           | `B` pressed                                            | `scene.launch("ShopMenu"); scene.pause();`                                       |
 | `ShopMenu`       | `Esc` / `B` / `Enter` after purchase                   | `scene.resume("Game"); scene.stop();`                                            |
 | `Game`           | `runComplete` event from `sync.state`                  | `scene.stop("GameHUD"); scene.start("WinScreen");`                               |
-| `WinScreen`      | "Play Again" clicked                                   | Detach listeners; `resetSync()`; `scene.start("MainMenu");`                      |
+| `WinScreen`      | "Play Again" clicked                                   | Detach listeners; `resetSync()`; `scene.start("MainMenu", { autoStart: true });` |
 
 ### S2C_ROOM_LOAD reuses `Game`
 
@@ -235,7 +235,7 @@ See [features/inventory-items.md](../features/inventory-items.md) for what the s
 
 - Pulls `state.totalMs`, `state.rank`, `state.splits`, and `state.leaderboard` at `create()` time and renders two tables: splits on the left, top-10 leaderboard on the right.
 - Subscribes to `state.on("leaderboard")` so late-arriving leaderboard updates refresh the table.
-- "Play Again" detaches local listeners, calls `resetSync()` (which destroys the `GameStateSync` singleton), then `scene.start("MainMenu")`. The MainMenu scene's `create()` will create a fresh `GameStateSync` via `getSync()` and re-run the connection flow.
+- "Play Again" detaches local listeners, calls `resetSync()` (which destroys the `GameStateSync` singleton), then `scene.start("MainMenu", { autoStart: true })`. MainMenu creates a fresh `GameStateSync` via `getSync()`. If the queue endpoint reports `503` (queue disabled/dev mode), MainMenu reuses the cached `player_id`, opens a fresh WS, and starts the next run without asking for credentials again. If queueing is enabled, MainMenu does **not** auto-auth from the cached id; it shows the login form so the player must re-queue for FIFO fairness.
 
 Why the detach-before-reset dance: `resetSync()` invalidates the old `state` emitter entirely. If we let `cleanup()` (run at scene shutdown after `scene.start`) try to `state.off(...)` against the **new** sync, we'd silently remove a listener that was never attached. `resetHandlersAttached = false` prevents the second detach.
 

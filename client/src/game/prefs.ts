@@ -72,6 +72,18 @@ export function setTimingsVisible(visible: boolean): void {
   safeSet(TIMINGS_KEY, visible ? "1" : "0");
 }
 
+/**
+ * The most recently authenticated player_id. MainMenu uses this only for
+ * explicit in-browser continuation flows such as WinScreen → Play Again,
+ * and only when the queue endpoint reports that queueing is disabled. A
+ * normal page load still requires username/password login so queue-enabled
+ * deployments cannot be bypassed by a stale local id.
+ */
+export function getCachedPlayerId(): string | null {
+  const v = safeGet(PLAYER_ID_KEY);
+  return v && v.length > 0 ? v : null;
+}
+
 export function setCachedPlayerId(playerId: string): void {
   if (!playerId) return;
   safeSet(PLAYER_ID_KEY, playerId);

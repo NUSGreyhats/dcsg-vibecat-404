@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { getSync } from "../net/runContext";
 import {
   clearCachedPlayerId,
+  getCachedPlayerId,
   setCachedPlayerId,
 } from "../prefs";
 import { WS_URL } from "../constants";
@@ -72,6 +73,7 @@ export class MainMenu extends Phaser.Scene {
   private clockSkewText?: Phaser.GameObjects.Text;
   private startButton?: HTMLButtonElement;
   private submitting = false;
+  private autoStartWithCachedId = false;
   private resizeHandlers: Array<() => void> = [];
   private sponsorLogoEls: HTMLImageElement[] = [];
 
@@ -99,6 +101,10 @@ export class MainMenu extends Phaser.Scene {
 
   constructor() {
     super({ key: "MainMenu" });
+  }
+
+  init(data?: { autoStart?: boolean }): void {
+    this.autoStartWithCachedId = data?.autoStart === true;
   }
 
   create(): void {
@@ -249,7 +255,11 @@ export class MainMenu extends Phaser.Scene {
 
     this.events.on("shutdown", this.cleanup, this);
 
-    setTimeout(() => this.usernameInput?.focus(), 50);
+    if (this.autoStartWithCachedId) {
+      void this.tryAutoStartCachedRun();
+    } else {
+      setTimeout(() => this.usernameInput?.focus(), 50);
+    }
   }
 
   private refreshClockSkewBanner(): void {
@@ -420,10 +430,69 @@ export class MainMenu extends Phaser.Scene {
     }
   }
 
+  private hideLoginForm(): void {
+    if (this.usernameInput) this.usernameInput.style.display = "none";
+    if (this.passwordInput) this.passwordInput.style.display = "none";
+    if (this.startButton) this.startButton.style.display = "none";
+  }
+
   private showLoginForm(): void {
     if (this.usernameInput) this.usernameInput.style.display = "";
     if (this.passwordInput) this.passwordInput.style.display = "";
     if (this.startButton) this.startButton.style.display = "";
+  }
+
+  private async tryAutoStartCachedRun(): Promise<void> {
+    if (this.submitting) return;
+    const cachedId = getCachedPlayerId();
+    if (!cachedId) {
+      this.showLoginForm();
+      this.statusText?.setText("Enter credentials to play.");
+      this.statusText?.setColor(hex(TEXT_MUTED));
+      setTimeout(() => this.usernameInput?.focus(), 50);
+      return;
+    }
+
+    this.submitting = true;
+    this.hideLoginForm();
+    this.statusText?.setText("Checking queue status...");
+    this.statusText?.setColor(hex(TEXT_MUTED));
+
+    if (!(await this.queueDisabledForCachedPlayer(cachedId))) {
+      // Queue-enabled deployments must force an explicit login + queue join
+      // for every turn. Even if the old token is still in the allowlist
+      // during post-run grace, auto-starting would bypass FIFO fairness.
+      this.submitting = false;
+      this.showLoginForm();
+      this.statusText?.setText("Log in to re-queue for another run.");
+      this.statusText?.setColor(hex(WARNING));
+      setTimeout(() => this.usernameInput?.focus(), 50);
+      return;
+    }
+
+    if (!(await this.connectForAuth())) {
+      this.submitting = false;
+      this.showLoginForm();
+      return;
+    }
+
+    this.statusText?.setText("Starting another run...");
+    this.statusText?.setColor(hex(TEXT_MUTED));
+    getSync().sendAuth(cachedId);
+  }
+
+  private async queueDisabledForCachedPlayer(playerId: string): Promise<boolean> {
+    try {
+      const res = await fetch(
+        "/api/queue/status/" + encodeURIComponent(playerId),
+        { cache: "no-store" },
+      );
+      return res.status === 503;
+    } catch {
+      // Be conservative: if we cannot prove queueing is disabled, do not
+      // auto-auth with a cached id. The player can still log in manually.
+      return false;
+    }
   }
 
   /**
@@ -490,7 +559,19 @@ export class MainMenu extends Phaser.Scene {
     this.resizeHandlers.push(place);
 
     input.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") this.onStart();
+      // Phaser's KeyboardPlugin captures gameplay keys globally via
+      // preventDefault (W/A/S/D, menu hotkeys, etc.). Those captures can
+      // survive scene transitions after a run, so stop login-field key
+      // events before they reach Phaser or characters such as "a" will
+      // be blocked in the browser input.
+      ev.stopPropagation();
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        this.onStart();
+      }
+    });
+    input.addEventListener("keyup", (ev) => {
+      ev.stopPropagation();
     });
 
     return input;
