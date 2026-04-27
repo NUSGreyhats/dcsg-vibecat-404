@@ -73,10 +73,11 @@ export function setTimingsVisible(visible: boolean): void {
 }
 
 /**
- * The most recently authenticated player_id. Cached on a successful
- * /api/login so MainMenu can auto-auth on a fresh WS without forcing
- * the user back through the login form. Cleared on auth_failed so a
- * stale id doesn't trap the user in a loop.
+ * The most recently authenticated player_id. Kept only as local session
+ * state so explicit logout can clear stale credentials; MainMenu still
+ * performs WS auth only after a fresh username/password login (and queue
+ * admission when enabled). Cleared on auth_failed so a stale id doesn't
+ * trap the user in a loop.
  */
 export function getCachedPlayerId(): string | null {
   const v = safeGet(PLAYER_ID_KEY);
