@@ -192,12 +192,13 @@ export class WinScreen extends Phaser.Scene {
     this.leaderboardTexts = [];
 
     const startY = 280;
-    const shown = entries.slice(0, 10);
+    const shown = dedupeLeaderboard(entries).slice(0, 10);
     for (let i = 0; i < shown.length; i++) {
       const e = shown[i];
+      const rank = i + 1;
       const name = (e.display_name ?? "").slice(0, 20).padEnd(20);
       const line =
-        `${String(e.rank).padEnd(5)}` +
+        `${String(rank).padEnd(5)}` +
         `${name} ` +
         `${formatTime(e.total_ms)}`;
       const txt = this.add
@@ -238,6 +239,18 @@ export class WinScreen extends Phaser.Scene {
     this.playAgainButton?.destroy();
     this.playAgainButton = undefined;
   }
+}
+
+function dedupeLeaderboard(entries: LeaderboardEntry[]): LeaderboardEntry[] {
+  const seen = new Set<string>();
+  const out: LeaderboardEntry[] = [];
+  for (const entry of entries) {
+    const key = entry.display_name || entry.replay_id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+  }
+  return out;
 }
 
 export default WinScreen;
