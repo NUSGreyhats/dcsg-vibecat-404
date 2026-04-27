@@ -112,8 +112,8 @@ export class GameHUD extends Phaser.Scene {
   private holdLabel?: Phaser.GameObjects.Text;
   private holdBarBg?: Phaser.GameObjects.Rectangle;
   private holdBarFill?: Phaser.GameObjects.Rectangle;
-  // Persistent leaderboard pop-out link. Lives below the splits column
-  // so the player can glance at where they stand mid-run.
+  // Persistent leaderboard pop-out link. Lives under the timer in the
+  // top-left HUD stack.
   private leaderboardLink?: Phaser.GameObjects.Text;
 
   constructor() {
@@ -524,16 +524,18 @@ export class GameHUD extends Phaser.Scene {
   }
 
   /**
-   * Persistent leaderboard pop-out link, anchored to the right edge a
-   * little above the weapon panel so it never collides with the splits
-   * column (which grows downward as rooms are cleared).
+   * Persistent leaderboard pop-out link, anchored under the timer in the
+   * top-left HUD stack.
    */
   private buildLeaderboardLink(): void {
+    const timerW = this.timeText?.displayWidth ?? 0;
+    const timerPanelW = this.timePanel?.displayWidth ?? 0;
+    const x = GUTTER_MEDIUM + Math.max(timerW, timerPanelW) + 14;
     const link = this.add
       .text(
-        this.scale.width - GUTTER_MEDIUM,
-        this.scale.height - 56,
-        "[ Leaderboard ↗ ]",
+        x,
+        10,
+        "Leaderboard ↗",
         {
           fontFamily: FONT_FAMILY,
           fontSize: FONT_SIZE_CAPTION,
@@ -542,11 +544,11 @@ export class GameHUD extends Phaser.Scene {
           strokeThickness: 2,
         },
       )
-      .setOrigin(1, 1)
+      .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(DEPTH_HUD_FILL)
       .setInteractive({ useHandCursor: true });
-    link.on("pointerover", () => link.setColor(hex(BONE_WHITE)));
+    link.on("pointerover", () => link.setColor(hex(TEXT_PRIMARY)));
     link.on("pointerout", () => link.setColor(hex(ACCENT_PRIMARY)));
     link.on("pointerdown", () => {
       window.open("/leaderboard", "_blank", "noopener,noreferrer");
