@@ -1,0 +1,163 @@
+{
+  "uid": "overview",
+  "title": "Overview",
+  "tags": ["overview"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "",
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "annotations": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "name": "env",
+        "label": "Env",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "qryType": 1, "query": "label_values(up, env)", "refId": "PrometheusVariableQueryEditor-VariableQuery" },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": { "text": "All", "value": "$__all", "selected": false },
+        "options": [],
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "CPU busy",
+      "description": "100 − idle, averaged across cores. Series per env (obs/dev/prod).",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 - 100 * avg by (env) (rate(node_cpu_seconds_total{env=~\"$env\"}[1m]))",
+          "legendFormat": "{{env}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Memory used",
+      "description": "1 − MemAvailable/MemTotal. MemAvailable already accounts for reclaimable cache.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{env=~\"$env\"} / node_memory_MemTotal_bytes{env=~\"$env\"})",
+          "legendFormat": "{{env}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 75 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Root filesystem used",
+      "description": "Used % of /. fstype!=rootfs filter avoids the kernel's pseudo-rootfs being double-counted.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\", fstype!=\"rootfs\", env=~\"$env\"} / node_filesystem_size_bytes{mountpoint=\"/\", fstype!=\"rootfs\", env=~\"$env\"})",
+          "legendFormat": "{{env}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 75 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Network throughput (RX + TX)",
+      "description": "Bytes/sec on real NICs only (eth*/en*). Excludes lo, docker0, veth*, overlay_*.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (env) (rate(node_network_receive_bytes_total{device=~\"eth.+|en.+\", env=~\"$env\"}[1m]) + rate(node_network_transmit_bytes_total{device=~\"eth.+|en.+\", env=~\"$env\"}[1m]))",
+          "legendFormat": "{{env}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    }
+  ]
+}
