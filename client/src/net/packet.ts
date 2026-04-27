@@ -29,7 +29,7 @@ export const S2CType = {
 export type S2CType = (typeof S2CType)[keyof typeof S2CType];
 
 export type C2SEnvelope<T extends C2SType = C2SType> = {
-  type: T; // 0x01–0x09, uint8 range
+  type: T; // 0x01–0x0a, uint8 range
   seq: number; // uint32, monotonic per-connection, starts at 1
   ts: number; // client wallclock ms (Date.now())
   data: C2SDataFor<T>;
