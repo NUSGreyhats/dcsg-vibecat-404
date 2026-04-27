@@ -92,14 +92,22 @@ func runSpectator(ctx context.Context, cfg config, m *metrics) {
 	}
 }
 
-// pickLiveRunID polls the lobby's /api/live until at least one run is
-// listed, then returns one at random. Bounded by ctx; bails out with
-// the last error if the deadline is hit before any run shows up. The
-// lobby URL is derived from cfg.serverURL by swapping the game-server
-// scheme/host with the public origin (the loadtest is pointed at the
-// game server but /api/live lives on the lobby behind the same proxy).
+// pickLiveRunID polls /api/live until at least one run is listed, then
+// returns one at random. Bounded by ctx; bails out with the last error
+// if the deadline is hit before any run shows up.
+//
+// URL resolution:
+//   - cfg.liveAPIURL wins if set (-live-api-url flag). Required when
+//     -server points at the game-server directly, since the game server
+//     does not serve /api/live.
+//   - Otherwise we derive from cfg.serverURL — the compose stack puts
+//     /ws and /api/live on the same Caddy origin, so the same host
+//     works for both endpoints.
 func pickLiveRunID(ctx context.Context, cfg config) (string, error) {
-	api := liveAPIURL(cfg.serverURL)
+	api := cfg.liveAPIURL
+	if api == "" {
+		api = deriveLiveAPIURL(cfg.serverURL)
+	}
 	deadline := time.Now().Add(15 * time.Second)
 	client := &http.Client{Timeout: 2 * time.Second}
 	var lastErr error
@@ -109,37 +117,12 @@ func pickLiveRunID(ctx context.Context, cfg config) (string, error) {
 			return "", ctx.Err()
 		default:
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, api, nil)
-		if err != nil {
-			return "", err
+		runID, err := fetchOneRunID(ctx, client, api)
+		if err == nil {
+			return runID, nil
 		}
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("api/live status %d", resp.StatusCode)
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-		var entries []struct {
-			RunID string `json:"run_id"`
-		}
-		if err := json.Unmarshal(body, &entries); err != nil {
-			lastErr = err
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-		if len(entries) == 0 {
-			lastErr = fmt.Errorf("no live runs yet")
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-		return entries[rand.Intn(len(entries))].RunID, nil
+		lastErr = err
+		time.Sleep(200 * time.Millisecond)
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no live runs within 15s")
@@ -147,11 +130,45 @@ func pickLiveRunID(ctx context.Context, cfg config) (string, error) {
 	return "", lastErr
 }
 
-// liveAPIURL converts ws[s]:// or http[s]:// game-server URLs into the
-// matching http[s]://host/api/live URL. Same scheme/host (the loadtest
-// expects the public proxy in front, where /ws and /api/live share an
-// origin), only the path changes.
-func liveAPIURL(serverURL string) string {
+func fetchOneRunID(ctx context.Context, client *http.Client, api string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, api, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		// Drain so the connection can be reused; ignore drain error.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return "", fmt.Errorf("api/live status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		// Surface the actual transport / read error rather than swallow
+		// it into an opaque "unexpected end of JSON input" downstream.
+		return "", fmt.Errorf("read api/live body: %w", err)
+	}
+	var entries []struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal(body, &entries); err != nil {
+		return "", fmt.Errorf("decode api/live: %w", err)
+	}
+	if len(entries) == 0 {
+		return "", fmt.Errorf("no live runs yet")
+	}
+	return entries[rand.Intn(len(entries))].RunID, nil
+}
+
+// deriveLiveAPIURL converts ws[s]:// or http[s]:// game-server URLs
+// into the matching http[s]://host/api/live URL. Same scheme/host (the
+// loadtest expects the public proxy in front, where /ws and /api/live
+// share an origin), only the path changes. Callers can override via
+// cfg.liveAPIURL when -server points at the game-server directly.
+func deriveLiveAPIURL(serverURL string) string {
 	u := serverURL
 	if strings.HasPrefix(u, "ws://") {
 		u = "http://" + strings.TrimPrefix(u, "ws://")

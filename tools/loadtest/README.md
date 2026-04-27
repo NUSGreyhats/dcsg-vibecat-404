@@ -34,7 +34,8 @@ means the engine is falling behind).
 
 | flag | default | meaning |
 | --- | --- | --- |
-| `-server` | `ws://127.0.0.1:8080` | WS base URL (no trailing path) |
+| `-server` | `ws://127.0.0.1:8080` | WS base URL (no trailing path). Direct to game-server by default. |
+| `-live-api-url` | _(empty)_ | Explicit URL for `/api/live` (the lobby endpoint). When empty, derived from `-server` — works against the full compose stack where Caddy fronts both `/ws` and `/api/live`. **Required when `-server` points at the game-server directly** (the game-server doesn't serve `/api/live`); set to e.g. `http://127.0.0.1:3001/api/live` against a standalone lobby. |
 | `-players` | `10` | concurrent synthetic players |
 | `-spectators-per-game` | `0` | extra `/ws/spectate` viewers per player. Each viewer polls `/api/live` to discover a public `run_id` then attaches; no 1:1 mapping to a specific player (issue #71 #1). |
 | `-ramp` | `5s` | linear ramp window for player connect launches |

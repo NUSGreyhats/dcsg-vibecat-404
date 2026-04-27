@@ -139,7 +139,7 @@ func TopRuns(db *sql.DB, n int) ([]protocol.LeaderboardEntry, error) {
            FROM completed_runs cr
       LEFT JOIN flagged_runs fr ON fr.replay_id = cr.replay_id
           WHERE fr.replay_id IS NULL
-          ORDER BY cr.total_ms ASC, cr.submitted_at ASC
+          ORDER BY cr.total_ms ASC, cr.submitted_at ASC, cr.replay_id ASC
           LIMIT ?`,
 		n,
 	)
@@ -183,4 +183,31 @@ func TopRuns(db *sql.DB, n int) ([]protocol.LeaderboardEntry, error) {
 		return nil, fmt.Errorf("leaderboard: rows: %w", err)
 	}
 	return entries, nil
+}
+
+// RankOfRun returns the 1-based leaderboard rank for replayID, excluding
+// flagged runs the same way TopRuns does.
+func RankOfRun(db *sql.DB, replayID string) (int, error) {
+	var rank int
+	err := db.QueryRow(
+		`SELECT rank
+		   FROM (
+		         SELECT cr.replay_id,
+		                ROW_NUMBER() OVER (
+		                    ORDER BY cr.total_ms ASC, cr.submitted_at ASC, cr.replay_id ASC
+		                ) AS rank
+		           FROM completed_runs cr
+		      LEFT JOIN flagged_runs fr ON fr.replay_id = cr.replay_id
+		          WHERE fr.replay_id IS NULL
+		        )
+		  WHERE replay_id = ?`,
+		replayID,
+	).Scan(&rank)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrNotFound
+		}
+		return 0, fmt.Errorf("leaderboard: rank: %w", err)
+	}
+	return rank, nil
 }

@@ -19,7 +19,6 @@ graph TB
             MENU[MainMenu]
             GAME[Game]
             HUD[GameHUD]
-            INV[InventoryMenu]
             WIN[WinScreen]
         end
 
@@ -36,10 +35,10 @@ graph TB
 
     HTML --> MAIN --> PHASER
     PHASER --> BOOT --> PRE --> MENU --> GAME
-    GAME -.overlays.-> HUD & INV
+    GAME -.overlays.-> HUD
     GAME --> WIN
 
-    MENU & GAME & HUD & INV & WIN -->|getSync| SYNC
+    MENU & GAME & HUD & WIN -->|getSync| SYNC
     SYNC -->|.state| STATE
     SYNC <-->|WebSocket JSON| WS
     HTML -.served by.-> HTTP
@@ -98,7 +97,7 @@ Defined in `client/src/game/main.ts`:
 | `physics.arcade.gravity` | `{ x: 0, y: 0 }`                         | Top-down game.                                                                                             |
 | `scale.mode`          | `Phaser.Scale.FIT`                          | Letterbox to viewport while preserving the 1280×768 aspect ratio.                                          |
 | `scale.autoCenter`    | `Phaser.Scale.CENTER_BOTH`                  | Center inside `<div id="app">`.                                                                            |
-| `scene`               | `[Boot, Preloader, MainMenu, Game, GameHUD, InventoryMenu, WinScreen]` | Registration order — Phaser starts the first entry automatically. |
+| `scene`               | `[Boot, Preloader, MainMenu, Game, GameHUD, ShopMenu, PauseMenu, WinScreen]` | Registration order — Phaser starts the first entry automatically. |
 
 Arcade physics runs but is **not load-bearing**: entities store a `targetX/targetY` from the last snapshot and `Phaser.Math.Linear`-lerp toward it each frame. The server-authoritative position always wins on the next snapshot.
 
@@ -148,7 +147,8 @@ client/
             ├── MainMenu.ts
             ├── Game.ts
             ├── GameHUD.ts
-            ├── InventoryMenu.ts
+            ├── ShopMenu.ts
+            ├── PauseMenu.ts
             ├── WinScreen.ts
             └── utils/Controls.ts        ← keyboard + pointer facade
 ```
@@ -291,11 +291,9 @@ See [02-net-sync.md](./02-net-sync.md) for the wire format and dispatch semantic
 
 ## Implementation status
 
-- All seven scenes listed above exist and compile.
+- All scenes listed above exist and compile.
 - `startGame()` path boots and connects in dev (`yarn dev`) and in the current Docker deploy.
-- `InventoryMenu` renders from `state.player.inventory` — but the backend item handler is greenfield (see [features/inventory-items.md](../features/inventory-items.md)), so "Use" sends a `C2S_USE_ITEM` the server does not yet act on.
-- Spectator mode entry point is **not yet implemented** — see [09-spectator-mode.md](./09-spectator-mode.md).
-- `PauseMenu` and `ShopMenu` are listed in some earlier specs but do not exist as files in this repo yet; when introduced, register per the rules in [04-scenes.md](./04-scenes.md).
+- Spectator mode entry point is implemented — see [09-spectator-mode.md](./09-spectator-mode.md).
 
 ## Intentional bugs in this area
 

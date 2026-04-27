@@ -15,8 +15,7 @@ Clear every enemy in a room to unlock its door. Go through the door. Repeat unti
 | Left click     | Shoot             |
 | `1` / `2` / `3` | Switch weapon    |
 | `E`            | Pick up / interact |
-| `I`            | Open inventory    |
-| `Enter`        | Use selected item |
+| `B`            | Open shop         |
 | `Esc`          | Pause             |
 
 ## Weapons
@@ -49,14 +48,18 @@ Walk up and press `E` to grab them.
 | ------------- | ---------------------------------------------------- |
 | Health potion | Heals you.                                           |
 | Ammo crate    | Refills ammo for your current weapon.                |
+| Coin          | Currency — drops from defeated enemies.              |
 
-## Inventory
+## Shop
 
-Open with `I`. You can hold items picked up during the run and use them when it matters:
+Open with `B`. Spend coins on permanent stackable buffs that last the rest of the run:
 
-- **Health potion** — heal.
-- **Speed boost** — short burst of speed.
-- **Shield** — reduces incoming damage for a few seconds.
+- **Ammo** — one-shot refill of every weapon.
+- **Speed** — +10% move speed per stack.
+- **Fire Rate** — faster firing per stack.
+- **Damage** — +10% damage per stack.
+
+Active stack counts show in the bottom-right HUD just above the weapon readout.
 
 ## Rooms
 

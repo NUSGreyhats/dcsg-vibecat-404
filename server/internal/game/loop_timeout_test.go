@@ -146,6 +146,44 @@ func TestReplayModeSkipsLivenessChecks(t *testing.T) {
 	}
 }
 
+func TestCompletedRunEmitsLeaderboardBeforeRunComplete(t *testing.T) {
+	start := time.Unix(1_700_000_000, 0)
+	eng, _, out := newTimeoutTestEngine(t, start)
+	eng.Submit = nil
+	eng.SubmitAndRefresh = func(run *leaderboard.CompletedRun) leaderboard.SubmitResult {
+		if run.TotalMs != 1234 {
+			t.Fatalf("submitted total_ms = %d, want 1234", run.TotalMs)
+		}
+		return leaderboard.SubmitResult{
+			Rank: 7,
+			Entries: []protocol.LeaderboardEntry{{
+				Rank:        7,
+				DisplayName: run.DisplayName,
+				TotalMs:     run.TotalMs,
+				ReplayID:    run.ReplayID,
+			}},
+		}
+	}
+
+	eng.finishRun(start.Add(1234*time.Millisecond), 1234, RunCompleted)
+
+	first := <-out
+	if first.Type != protocol.S2CLeaderboard {
+		t.Fatalf("first terminal env type = %#x, want S2CLeaderboard", first.Type)
+	}
+	second := <-out
+	if second.Type != protocol.S2CRunComplete {
+		t.Fatalf("second terminal env type = %#x, want S2CRunComplete", second.Type)
+	}
+	rc, ok := second.Data.(protocol.RunCompleteData)
+	if !ok {
+		t.Fatalf("run complete data type = %T, want protocol.RunCompleteData", second.Data)
+	}
+	if rc.Rank != 7 {
+		t.Fatalf("rank = %d, want 7", rc.Rank)
+	}
+}
+
 // enqueueInput marshals an InputPacket into a C2S envelope (Ts within the
 // per-packet validation window) and pushes the JSON bytes onto in.
 func enqueueInput(t *testing.T, in chan []byte, now time.Time, seq uint32) {

@@ -42,9 +42,8 @@ jobs:
           script_stop: true
           # Give docker builds room on slow droplets.
           command_timeout: 15m
-          # Forward repo Actions config into the remote shell so the
-          # docker compose run picks them up via process env. Avoids
-          # writing a .env file to disk on the droplet. Operational
+          # Forward repo Actions config into the remote shell so we
+          # can write the droplet's .env file from them. Operational
           # toggles come from repo Variables (visible in CI logs);
           # credentials come from repo Secrets (masked).
           envs: AUTH_MODE,QUEUE_ENABLED,MAX_CONCURRENT,BEHIND_TLS,WS_ALLOWED_ORIGINS,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,ADMIN_SESSION_SECRET,INTERNAL_SECRET
@@ -85,6 +84,25 @@ jobs:
             RESOLVED_SHA="$(git rev-parse "origin/${REF}" 2>/dev/null || git rev-parse "${REF}")"
             echo "==> Resolved ${REF} → ${RESOLVED_SHA}"
             git reset --hard "${RESOLVED_SHA}"
+
+            # Write .env so docker-compose interpolation matches the local
+            # workflow (cp .env.example .env). Persists across operator-run
+            # `docker compose up`s without re-running this deploy. Mode 600
+            # keeps secrets readable only by the deploy user.
+            echo "==> Writing .env"
+            umask 077
+            cat > .env <<EOF
+            AUTH_MODE=${AUTH_MODE:-}
+            QUEUE_ENABLED=${QUEUE_ENABLED:-}
+            MAX_CONCURRENT=${MAX_CONCURRENT:-}
+            BEHIND_TLS=${BEHIND_TLS:-}
+            WS_ALLOWED_ORIGINS=${WS_ALLOWED_ORIGINS:-}
+            INTERNAL_SECRET=${INTERNAL_SECRET:-}
+            TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+            TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID:-}
+            ADMIN_SESSION_SECRET=${ADMIN_SESSION_SECRET:-}
+            EOF
+            umask 022
 
             # Build + launch. --build forces a rebuild when source has changed.
             echo "==> docker compose up -d --build"

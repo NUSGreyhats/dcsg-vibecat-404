@@ -168,7 +168,7 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
-	// Identity HTTP endpoints, /register, /api/leaderboard, and /api/replay/:id
+	// Identity HTTP endpoints, /api/leaderboard, and /api/replay/:id
 	// all live on the lobby service. The game server still imports
 	// pkg/identity for WS-time Lookup in authCheck above and writes to
 	// game.db via the leaderboard goroutine started below.
@@ -265,6 +265,22 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 	outCh := make(chan protocol.S2CEnvelope, game.OutChBuf)
 
 	engine := game.NewEngine(inCh, outCh, lb.Submit, authCheck)
+	engine.SubmitAndRefresh = lb.SubmitAndRefresh
+	engine.RegisterLeaderboard = func(playerID string) {
+		lb.Register(playerID, outCh)
+		entries := lb.Top(leaderboard.TopBroadcastN)
+		if entries == nil {
+			return
+		}
+		select {
+		case outCh <- protocol.NewS2C(
+			protocol.S2CLeaderboard,
+			0,
+			protocol.LeaderboardData{Entries: entries},
+		):
+		default:
+		}
+	}
 	engine.Live = liveReg
 	engine.Engines = engineReg
 
@@ -281,6 +297,18 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 
 		engine.Run(connCtx)
 
+		// Leaderboard registry is keyed by player_id (the WS-auth
+		// identity), but live-games / spectator routing is keyed by
+		// the public run_id minted in initRun (issue #71 #1). Use each
+		// accordingly so liveReg doesn't end up with a stale player_id
+		// key after this PR's run_id switch.
+		if engine.PlayerID != "" {
+			lb.Unregister(engine.PlayerID)
+		}
+		if rid := engine.RunID(); rid != "" {
+			liveReg.Remove(rid)
+		}
+
 		// Engine has emitted any final messages (notably RUN_COMPLETE on
 		// death). Close outCh so the writer drains the buffer instead of
 		// being killed mid-flush by conn.Close, then wait briefly for it
@@ -291,16 +319,6 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 		case <-time.After(500 * time.Millisecond):
 		}
 		conn.Close(websocket.StatusNormalClosure, "bye")
-
-		// Leaderboard registry is keyed by player_id (the WS-auth
-		// identity), but live-games and spectator routing are keyed
-		// by the public run_id minted in initRun. Use each accordingly.
-		if engine.PlayerID != "" {
-			lb.Unregister(engine.PlayerID)
-		}
-		if rid := engine.RunID(); rid != "" {
-			liveReg.Remove(rid)
-		}
 	}()
 }
 

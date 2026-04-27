@@ -26,6 +26,7 @@ import (
 
 type config struct {
 	serverURL         string
+	liveAPIURL        string
 	players           int
 	spectatorsPerGame int
 	rampDuration      time.Duration
@@ -40,6 +41,7 @@ type config struct {
 func parseFlags() config {
 	cfg := config{}
 	flag.StringVar(&cfg.serverURL, "server", "ws://127.0.0.1:8080", "WebSocket server base URL (no trailing path)")
+	flag.StringVar(&cfg.liveAPIURL, "live-api-url", "", "explicit URL for /api/live (lobby endpoint); when empty, derived from -server. Required when -server points at the game-server directly (which doesn't serve /api/live).")
 	flag.IntVar(&cfg.players, "players", 10, "number of synthetic players")
 	flag.IntVar(&cfg.spectatorsPerGame, "spectators-per-game", 0, "extra /ws/spectate viewers per player (0 disables)")
 	flag.DurationVar(&cfg.rampDuration, "ramp", 5*time.Second, "linear ramp-up window for player connections")

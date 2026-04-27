@@ -44,7 +44,6 @@ All frames are UTF-8 JSON strings. The client does not use binary WebSocket fram
 | 0x05  | `C2S_SWITCH_WEAPON` | `sendSwitchWeapon(slot)`                | `Game.handleInput()` on `1/2/3` keys |
 | 0x06  | `C2S_INTERACT`      | `sendInteract(targetId, claimedType)`   | `Game.handleInput()` when `E` pressed near a pickup; `claimedType` is the rendered pickup's type — see [shop.md BUG-12](../features/shop.md#bug-12-pickup-type-confusion) |
 | 0x07  | `C2S_ENTER_DOOR`    | `sendEnterDoor(doorId)`                 | `Game.handleInput()` when `E` pressed near an unlocked door |
-| 0x08  | `C2S_USE_ITEM`      | `sendUseItem(itemName)`                 | `InventoryMenu.useSelected()` |
 | 0x09  | `C2S_SHOP_PURCHASE` | `sendShopPurchase(itemId)`              | `ShopMenu.purchaseSelected()` |
 
 ### Server → Client packet registry
@@ -101,14 +100,6 @@ graph LR
 - `ts` is `Date.now()` at the moment of envelope construction. Server validates `|ts − time.Now()| ≤ 2 s`. The client does **not** track or reshape `ts`; anyone who wants to exploit [BUG-02 drift tick stretching](../foundations/05-server-runtime.md#bug-02-drift-tick-stretching) has to write a custom client — this is the intended tooling surface.
 - `JSON.stringify(envelope)` preserves camelCase / snake_case on the envelope fields as defined in `packet.ts`. `type`, `seq`, `ts`, `server_ts`, `data` — snake_case matches the Go server's JSON tags.
 - The pre-open buffer (`queued: string[]`) exists because `MainMenu.onStart()` can call `sendAuth()` between `new WebSocket()` and `onopen`. Buffer order is FIFO; flush happens once, synchronously, inside `onopen`.
-
-### Duplicate-key and case-insensitive payloads (BUG-09 — currently disabled)
-
-The stock client uses `JSON.stringify`, which **cannot** emit duplicate JSON keys (last write wins at the JS object level) and always emits field names exactly as they appear in the TS source. Triggering [BUG-09 — JSON Case-Insensitive Field Smuggling](../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling) would therefore require a custom client — e.g. a WebSocket script that hand-builds frame text like `'{"type":8,"seq":1,"ts":0,"data":{"item_name":"HEALTH_POTION","item_name":"timewarp"}}'`.
-
-BUG-09 is currently **disabled** on the server (the `DebugItems` fallback the smuggled payload used to land in has been removed). A crafted duplicate-key frame is still processed by `encoding/json` but resolves to an unknown item name that `ValidateItemName` rejects. See [../bugs.md — currently disabled](../bugs.md#currently-disabled).
-
-The stock client must never grow a "developer mode" that lets users craft arbitrary JSON — that short-circuits the challenge if/when BUG-09 returns. Stick to the typed helpers.
 
 ## Inbound pipeline — S2C
 
@@ -227,7 +218,7 @@ The client is strictly a presentation layer for server-authoritative state. Conc
 
 ## Intentional bugs in this area
 
-None. The net layer is a pass-through. Any bug here (duplicate frame handling, incorrect seq increment, silent drop of a needed packet) invalidates replay or hides server-side exploits, so this file must stay correct. Every intentional bug surfaces on the **other side** of the pipeline — either the server's JSON parser differential (BUG-09) or the server's state mutation (BUG-07, BUG-08, etc.).
+None. The net layer is a pass-through. Any bug here (duplicate frame handling, incorrect seq increment, silent drop of a needed packet) invalidates replay or hides server-side exploits, so this file must stay correct. Every intentional bug surfaces on the **other side** of the pipeline — server-side state mutation (BUG-07, BUG-08, etc.).
 
 ## Cross-references
 
@@ -235,5 +226,5 @@ None. The net layer is a pass-through. Any bug here (duplicate frame handling, i
 - [03-client-state.md](./03-client-state.md) — the `GameState` class that `apply()` mutates + its event contract.
 - [04-scenes.md](./04-scenes.md) — scenes that subscribe to state events.
 - [07-input-controls.md](./07-input-controls.md) — where each C2S helper is called from.
-- [foundations/02-protocol.md](../foundations/02-protocol.md) — authoritative packet registry + sub-structure definitions + BUG-09.
+- [foundations/02-protocol.md](../foundations/02-protocol.md) — authoritative packet registry + sub-structure definitions.
 - [foundations/05-server-runtime.md](../foundations/05-server-runtime.md) — server send ordering.

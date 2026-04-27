@@ -1,9 +1,7 @@
 package game
 
 // ShopOffer is one row in the static shop catalog. Dispatch is by integer
-// ID, *not* string name — this deliberately keeps the shop path off the
-// AllowedItems string-keyed pipeline that historically hosted BUG-09/10.
-// See features/shop.md.
+// ID, not string name. See features/shop.md.
 type ShopOffer struct {
 	ID   uint8
 	Name string

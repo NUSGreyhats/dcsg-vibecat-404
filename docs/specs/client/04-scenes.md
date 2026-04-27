@@ -13,9 +13,8 @@ Append rows here when adding a new scene. Registration order in `client/src/game
 | `Boot`           | `client/src/game/scenes/Boot.ts`                 | Minimal bootstrap; loads a 1×1 fallback pixel so `Preloader` always has at least one texture. | — |
 | `Preloader`      | `client/src/game/scenes/Preloader.ts`            | Loads atlases, images, and all 10 room tilemaps. Shows a progress bar.   | — |
 | `MainMenu`       | `client/src/game/scenes/MainMenu.ts`             | Connects the WebSocket, takes a `player_id` via HTML overlay, drives `C2S_AUTH` + `C2S_START_RUN`. | — |
-| `Game`           | `client/src/game/scenes/Game.ts`                 | Main gameplay: owns entity maps, reconciles S2C snapshots, forwards input. | `GameHUD`, `InventoryMenu` / `ShopMenu` / `PauseMenu` (while paused) |
-| `GameHUD`        | `client/src/game/scenes/GameHUD.ts`              | Overlay: HP bar, timer, room indicator, weapon + ammo text, coin counter. Polls state each frame. Owns the "B" → `ShopMenu` and inventory-key bindings. | `Game` |
-| `InventoryMenu`  | `client/src/game/scenes/InventoryMenu.ts`        | Modal overlay: inventory list, selection, `C2S_USE_ITEM`. Pauses `Game` while open. | `Game` (paused) |
+| `Game`           | `client/src/game/scenes/Game.ts`                 | Main gameplay: owns entity maps, reconciles S2C snapshots, forwards input. | `GameHUD`, `ShopMenu` / `PauseMenu` (while paused) |
+| `GameHUD`        | `client/src/game/scenes/GameHUD.ts`              | Overlay: HP bar, timer, room indicator, weapon + ammo text, coin counter, active stack readout. Polls state each frame. Owns the "B" → `ShopMenu` keybind. | `Game` |
 | `ShopMenu`       | `client/src/game/scenes/ShopMenu.ts`             | Modal overlay launched by "B": static catalog mirror from [features/shop.md](../features/shop.md), Enter sends `C2S_SHOP_PURCHASE { item_id }`. Pauses `Game` while open. | `Game` (paused) |
 | `PauseMenu`      | `client/src/game/scenes/PauseMenu.ts`            | Modal overlay: pause screen / resume / quit. Pauses `Game` while open.   | `Game` (paused) |
 | `WinScreen`      | `client/src/game/scenes/WinScreen.ts`            | Run summary (total time, rank, splits) + live leaderboard + "Play Again". Title and leaderboard section branch on `runOutcome`: `"completed"` shows rank + submission row; `"failed"` shows a "RUN FAILED" banner and hides rank (no leaderboard submission occurred). | — |
@@ -66,8 +65,8 @@ graph TD
     BOOT[Boot] -->|scene.start| PRE[Preloader]
     PRE -->|scene.start on 'complete'| MENU[MainMenu]
     MENU -->|scene.start + scene.launch GameHUD<br/>on runStarted| GAME[Game]
-    GAME -->|scene.launch + scene.pause| INV[InventoryMenu]
-    INV -->|scene.resume + scene.stop| GAME
+    GAME -->|scene.launch + scene.pause| SHOP[ShopMenu]
+    SHOP -->|scene.resume + scene.stop| GAME
     GAME -->|scene.stop GameHUD<br/>scene.start WinScreen<br/>on runComplete| WIN[WinScreen]
     WIN -->|resetSync + scene.start<br/>on 'Play Again'| MENU
 
@@ -79,7 +78,7 @@ graph TD
 
 - `scene.start(key)` stops the current scene, then starts the target. Used for linear flow (Boot→Preloader→MainMenu, MainMenu→Game, Game→WinScreen).
 - `scene.launch(key)` starts the target alongside the current scene. Both `create()` and both `update()`. Used for HUD overlays.
-- `scene.pause(key)` freezes a scene's `update()` loop but keeps its `GameObjects` visible. Combined with `launch` to implement a modal overlay: `Game` is paused while `InventoryMenu` runs on top; `InventoryMenu.close()` calls `scene.resume("Game")`.
+- `scene.pause(key)` freezes a scene's `update()` loop but keeps its `GameObjects` visible. Combined with `launch` to implement a modal overlay: `Game` is paused while `ShopMenu` runs on top; `ShopMenu.close()` calls `scene.resume("Game")`.
 
 ### Transition endpoints
 
@@ -89,8 +88,6 @@ graph TD
 | `Preloader`      | `load.on("complete")`                                  | `scene.start("MainMenu")` (this is in `create()` of `Preloader`; `preload()` hooks `progress` + `loaderror`) |
 | `MainMenu`       | user clicks "Start Run" + WebSocket open               | `sync.sendAuth(playerId)` → on `authOk` → `sync.sendStartRun()` → on `runStarted` → `scene.start("Game") + scene.launch("GameHUD")` |
 | `Game`           | `E` pressed near pickup → `sync.sendInteract`; near door → `sync.sendEnterDoor`. See [07-input-controls.md](./07-input-controls.md). | No scene transition; server drives room via `S2C_ROOM_LOAD` which reuses `Game`. |
-| `Game`           | `I` pressed                                            | `scene.launch("InventoryMenu"); scene.pause();`                                  |
-| `InventoryMenu`  | `Esc` / `I` / `Enter` after use                        | `scene.resume("Game"); scene.stop();`                                            |
 | `Game`           | `B` pressed                                            | `scene.launch("ShopMenu"); scene.pause();`                                       |
 | `ShopMenu`       | `Esc` / `B` / `Enter` after purchase                   | `scene.resume("Game"); scene.stop();`                                            |
 | `Game`           | `runComplete` event from `sync.state`                  | `scene.stop("GameHUD"); scene.start("WinScreen");`                               |
@@ -108,9 +105,9 @@ Phaser's scene manager runs scenes in the order they were added. During gameplay
 | ------------------ | -------------- | ------------ | --------------- | -------------------- |
 | Background         | `Game`         | Yes (or no if paused) | Yes (via `Controls`) | Yes               |
 | HUD overlay        | `GameHUD`      | Yes          | No              | Yes (depth 1000+)    |
-| Modal overlay (opt)| `InventoryMenu`| Yes          | Yes (captures) | Yes (depth 1001+)    |
+| Modal overlay (opt)| `ShopMenu`     | Yes          | Yes (captures) | Yes (depth 1001+)    |
 
-When `InventoryMenu` is launched, `Game` is paused — its `update()` loop stops so the player character doesn't keep moving while the menu is open. `GameHUD` keeps running and updates HP / time / weapon text in real time. `InventoryMenu` owns its own keyboard (`Up/Down/Enter/Esc/I`), attached locally rather than through `Controls` (see [07-input-controls.md](./07-input-controls.md)), so there's no chance of an input double-trigger when returning to `Game`.
+When `ShopMenu` is launched, `Game` is paused — its `update()` loop stops so the player character doesn't keep moving while the menu is open. `GameHUD` keeps running and updates HP / time / weapon text in real time. `ShopMenu` owns its own keyboard (`Up/Down/Enter/Esc/B`), attached locally rather than through `Controls` (see [07-input-controls.md](./07-input-controls.md)), so there's no chance of an input double-trigger when returning to `Game`.
 
 ## `MainMenu` — connection + handoff
 
@@ -205,7 +202,7 @@ Mirror detach in `Game.cleanup()`. Each handler's responsibility:
 1. Advance per-entity smoothing: `player.tick(dt)`, `enemy.tick(dt)`, `bullet.tick(dt)`. Each lerps its sprite toward the server-set `targetX/targetY`. See [05-entities-rendering.md](./05-entities-rendering.md).
 2. Accumulate `inputSendAcc` and every 50 ms send a `C2S_INPUT { dx, dy }`.
 3. On `Controls.shootPressed()`, send a `C2S_SHOOT { aim_angle }`.
-4. On `Controls.weaponSwitchPressed()` / `interactPressed()` / `inventoryPressed()`, fire the matching C2S or scene transition.
+4. On `Controls.weaponSwitchPressed()` / `interactPressed()` / `shopPressed()`, fire the matching C2S or scene transition.
 
 Input mapping details: [07-input-controls.md](./07-input-controls.md).
 
@@ -222,14 +219,6 @@ Input mapping details: [07-input-controls.md](./07-input-controls.md).
 | `weaponText` | `state.player?.weapon_id`, `.ammo` | Looks up display name in `WEAPON_STATS` (see [client/src/game/weapons.ts](../../../client/src/game/weapons.ts) and [features/combat-weapons.md](../features/combat-weapons.md)). |
 
 All HUD GameObjects are `setScrollFactor(0)` + `setDepth(1000+)` so they stay pinned to screen coords above the `Game` scene.
-
-## `InventoryMenu` — modal overlay
-
-- Snapshots `state.player?.inventory` at open time into a local `items` array so a mid-menu `S2C_STATE` doesn't renumber the highlighted row.
-- Owns its own `KeyMap` rather than sharing `Controls` — Inventory keys are scene-local (Up/Down/Enter/Esc/I), and isolating them avoids an unintended re-trigger of `interactPressed` / `inventoryPressed` when returning to `Game`.
-- `useSelected()` calls `sync.sendUseItem(name)` and then `close()`. The server-side effect (HP bump, time shift, whatever) arrives in the next `S2C_STATE` and is reflected by `GameHUD` without any further scene work.
-
-See [features/inventory-items.md](../features/inventory-items.md) for what the server does with `C2S_USE_ITEM` (and how [BUG-09](../foundations/02-protocol.md#bug-09-json-case-insensitive-field-smuggling) and [BUG-10](../features/inventory-items.md#bug-10-rune-vs-byte-item-length-bypass) land).
 
 ## `WinScreen` — end-of-run summary
 
@@ -257,7 +246,7 @@ Why the detach-before-reset dance: `resetSync()` invalidates the old `state` emi
 
 ## Implementation status
 
-All scenes in the [Scene table](#scene-table-source-of-truth) — `Boot`, `Preloader`, `MainMenu`, `Game`, `GameHUD`, `InventoryMenu`, `ShopMenu`, `PauseMenu`, `WinScreen` — are implemented and registered in `client/src/game/main.ts`.
+All scenes in the [Scene table](#scene-table-source-of-truth) — `Boot`, `Preloader`, `MainMenu`, `Game`, `GameHUD`, `ShopMenu`, `PauseMenu`, `WinScreen` — are implemented and registered in `client/src/game/main.ts`.
 
 The spectator client (a slimmed-down variant that would mount `Game` + `GameHUD` only, bound to `/ws/spectate`) is greenfield — see [09-spectator-mode.md](./09-spectator-mode.md).
 

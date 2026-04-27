@@ -206,7 +206,7 @@ Reverse-proxy-level connect-rate limiting is the lobby's concern, not the game s
 
 ### Interaction with intentional bugs
 
-Spectators receive the raw `S2C_STATE` stream, so they **see every intentional-bug artifact as it happens**: kill-log garbage (BUG-11), room-settle shots landing pre-visual-move (BUG-06), time-warp nudges (BUG-09). This is intentional — the show is the point. No bug's exploit path is altered by the presence of spectators, because spectators are a pure sink (no inputs enter the drain phase from them).
+Spectators receive the raw `S2C_STATE` stream, so they **see every intentional-bug artifact as it happens**: kill-log garbage (BUG-11), room-settle shots landing pre-visual-move (BUG-06). This is intentional — the show is the point. No bug's exploit path is altered by the presence of spectators, because spectators are a pure sink (no inputs enter the drain phase from them).
 
 Drop-on-full for spectators also means that a viewer's locally-reconstructed state may briefly diverge from the server's — a lost `S2C_ENTITY_DIED` is not re-sent, but the next `S2C_STATE` (50 ms later) carries the current entity list and resyncs the client. Viewers are not replay-grade; they're good-enough-for-watching.
 

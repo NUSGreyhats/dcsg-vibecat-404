@@ -19,11 +19,12 @@ The browser only sees `client` on port 80 — Caddy reverse-proxies `/api/*`, `/
 ## Quick start (local dev)
 
 ```sh
+cp .env.example .env   # docker-compose auto-loads it; tweak as needed
 docker compose up -d --build
 open http://localhost/
 ```
 
-`docker compose down` to stop. Default config is the safest possible: `AUTH_MODE=identity` (anyone registered can play), `MAX_CONCURRENT=64`, queue + admin disabled.
+`docker compose down` to stop. Default config is the safest possible: `AUTH_MODE=identity` (anyone registered can play), `MAX_CONCURRENT=64`, queue + admin disabled. The `.env` file is gitignored — never commit secrets. The deploy workflow writes the same file onto the droplet from repo Variables + Secrets, so local and prod read the same keys.
 
 ## Deployment modes
 
@@ -69,23 +70,22 @@ Tear down with `docker compose -p <project> down`.
 
 ### 3. Prod cutover — FIFO queue + Telegram admin
 
-Set the env vars below in your shell (or a sourced `.envrc`) before `docker compose up`. The compose file uses `${VAR:-default}` interpolation so anything left unset stays at the dev default.
+Edit `.env` (see [`.env.example`](.env.example)). The compose file uses `${VAR:-default}` interpolation so anything left unset stays at the dev default.
 
 ```sh
-# Game server: gate WS auth on the allowlist.
-export AUTH_MODE=token
-export MAX_CONCURRENT=4
+# .env
+AUTH_MODE=token              # gate WS auth on the allowlist
+MAX_CONCURRENT=4
+QUEUE_ENABLED=true           # turn on the queue + Telegram-OTP admin
+TELEGRAM_BOT_TOKEN=<bot token from @BotFather>
+TELEGRAM_ADMIN_CHAT_ID=<numeric chat id, e.g. -100123456789 for groups>
+ADMIN_SESSION_SECRET=<≥16 random bytes; rotate to invalidate sessions>
+INTERNAL_SECRET=<≥32 random bytes; shared between lobby and game-server>
+WS_ALLOWED_ORIGINS=play.example.com,*.example.com   # browser Origin allowlist
+BEHIND_TLS=1                 # forces Secure admin cookies (see "Production TLS")
+```
 
-# Lobby: turn on the queue + Telegram-OTP admin.
-export QUEUE_ENABLED=true
-export TELEGRAM_BOT_TOKEN='<bot token from @BotFather>'
-export TELEGRAM_ADMIN_CHAT_ID='<numeric chat id, e.g. -100123456789 for groups>'
-export ADMIN_SESSION_SECRET='<≥16 random bytes; rotate to invalidate sessions>'
-
-# Tell the lobby that TLS is terminated upstream so admin cookies are
-# always issued Secure (see "Production TLS" below).
-export BEHIND_TLS=1
-
+```sh
 docker compose up -d --build
 ```
 

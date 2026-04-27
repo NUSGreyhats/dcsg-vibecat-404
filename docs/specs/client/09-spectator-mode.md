@@ -53,13 +53,12 @@ graph TB
 
 | Area                       | Player client                                                      | Spectator client                                                              |
 | -------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| WebSocket URL              | `/ws`                                                              | `/ws/spectate?run_id=<hex>` (from the URL path)                            |
+| WebSocket URL              | `/ws`                                                              | `/ws/spectate?run_id=<uuid>` (from the URL path)                           |
 | First frames received      | `S2C_AUTH_OK` → `S2C_RUN_STARTED`                                   | **Catchup sequence**: `S2C_RUN_STARTED` + most-recent `S2C_ROOM_LOAD` + most-recent `S2C_STATE`, then live stream. See [foundations/02-protocol.md#catchup-snapshot-on-attach](../foundations/02-protocol.md#catchup-snapshot-on-attach). |
 | C2S packets sent           | All 8 C2S types                                                    | **None**. `SpectatorSync` has no `send*` methods. Any accidental outbound frame is a programming error. |
 | `seq` continuity           | Starts at 1, increments per C2S                                    | Not applicable (no C2S). Inbound `seq` is per-spectator from the server's reset. |
 | Controls                   | Full `Controls` facade                                             | No input wiring. `Game`-variant scene ignores keyboard/mouse entirely.         |
 | MainMenu                   | Player ID input, auth, start run                                   | Replaced by a minimal "Connecting to {display_name}…" scene that waits for catchup then transitions. |
-| InventoryMenu              | Accessible via `I`                                                 | **Not mounted.** Inventory changes are implicit via `S2C_STATE.player.inventory` but there's no modal.     |
 | WinScreen                  | Shows rank + "Play Again" → resets                                 | Replaced by `SpectateEnd` — shows the player's final time + rank, with "Back to selector" link.   |
 | Disconnect behavior        | Hard error; surfaces to UI; no reconnect.                          | Same — if spectator WS drops, user is taken to `SpectateEnd` with a "connection lost" message.   |
 | Run-complete behavior      | Transitions to `WinScreen`.                                        | Shows `SpectateEnd`. Server sends final `S2C_RUN_COMPLETE` and closes after the 500 ms `SPECTATOR_CATCHUP_MS` grace window. |
@@ -149,7 +148,7 @@ Structural copy of `Game.ts` with deliberate surgery:
 | `Controls` instance + `update()` input handling        | `update()` entity lerping                                    |
 | `sync.sendInput / sendShoot / sendSwitchWeapon / sendInteract / sendEnterDoor` | `sync.state.on('state')` reconciliation                      |
 | `inputSendAcc` + 50 ms throttle                        | `onServerState` / `onRoomLoad` / `onDoorUnlocked` / `onEntityDied` |
-| `scene.launch("InventoryMenu")` on `I`                 | Full entity/projectile rendering                             |
+| `scene.launch("ShopMenu")` on `B`                      | Full entity/projectile rendering                             |
 | `onRunComplete → WinScreen`                            | `onRunComplete → SpectateEnd`                                |
 
 Scene listens to the **same events** on the same `GameState`. A spectator sees every visual quirk the player sees — [BUG-11 kill-log corruption](../foundations/05-server-runtime.md#bug-11-kill-log-append-race) shows up as identically-garbaged KillLog entries; [BUG-06 settle race](../foundations/05-server-runtime.md#bug-06-concurrent-room-settle-race) shots visibly land pre-move on the next `S2C_STATE`; [BUG-02 drift](../foundations/05-server-runtime.md#bug-02-drift-tick-stretching) makes physics run fast on the viewer's screen too. **This is the point** — spectating is the show of exploits as they happen. See [foundations/05-server-runtime.md#interaction-with-intentional-bugs](../foundations/05-server-runtime.md#interaction-with-intentional-bugs).

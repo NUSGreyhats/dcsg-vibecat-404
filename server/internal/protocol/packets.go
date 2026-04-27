@@ -33,10 +33,6 @@ type EnterDoorPacket struct {
 	DoorID uint32 `json:"door_id"`
 }
 
-type UseItemPacket struct {
-	ItemName string `json:"item_name"`
-}
-
 type ShopPurchasePacket struct {
 	ItemID uint8 `json:"item_id"`
 }
@@ -81,16 +77,15 @@ type RoomData struct {
 }
 
 type PlayerSnapshot struct {
-	X              float32  `json:"x"`
-	Y              float32  `json:"y"`
-	HP             int16    `json:"hp"`
-	WeaponID       uint8    `json:"weapon_id"`
-	Ammo           int      `json:"ammo"`
-	Inventory      []string `json:"inventory"`
-	Coins          int32    `json:"coins"`
-	SpeedStacks    uint8    `json:"speed_stacks"`
-	FireRateStacks uint8    `json:"fire_rate_stacks"`
-	DamageStacks   uint8    `json:"damage_stacks"`
+	X              float32 `json:"x"`
+	Y              float32 `json:"y"`
+	HP             int16   `json:"hp"`
+	WeaponID       uint8   `json:"weapon_id"`
+	Ammo           int     `json:"ammo"`
+	Coins          int32   `json:"coins"`
+	SpeedStacks    uint8   `json:"speed_stacks"`
+	FireRateStacks uint8   `json:"fire_rate_stacks"`
+	DamageStacks   uint8   `json:"damage_stacks"`
 	// AimAngle is the radians angle of the player's most recent
 	// C2S_SHOOT. Spectators render the gun rotation from this; the
 	// player ignores it (their local cursor is more responsive).
