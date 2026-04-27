@@ -58,6 +58,7 @@ func drainErr(out chan protocol.S2CEnvelope) *protocol.ErrorData {
 
 func TestAwaitAuthRejectsSkewedTs(t *testing.T) {
 	eng, in, out := newHandshakeTestEngine()
+	// Client ts in the past → client clock is "behind" the server.
 	skewed := time.Now().Add(-1 * time.Hour).UnixMilli()
 	in <- encodeC2S(t, protocol.C2SAuth, skewed, protocol.AuthPacket{PlayerID: "p"})
 
@@ -73,15 +74,42 @@ func TestAwaitAuthRejectsSkewedTs(t *testing.T) {
 	if errData.Code != "ts_out_of_window" {
 		t.Fatalf("expected code=ts_out_of_window, got %q", errData.Code)
 	}
-	if !strings.Contains(errData.Message, "ms") {
-		t.Fatalf("expected diff in error message, got %q", errData.Message)
+	if !strings.Contains(errData.Message, "behind server") {
+		t.Fatalf("expected 'behind server' direction in message, got %q", errData.Message)
+	}
+}
+
+func TestAwaitAuthMessageDirectionWhenClientAhead(t *testing.T) {
+	// Client ts in the future → "ahead of" server. The message must use
+	// an absolute offset and the correct direction word — not a raw
+	// negative diff like "-3600000 ms".
+	eng, in, out := newHandshakeTestEngine()
+	skewed := time.Now().Add(1 * time.Hour).UnixMilli()
+	in <- encodeC2S(t, protocol.C2SAuth, skewed, protocol.AuthPacket{PlayerID: "p"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if eng.awaitAuth(ctx) {
+		t.Fatal("expected awaitAuth to reject a skewed-ts AUTH and return false")
+	}
+	errData := drainErr(out)
+	if errData == nil || errData.Code != "ts_out_of_window" {
+		t.Fatalf("expected code=ts_out_of_window, got %+v", errData)
+	}
+	if !strings.Contains(errData.Message, "ahead of server") {
+		t.Fatalf("expected 'ahead of server' direction in message, got %q", errData.Message)
+	}
+	if strings.Contains(errData.Message, "-") {
+		t.Fatalf("message must not contain a negative diff; got %q", errData.Message)
 	}
 }
 
 func TestAwaitAuthAcceptsTsZeroForReplay(t *testing.T) {
-	// Replay's feedAuth uses Ts=0; the validator must let it through even
-	// though the engine isn't in ReplayMode yet during this synthetic
-	// handshake (the helper-skip is the Ts==0 short-circuit).
+	// Replay's feedAuth uses Ts=0 (server/internal/replay/player.go:306).
+	// The actual replay driver also sets ReplayMode=true before
+	// feedAuth/feedStartRun, so either short-circuit alone is sufficient
+	// — but this test pins the Ts==0 path independently in case the
+	// ReplayMode ordering changes.
 	eng, in, out := newHandshakeTestEngine()
 	in <- encodeC2S(t, protocol.C2SAuth, 0, protocol.AuthPacket{PlayerID: "p"})
 

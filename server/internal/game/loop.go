@@ -207,9 +207,15 @@ func (e *Engine) validateTsWindow(ts int64, now time.Time) bool {
 	diff := now.UnixMilli() - ts
 	windowMs := int64(TsValidationWindow / time.Millisecond)
 	if diff > windowMs || diff < -windowMs {
+		offsetMs := diff
+		direction := "behind"
+		if diff < 0 {
+			offsetMs = -diff
+			direction = "ahead of"
+		}
 		e.sendError("ts_out_of_window",
-			fmt.Sprintf("client clock differs from server by %d ms (max ±%d ms) — please sync your system clock",
-				diff, windowMs))
+			fmt.Sprintf("client clock is %d ms %s server (max ±%d ms) — please sync your system clock",
+				offsetMs, direction, windowMs))
 		return false
 	}
 	return true

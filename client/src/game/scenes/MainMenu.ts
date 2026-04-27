@@ -211,17 +211,32 @@ export class MainMenu extends Phaser.Scene {
     this.drawSponsorsPanel(panelX, sponsorTop);
 
     // Clock-skew warning. Hidden until we have a server-time sample
-    // (HTTP Date header from /api/login, or any S2C envelope). Sits
-    // directly under the login panel so it's the first thing the user
-    // notices when their clock is off — see issue #46.
+    // (HTTP Date header from /api/login, or any S2C envelope). Anchored
+    // top-center because the bottom-right login + sponsors stack is
+    // already crowded; top-of-screen is otherwise empty splash and
+    // gives the warning room to wrap. See issue #46.
+    const bannerWidth = Math.min(720, w - 80);
     this.clockSkewText = this.add
-      .text(contentX, panelY + 172, "", {
+      .text(w / 2, 24, "", {
         fontFamily: FONT_FAMILY,
-        fontSize: FONT_SIZE_SMALL,
+        fontSize: FONT_SIZE_BODY,
         color: hex(WARNING),
-        wordWrap: { width: MainMenu.INPUT_WIDTH },
+        align: "center",
+        wordWrap: { width: bannerWidth },
+        backgroundColor: hex(DEEP_NAVY),
+        padding: { x: 16, y: 8 },
       })
+      .setOrigin(0.5, 0)
+      .setDepth(DEPTH_SPLASH + 1)
       .setVisible(false);
+    const repositionBanner = () => {
+      this.clockSkewText?.setPosition(this.scale.width / 2, 24);
+      this.clockSkewText?.setWordWrapWidth(
+        Math.min(720, this.scale.width - 80),
+      );
+    };
+    this.scale.on("resize", repositionBanner);
+    this.resizeHandlers.push(repositionBanner);
 
     const sync = getSync();
     sync.state.on("authOk", this.onAuthOk, this);
@@ -245,11 +260,11 @@ export class MainMenu extends Phaser.Scene {
       t.setVisible(false);
       return;
     }
-    const seconds = (offset / 1000).toFixed(1);
+    const seconds = (Math.abs(offset) / 1000).toFixed(1);
     const direction = offset > 0 ? "behind" : "ahead of";
     t.setText(
-      `⚠ Your clock is ~${Math.abs(Number(seconds))}s ${direction} the server. ` +
-        `Sync your system clock (NTP) — otherwise the server will reject your input mid-run.`,
+      `⚠ Your clock is ~${seconds}s ${direction} the server. ` +
+        `Sync your system clock (NTP) — otherwise the server will refuse to start your run.`,
     );
     t.setVisible(true);
   }
