@@ -48,6 +48,11 @@ func Open(path string) (*sql.DB, error) {
         );
         CREATE INDEX IF NOT EXISTS idx_runs_total_ms ON completed_runs(total_ms);
         CREATE INDEX IF NOT EXISTS idx_runs_player   ON completed_runs(player_id);
+        CREATE TABLE IF NOT EXISTS flagged_runs (
+            replay_id  TEXT PRIMARY KEY,
+            flagged_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            reason     TEXT NOT NULL DEFAULT ''
+        );
     `); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("leaderboard: schema: %w", err)
@@ -56,72 +61,106 @@ func Open(path string) (*sql.DB, error) {
 }
 
 // TopRuns returns the fastest n runs ordered by total_ms ascending, with
-// rank filled from the 1-based row position. When dedupe is true, only each
-// player's fastest run is returned.
+// global ranks filled. When dedupe is true, only each player's fastest run
+// is returned.
 func TopRuns(db *sql.DB, n int, dedupe bool) ([]Entry, error) {
-	if n <= 0 {
-		return nil, nil
-	}
-	rows, err := db.Query(
-		`WITH ranked AS (
-             SELECT cr.replay_id, cr.player_id, cr.display_name, cr.total_ms,
-                    cr.seed, cr.splits_json, cr.submitted_at,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY cr.player_id
-                        ORDER BY cr.total_ms ASC, cr.submitted_at ASC
-                    ) AS player_rank
-               FROM completed_runs cr
-          LEFT JOIN flagged_runs fr ON fr.replay_id = cr.replay_id
-              WHERE fr.replay_id IS NULL
-         )
-         SELECT replay_id, display_name, total_ms, seed, splits_json, submitted_at
-           FROM ranked
-          WHERE (? = 0 OR player_rank = 1)
-          ORDER BY total_ms ASC, submitted_at ASC
-          LIMIT ?`,
-		boolInt(dedupe),
-		n,
-	)
+	page, err := PageRuns(db, n, 1, dedupe, "")
 	if err != nil {
-		return nil, fmt.Errorf("leaderboard: query top: %w", err)
+		return nil, err
+	}
+	return page.Entries, nil
+}
+
+// PageRuns returns one globally ranked page. Ranks are computed before
+// LIMIT/OFFSET so page 2 starts at rank limit+1 instead of resetting to 1.
+func PageRuns(db *sql.DB, limit, page int, dedupe bool, currentPlayerID string) (Page, error) {
+	if limit <= 0 {
+		return Page{}, nil
+	}
+	if page <= 0 {
+		page = 1
+	}
+
+	var total int
+	if err := db.QueryRow(leaderboardCountSQL, boolInt(dedupe)).Scan(&total); err != nil {
+		return Page{}, fmt.Errorf("leaderboard: count: %w", err)
+	}
+
+	offset := (page - 1) * limit
+	rows, err := db.Query(leaderboardPageSQL, boolInt(dedupe), limit, offset)
+	if err != nil {
+		return Page{}, fmt.Errorf("leaderboard: query top: %w", err)
 	}
 	defer rows.Close()
 
-	entries := make([]Entry, 0, n)
-	rank := 1
+	entries := make([]Entry, 0, limit)
 	for rows.Next() {
-		var (
-			replayID    string
-			displayName string
-			totalMs     int64
-			seed        int64
-			splitsJSON  string
-			submittedAt string
-		)
-		if err := rows.Scan(&replayID, &displayName, &totalMs, &seed, &splitsJSON, &submittedAt); err != nil {
-			return nil, fmt.Errorf("leaderboard: scan: %w", err)
+		entry, rowPlayerID, err := scanEntry(rows)
+		if err != nil {
+			return Page{}, fmt.Errorf("leaderboard: scan: %w", err)
 		}
-		var splits []Split
-		if splitsJSON != "" {
-			if err := json.Unmarshal([]byte(splitsJSON), &splits); err != nil {
-				return nil, fmt.Errorf("leaderboard: unmarshal splits: %w", err)
-			}
-		}
-		entries = append(entries, Entry{
-			Rank:        rank,
-			DisplayName: displayName,
-			TotalMs:     totalMs,
-			Splits:      splits,
-			Seed:        seed,
-			ReplayID:    replayID,
-			SubmittedAt: submittedAt,
-		})
-		rank++
+		entry.Current = currentPlayerID != "" && rowPlayerID == currentPlayerID
+		entries = append(entries, entry)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("leaderboard: rows: %w", err)
+		return Page{}, fmt.Errorf("leaderboard: rows: %w", err)
 	}
-	return entries, nil
+	return Page{
+		Entries: entries,
+		Page:    page,
+		Limit:   limit,
+		Total:   total,
+		HasPrev: page > 1,
+		HasNext: offset+len(entries) < total,
+	}, nil
+}
+
+// PlayerBestRun returns the authenticated player's fastest visible row
+// under the same dedupe mode as the main leaderboard query.
+func PlayerBestRun(db *sql.DB, playerID string, dedupe bool) (*Entry, error) {
+	if playerID == "" {
+		return nil, ErrNotFound
+	}
+	row := db.QueryRow(leaderboardPlayerSQL, boolInt(dedupe), playerID)
+	entry, _, err := scanEntry(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("leaderboard: player: %w", err)
+	}
+	entry.Current = true
+	return &entry, nil
+}
+
+type entryScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanEntry(scanner entryScanner) (Entry, string, error) {
+	var (
+		entry      Entry
+		playerID   string
+		splitsJSON string
+	)
+	if err := scanner.Scan(
+		&entry.Rank,
+		&entry.ReplayID,
+		&playerID,
+		&entry.DisplayName,
+		&entry.TotalMs,
+		&entry.Seed,
+		&splitsJSON,
+		&entry.SubmittedAt,
+	); err != nil {
+		return Entry{}, "", err
+	}
+	if splitsJSON != "" {
+		if err := json.Unmarshal([]byte(splitsJSON), &entry.Splits); err != nil {
+			return Entry{}, "", fmt.Errorf("leaderboard: unmarshal splits: %w", err)
+		}
+	}
+	return entry, playerID, nil
 }
 
 func boolInt(v bool) int {
@@ -130,6 +169,44 @@ func boolInt(v bool) int {
 	}
 	return 0
 }
+
+const leaderboardBaseSQL = `
+WITH ranked AS (
+     SELECT cr.replay_id, cr.player_id, cr.display_name, cr.total_ms,
+            cr.seed, cr.splits_json, cr.submitted_at,
+            ROW_NUMBER() OVER (
+                PARTITION BY cr.player_id
+                ORDER BY cr.total_ms ASC, cr.submitted_at ASC, cr.replay_id ASC
+            ) AS player_rank
+       FROM completed_runs cr
+  LEFT JOIN flagged_runs fr ON fr.replay_id = cr.replay_id
+      WHERE fr.replay_id IS NULL
+),
+visible AS (
+     SELECT replay_id, player_id, display_name, total_ms, seed,
+            splits_json, submitted_at,
+            ROW_NUMBER() OVER (
+                ORDER BY total_ms ASC, submitted_at ASC, replay_id ASC
+            ) AS rank
+       FROM ranked
+      WHERE (? = 0 OR player_rank = 1)
+)`
+
+const leaderboardCountSQL = leaderboardBaseSQL + `
+SELECT COUNT(*) FROM visible`
+
+const leaderboardPageSQL = leaderboardBaseSQL + `
+SELECT rank, replay_id, player_id, display_name, total_ms, seed, splits_json, submitted_at
+  FROM visible
+ ORDER BY rank ASC
+ LIMIT ? OFFSET ?`
+
+const leaderboardPlayerSQL = leaderboardBaseSQL + `
+SELECT rank, replay_id, player_id, display_name, total_ms, seed, splits_json, submitted_at
+  FROM visible
+ WHERE player_id = ?
+ ORDER BY total_ms ASC, submitted_at ASC, replay_id ASC
+ LIMIT 1`
 
 // Replay holds the fields needed to reconstruct a run client-side.
 type Replay struct {
