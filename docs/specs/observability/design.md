@@ -2,7 +2,7 @@
 
 > Tracks GitHub issue [#75 "Admin panel observability"](https://github.com/NUSGreyhats/DEFCON-Game/issues/75).
 
-**Status:** Phase 1 shipped; Phase 2 (game-droplet exporters) implementation in progress. Phase 3 deferred.
+**Status:** Phases 1, 2, 3 shipped. Phase 4 (alerting) deferred.
 **Date:** 2026-04-27
 **Target event:** DEF CON SG (3-day window)
 
@@ -14,33 +14,31 @@ Out of scope for this spec: alerting (Phase 4, separate future issue) and any pu
 
 ## Architecture
 
-Two droplets. Observability runs on a **separate VM** so a saturated game host doesn't take the dashboard down at the moment mods need it most.
+Three droplets. Observability runs on a **separate VM** so a saturated game host doesn't take the dashboard down at the moment mods need it most. The two game droplets (dev + prod) are scraped by the same OBS instance and distinguished by an `env` label injected at scrape time.
 
 ```
-┌─────────────────────────────────────┐    ┌─────────────────────────────┐
-│   GAME DROPLET (existing)           │    │   OBS DROPLET (new, $4/mo)  │
-│                                     │    │                             │
-│  client (caddy) ──────┐  public :80 │    │  caddy :80,:443 ─► grafana  │
-│   reverse-proxies:    │             │    │   (basic-auth + LE TLS)     │
-│    /ws,/api/...       │             │    │                             │
-│    /admin/...         │             │    │  victoria-metrics :8428     │
-│    /_metrics/lobby ───┼──► lobby    │    │   (single-node, loopback)   │
-│    /_metrics/game ────┼──► server   │    │   ↑ scrape every 15s        │
-│    /_metrics/node ────┼──► node-exp │    │                             │
-│                       │             │    │  node-exp :9100 (loopback)  │
-│                       │             │ ◄──┤                             │
-│  (all backends on     │             │HTTP│                             │
-│   docker net,         │             │ +  │                             │
-│   loopback only)      │             │ src-IP                            │
-└─────────────────────────────────────┘    └─────────────────────────────┘
-                                                  │
-                                                  ▼
-                                           https://obs.<domain>/
-                                           (mods open Grafana here)
+┌────────────────────────────┐
+│  GAME DROPLET — DEV        │ ─┐
+│  (DO_HOST)                 │  │           ┌─────────────────────────────┐
+│  client (caddy) :80        │  │           │   OBS DROPLET ($4/mo)       │
+│  /_metrics/{lobby,game,    │  │           │                             │
+│   node} → loopback         │  │           │  caddy :80,:443 ─► grafana  │
+└────────────────────────────┘  │           │   (basic-auth + LE TLS)     │
+                                │ HTTP      │                             │
+┌────────────────────────────┐  ├──────────►│  victoria-metrics :8428     │
+│  GAME DROPLET — PROD       │  │ +         │   scrape every 15s, every   │
+│  (DO_HOST_PROD)            │  │ src-IP    │   series labelled with      │
+│  client (caddy) :80        │  │ gate      │   env={obs|dev|prod}        │
+│  /_metrics/{lobby,game,    │  │           │                             │
+│   node} → loopback         │ ─┘           │  node-exp :9100 (env=obs)   │
+└────────────────────────────┘              └─────────────────────────────┘
+                                                    │
+                                                    ▼
+                                             https://observability.<domain>/
 
-Source-IP gate for /_metrics/* lives in Caddy on the game droplet
-(no DO Cloud Firewall needed there). DO Cloud Firewall on the OBS
-droplet allowlists :22 to team IPs and exposes :80/:443 to the world.
+Source-IP gate for /_metrics/* lives in Caddy on each game droplet
+(both dev and prod forward OBS_HOST). DO Cloud Firewall on OBS
+allowlists :22 to team IPs and exposes :80/:443 to the world.
 ```
 
 **Tooling choices** (decisions log at the bottom of this doc):
@@ -169,7 +167,7 @@ New repo `Variables` (non-secret, version-controlled-elsewhere) and `Secrets` in
 **Phase 2 additions** (existing secrets reused, no new ones to configure):
 
 - `OBS_HOST` (already present) — game droplet's `deploy.yml` now also forwards this so `client/Caddyfile`'s `remote_ip {$OBS_HOST}` directive can substitute it.
-- `DO_HOST` (already present) — OBS droplet's `deploy-obs.yml` reads it as `GAME_HOST` env var, aliased to `game-droplet` in the VM container's `/etc/hosts` so `scrape.yml` can reference it by hostname.
+- `DO_HOST` and `DO_HOST_PROD` (already present) — OBS droplet's `deploy-obs.yml` reads them as `GAME_HOST_DEV` and `GAME_HOST_PROD`, aliased to `game-droplet-dev` and `game-droplet-prod` in the VM container's `/etc/hosts` so `scrape.yml` can reference them by hostname. Each scrape job has two static targets, one per env, with an `env={dev|prod}` label.
 
 The OBS deploy hardcodes `root` as the SSH user (it doesn't reuse `DO_USER`, which on this repo's existing deploy points to a non-root account that doesn't exist on the OBS droplet). Both DO droplets ship with `root` available by default; OBS uses it directly. `setup-swap.sh` runs as root without needing `sudo`. Also forwards `secrets.GITHUB_TOKEN` (auto-issued, run-scoped) so the droplet can `git clone` a private repo.
 
@@ -215,11 +213,11 @@ From **node-exporter** on each VM:
 - `concurrent_cap` gauge — game-server's current `MAX_CONCURRENT`. (The lobby's admin-tunable queue admission cap is separate; if mods change it from the panel we'll add a `lobby_admission_cap` gauge in the lobby — easy follow-up if useful.)
 - `replay_viewers_active` gauge — game-server
 - `spectator_connections_active` gauge — game-server
+- `room_split_duration_seconds` histogram — per-room time spent, label `{room=<index>}`. Postmortem-friendly; cardinality is bounded (rooms 0..FinalRoom).
+- `weapon_shots_total` counter — accepted shots by weapon name. Shotgun pellets count as one shot, not three.
 
 **Explicitly excluded as YAGNI for this issue:**
-- Per-bug exploit detection (interesting, but its own scope; track separately).
-- Per-room time spent (replay-analysis territory).
-- Per-weapon usage (postmortem fodder, not live ops).
+- Per-bug exploit detection (interesting, but it's an *analysis pipeline*, not a metric — needs replay-log statistical comparison, not a counter. Scope separately.)
 - Distributed tracing (no value at this scale).
 
 ## Phasing

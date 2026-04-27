@@ -3,6 +3,8 @@ package game
 import (
 	"math"
 	"time"
+
+	"github.com/greyhats/defcon-game/server/internal/metrics"
 )
 
 // ApplyHeal mutates p.HP in place. BUG-08: no overflow check — Go wraps
@@ -63,6 +65,7 @@ func HandleShoot(p *PlayerState, r *RoomState, aimAngle float32, now time.Time) 
 	// Charge cooldown + ammo. Fire-rate stacks shorten the per-shot cooldown
 	// linearly: cooldown / (1 + 0.1 * stacks). See features/shop.md.
 	p.WeaponAmmo[wid] = ammo - 1
+	metrics.WeaponShots.WithLabelValues(spec.Name).Inc()
 	cooldown := time.Duration(spec.CooldownMs) * time.Millisecond
 	if p.FireRateStacks > 0 {
 		cooldown = time.Duration(float64(cooldown) / (1 + 0.1*float64(p.FireRateStacks)))

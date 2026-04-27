@@ -23,6 +23,7 @@ import (
 	"github.com/greyhats/defcon-game/server/internal/auth"
 	"github.com/greyhats/defcon-game/server/internal/game"
 	"github.com/greyhats/defcon-game/server/internal/leaderboard"
+	"github.com/greyhats/defcon-game/server/internal/metrics"
 	"github.com/greyhats/defcon-game/server/internal/protocol"
 	"github.com/greyhats/defcon-game/server/internal/replay"
 	"github.com/greyhats/defcon-game/server/internal/spectator"
@@ -71,11 +72,15 @@ func main() {
 	switch mode {
 	case auth.ModeOpen:
 		log.Printf("auth mode: open")
+		metrics.AuthModeInfo.WithLabelValues("open").Set(1)
 	case auth.ModeToken:
 		log.Printf("auth mode: token (allowlist=%s)", allowlistPath)
+		metrics.AuthModeInfo.WithLabelValues("token").Set(1)
 	case auth.ModeIdentity:
 		log.Printf("auth mode: identity (db=%s)", identityDBPath)
+		metrics.AuthModeInfo.WithLabelValues("identity").Set(1)
 	}
+	metrics.ConcurrentCap.Set(float64(maxConcurrent))
 	if !leaderboardEnabled {
 		log.Printf("leaderboard: disabled (LEADERBOARD_ENABLED=false)")
 	} else if len(adminSecret) >= 16 {
@@ -160,6 +165,9 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
+	// /metrics is reachable only through client/Caddyfile's
+	// remote_ip-gated /_metrics/game route on the game droplet.
+	mux.Handle("/metrics", metrics.Handler())
 	// Identity HTTP endpoints (/api/login, /api/register, /api/verify) are
 	// owned by the lobby service in prod. Mount them on the game server
 	// too when DEV_MOUNT_IDENTITY=1 so a single `go run ./cmd/server`
@@ -235,20 +243,26 @@ func lookupDisplayName(identityDB *sql.DB, playerID string) (string, error) {
 func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem chan struct{}, authCheck func(string) (string, error), lb *leaderboard.Service, liveReg *spectator.LiveRegistry, engineReg *spectator.Engines) {
 	select {
 	case sem <- struct{}{}:
+		metrics.SlotInUse.Set(float64(len(sem)))
 	default:
 		http.Error(w, "server full", http.StatusServiceUnavailable)
 		return
 	}
-	releaseSlot := func() { <-sem }
+	releaseSlot := func() {
+		<-sem
+		metrics.SlotInUse.Set(float64(len(sem)))
+	}
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})
 	if err != nil {
 		releaseSlot()
+		metrics.Errors.WithLabelValues("ws_accept").Inc()
 		log.Printf("ws accept: %v", err)
 		return
 	}
+	metrics.WSConnsActive.Inc()
 
 	connCtx, cancel := context.WithCancel(ctx)
 
@@ -294,6 +308,7 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 	go func() {
 		defer cancel()
 		defer releaseSlot()
+		defer metrics.WSConnsActive.Dec()
 
 		engine.Run(connCtx)
 
@@ -446,6 +461,7 @@ func handleSpectateWS(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		caps.ReleaseGlobal()
 		return
 	}
+	metrics.SpectatorConnsActive.Inc()
 
 	// Ownership transfer point. From here on, the writer goroutine owns
 	// the global cap slot release and the engine deregister; the reader
@@ -506,6 +522,7 @@ func handleSpectateWS(ctx context.Context, w http.ResponseWriter, r *http.Reques
 	go func() {
 		defer cancel()
 		defer caps.ReleaseGlobal()
+		defer metrics.SpectatorConnsActive.Dec()
 		defer wsConn.Close(websocket.StatusNormalClosure, "bye")
 		defer bestEffortDeregister()
 		for {
@@ -610,6 +627,7 @@ func handleReplayWS(parent context.Context, w http.ResponseWriter, r *http.Reque
 		log.Printf("replay: accept: %v", err)
 		return
 	}
+	metrics.ReplayViewersActive.Inc()
 
 	connCtx, cancel := context.WithCancel(parent)
 	player := replay.New(rep.PlayerID, rep.DisplayName, rep.Seed, records)
@@ -685,6 +703,7 @@ func handleReplayWS(parent context.Context, w http.ResponseWriter, r *http.Reque
 	go func() {
 		defer cancel()
 		defer caps.ReleaseGlobal()
+		defer metrics.ReplayViewersActive.Dec()
 		defer wsConn.Close(websocket.StatusNormalClosure, "bye")
 		for {
 			select {
