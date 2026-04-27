@@ -10,6 +10,15 @@ The replay reproduces the recorded `InputLog` byte-for-byte. Because the meta-ga
 
 A second consequence: the viewer is a moderation tool, not a feature for players. Its primary use is "I see a suspicious time on the leaderboard — let me watch the run before deciding whether to flag." The UX is tuned for that — fast scrub, clear control surface, restart, integration with the existing admin panel.
 
+## Disabled-leaderboard deployments
+
+When `LEADERBOARD_ENABLED=false` (see [foundations/08-leaderboard-replay.md#deployment-toggle](../foundations/08-leaderboard-replay.md#deployment-toggle)), the replay viewer goes dark alongside the rest of the leaderboard surface:
+
+- The lobby returns `503 leaderboard disabled` from `/admin/replay/:id/meta`, `/admin/replay/:id/ticket`, and `/admin/replay/:id` (the JSON download). The viewer's loading-screen meta fetch currently surfaces the `/meta` failure as a generic `meta 503` error, not the existing "admin disabled" path (which is a separate concern about the Telegram-OTP gate).
+- The game server does not register `/ws/replay` at all, so an upgrade attempt returns `404` rather than `503`. This makes a misconfigured deploy distinguishable from an intentionally disabled one.
+
+There are no recorded runs to play back in this posture — the game server never wrote any — so the viewer page itself is not reachable as a moderation tool. The HTML at `/admin/replay/:id/view` still serves (Caddy doesn't gate it), but its data-layer fetches all 503 immediately.
+
 ## Why a separate client mode
 
 The viewer looks almost exactly like a spectator session — same rooms, same entities, same HUD, same protocol packets — but the differences are load-bearing for the UX and for keeping the player and spectator bundles lean:

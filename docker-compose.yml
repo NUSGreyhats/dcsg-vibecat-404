@@ -22,6 +22,10 @@ services:
       # disables /ws/replay (returns 503 — same posture as lobby's
       # /admin/* with admin auth unconfigured).
       ADMIN_SESSION_SECRET: "${ADMIN_SESSION_SECRET:-}"
+      # Set to false to ship without the leaderboard. Game server skips
+      # the submit goroutine and /ws/replay; lobby 503s its leaderboard
+      # surfaces. See .env.example for full effect.
+      LEADERBOARD_ENABLED: "${LEADERBOARD_ENABLED:-true}"
     volumes:
       - game-data:/data
     # Bind to loopback only: all browser traffic goes through the Caddy
@@ -59,6 +63,13 @@ services:
       QUEUE_ENABLED: "${QUEUE_ENABLED:-false}"
       LOBBY_DB: "/data/lobby.db"
       ALLOWLIST_PATH: "/data/allowlist.json"
+      # Mirror of the game-server flag. When false the lobby 503s its
+      # public + admin leaderboard/replay endpoints and /api/config
+      # advertises the disabled state to the client.
+      LEADERBOARD_ENABLED: "${LEADERBOARD_ENABLED:-true}"
+      # Surfaced via /api/config; rendered by the win screen when
+      # leaderboard is disabled. Empty → server default.
+      LEADERBOARD_DISABLED_MESSAGE: "${LEADERBOARD_DISABLED_MESSAGE:-}"
       # Stripped source baked into the lobby image as a single tarball
       # by the strip stage in lobby/Dockerfile. /source serves an HTML
       # download page; /source.tar.gz streams the file. Override only
