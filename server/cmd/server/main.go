@@ -19,11 +19,11 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/greyhats/defcon-game/pkg/identity"
+	"github.com/greyhats/defcon-game/pkg/replayauth"
 	"github.com/greyhats/defcon-game/server/internal/auth"
 	"github.com/greyhats/defcon-game/server/internal/game"
 	"github.com/greyhats/defcon-game/server/internal/leaderboard"
 	"github.com/greyhats/defcon-game/server/internal/protocol"
-	"github.com/greyhats/defcon-game/pkg/replayauth"
 	"github.com/greyhats/defcon-game/server/internal/replay"
 	"github.com/greyhats/defcon-game/server/internal/spectator"
 )
@@ -226,6 +226,22 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 	outCh := make(chan protocol.S2CEnvelope, game.OutChBuf)
 
 	engine := game.NewEngine(inCh, outCh, lb.Submit, authCheck)
+	engine.SubmitAndRefresh = lb.SubmitAndRefresh
+	engine.RegisterLeaderboard = func(playerID string) {
+		lb.Register(playerID, outCh)
+		entries := lb.Top(leaderboard.TopBroadcastN)
+		if entries == nil {
+			return
+		}
+		select {
+		case outCh <- protocol.NewS2C(
+			protocol.S2CLeaderboard,
+			0,
+			protocol.LeaderboardData{Entries: entries},
+		):
+		default:
+		}
+	}
 	engine.Live = liveReg
 	engine.Engines = engineReg
 
@@ -242,6 +258,11 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 
 		engine.Run(connCtx)
 
+		if engine.PlayerID != "" {
+			lb.Unregister(engine.PlayerID)
+			liveReg.Remove(engine.PlayerID)
+		}
+
 		// Engine has emitted any final messages (notably RUN_COMPLETE on
 		// death). Close outCh so the writer drains the buffer instead of
 		// being killed mid-flush by conn.Close, then wait briefly for it
@@ -253,10 +274,6 @@ func handleWS(ctx context.Context, w http.ResponseWriter, r *http.Request, sem c
 		}
 		conn.Close(websocket.StatusNormalClosure, "bye")
 
-		if engine.PlayerID != "" {
-			lb.Unregister(engine.PlayerID)
-			liveReg.Remove(engine.PlayerID)
-		}
 	}()
 }
 

@@ -34,6 +34,13 @@ type Engine struct {
 	InCh   <-chan []byte
 	OutCh  chan<- protocol.S2CEnvelope
 	Submit func(*leaderboard.CompletedRun) bool
+	// SubmitAndRefresh is the live completion path: it persists a completed
+	// run and returns the refreshed top list before the terminal packet is
+	// sent, so the player's end screen has leaderboard data.
+	SubmitAndRefresh func(*leaderboard.CompletedRun) leaderboard.SubmitResult
+	// RegisterLeaderboard hooks the authenticated player's websocket into
+	// leaderboard broadcasts. The server owns the actual registry.
+	RegisterLeaderboard func(playerID string)
 	// AuthCheck gates the WS auth handshake. It returns the player's
 	// display name (empty to fall back to the raw player_id) and an
 	// error to reject the connection.
@@ -283,6 +290,9 @@ func (e *Engine) awaitAuth(ctx context.Context) bool {
 			// window would hang waiting for catchup that can't be sent
 			// and would consume per-game cap until the run started.
 			e.send(protocol.S2CAuthOk, protocol.AuthOkData{DisplayName: e.DisplayName})
+			if e.RegisterLeaderboard != nil && !e.ReplayMode {
+				e.RegisterLeaderboard(e.PlayerID)
+			}
 			return true
 		}
 	}
@@ -881,6 +891,7 @@ func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {
 	// skip submission — no CompletedRun, no DB row, no replay verification.
 	// Replay mode also skips submission: a replayed run must never
 	// re-insert itself into completed_runs.
+	rank := 0
 	if status == RunCompleted && !e.ReplayMode {
 		inputLog, _ := json.Marshal(e.run.InputLog)
 		replayID := uuid.NewString()
@@ -896,7 +907,17 @@ func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {
 			Checksum:    checksum,
 			SubmittedAt: now,
 		}
-		if e.Submit != nil {
+		if e.SubmitAndRefresh != nil {
+			result := e.SubmitAndRefresh(cr)
+			if result.Err != nil {
+				log.Printf("leaderboard: submit run %s: %v", replayID, result.Err)
+			} else {
+				rank = result.Rank
+				e.send(protocol.S2CLeaderboard, protocol.LeaderboardData{
+					Entries: result.Entries,
+				})
+			}
+		} else if e.Submit != nil {
 			if !e.Submit(cr) {
 				log.Printf("completedCh full, dropping run %s", replayID)
 			}
@@ -906,7 +927,7 @@ func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {
 	e.send(protocol.S2CRunComplete, protocol.RunCompleteData{
 		Outcome: status.Outcome(),
 		TotalMs: totalMs,
-		Rank:    0,
+		Rank:    rank,
 		Splits:  e.run.Splits,
 	})
 	// Spectators have just received the RUN_COMPLETE via fan-out; schedule
