@@ -75,6 +75,18 @@ func main() {
 	telegramChatID := os.Getenv("TELEGRAM_ADMIN_CHAT_ID")
 	adminSessionSecret := []byte(os.Getenv("ADMIN_SESSION_SECRET"))
 	queueEnabled := strings.EqualFold(os.Getenv("QUEUE_ENABLED"), "true")
+	// LEADERBOARD_ENABLED gates the entire leaderboard surface — public
+	// /leaderboard + /api/leaderboard, every admin replay/leaderboard/
+	// winners route, and gameDB itself. Default true preserves existing
+	// behavior; when false the lobby never opens game.db and 503s the
+	// gated routes. Spec: docs/specs/foundations/08-leaderboard-replay.md.
+	leaderboardEnabled := !strings.EqualFold(os.Getenv("LEADERBOARD_ENABLED"), "false")
+	// LEADERBOARD_DISABLED_MESSAGE is surfaced by /api/config and
+	// rendered on the win screen in place of the leaderboard pane when
+	// leaderboardEnabled is false. Empty falls back to the booth CTA
+	// default below. Ignored when leaderboard is enabled.
+	leaderboardDisabledMessage := envDefault("LEADERBOARD_DISABLED_MESSAGE",
+		"Please visit our booth to record an official attempt")
 
 	identityDB, err := identity.OpenDB(identityDBPath)
 	if err != nil {
@@ -82,15 +94,23 @@ func main() {
 	}
 	defer identityDB.Close()
 
-	gameDB, err := leaderboard.Open(gameDBPath)
-	if err != nil {
-		log.Fatalf("open game db: %v", err)
-	}
-	defer gameDB.Close()
+	// gameDB is only opened when the leaderboard is enabled. With
+	// LEADERBOARD_ENABLED=false the lobby never reads completed_runs,
+	// so opening + EnsureSchema would just create an empty table on
+	// fresh deploys for no reason.
+	var gameDB *sql.DB
+	if leaderboardEnabled {
+		var err error
+		gameDB, err = leaderboard.Open(gameDBPath)
+		if err != nil {
+			log.Fatalf("open game db: %v", err)
+		}
+		defer gameDB.Close()
 
-	// Ensure admin-owned schema exists (flagged_runs). Idempotent.
-	if err := admin.EnsureSchema(gameDB); err != nil {
-		log.Fatalf("admin schema: %v", err)
+		// Ensure admin-owned schema exists (flagged_runs). Idempotent.
+		if err := admin.EnsureSchema(gameDB); err != nil {
+			log.Fatalf("admin schema: %v", err)
+		}
 	}
 
 	// lobby.db is opened unconditionally — both the queue (when
@@ -167,12 +187,20 @@ func main() {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if !leaderboardEnabled {
+			http.Error(w, "leaderboard disabled", http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(web.LeaderboardHTML)
 	})
 	mux.HandleFunc("/api/leaderboard", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !leaderboardEnabled {
+			http.Error(w, "leaderboard disabled", http.StatusServiceUnavailable)
 			return
 		}
 		limit := 10
@@ -292,6 +320,16 @@ func main() {
 		// /admin/login, /admin/verify, /admin/logout are intercepted
 		// by the more-specific HandleFunc registrations above, so
 		// they never reach this gated branch.
+		// When LEADERBOARD_ENABLED=false, every admin route that reads
+		// or writes completed_runs / flagged_runs is gated 503 here so
+		// the case bodies below don't fire with a nil gameDB. Admin
+		// auth itself stays orthogonal — the panel index, queue,
+		// settings, and source still work; only the leaderboard /
+		// replay / winners surfaces go dark.
+		if !leaderboardEnabled && isLeaderboardAdminPath(r.Method, r.URL.Path) {
+			http.Error(w, "leaderboard disabled", http.StatusServiceUnavailable)
+			return
+		}
 		switch {
 		case r.Method == http.MethodGet && (r.URL.Path == "/admin/" || r.URL.Path == "/admin"):
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -386,6 +424,26 @@ func main() {
 		w.Header().Set("Content-Disposition", `attachment; filename="source.tar.gz"`)
 		http.ServeFile(w, r, sourceTarball)
 	})
+	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Public client-facing feature flags. Read once on boot by the
+		// game client (see client/src/net/config.ts) so the win screen
+		// knows whether to render the leaderboard pane or the booth
+		// CTA. queue_enabled is exposed for symmetry with future client
+		// gating; it is already authoritative on the server.
+		payload := map[string]any{
+			"leaderboard_enabled": leaderboardEnabled,
+			"queue_enabled":       queueEnabled,
+		}
+		if !leaderboardEnabled {
+			payload["leaderboard_disabled_message"] = leaderboardDisabledMessage
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(payload)
+	})
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -405,7 +463,11 @@ func main() {
 		if queueEnabled {
 			queueState = "on (db=" + lobbyDBPath + " allowlist=" + allowlistPath + ")"
 		}
-		log.Printf("lobby: listening on %s (identity_db=%s game_db=%s game_server=%s source_tarball=%s admin=%s queue=%s)", addr, identityDBPath, gameDBPath, gameServerURL, sourceTarball, adminEnabled, queueState)
+		leaderboardState := "off"
+		if leaderboardEnabled {
+			leaderboardState = "on (db=" + gameDBPath + ")"
+		}
+		log.Printf("lobby: listening on %s (identity_db=%s game_db=%s game_server=%s source_tarball=%s admin=%s queue=%s leaderboard=%s)", addr, identityDBPath, gameDBPath, gameServerURL, sourceTarball, adminEnabled, queueState, leaderboardState)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen: %v", err)
 		}
@@ -423,6 +485,26 @@ func envDefault(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// isLeaderboardAdminPath reports whether (method, path) targets an
+// /admin/* surface that depends on game.db (completed_runs /
+// flagged_runs). Used to 503 those routes when LEADERBOARD_ENABLED=false
+// without disturbing /admin/queue, /admin/settings, etc.
+func isLeaderboardAdminPath(method, path string) bool {
+	switch {
+	case method == http.MethodGet && path == "/admin/leaderboard.json":
+		return true
+	case method == http.MethodPost && (path == "/admin/leaderboard/flag" || path == "/admin/leaderboard/unflag"):
+		return true
+	case method == http.MethodDelete && strings.HasPrefix(path, "/admin/leaderboard/"):
+		return true
+	case strings.HasPrefix(path, "/admin/replay/"):
+		return true
+	case method == http.MethodGet && path == "/admin/winners.csv":
+		return true
+	}
+	return false
 }
 
 // adminFlagHandler is the shared body for POST /admin/leaderboard/{flag,unflag}.

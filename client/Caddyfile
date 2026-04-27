@@ -21,7 +21,7 @@
     # (Phase 4) so only moderators can pull input logs. The
     # /spectate/:player_id viewer page lands in Phase 3b alongside the
     # spectator client bundle.
-    @lobby_api path /api/register /api/login /api/verify /api/health /api/leaderboard /api/live /api/queue/*
+    @lobby_api path /api/register /api/login /api/verify /api/health /api/config /api/leaderboard /api/live /api/queue/*
     handle @lobby_api {
         reverse_proxy lobby:3001
     }
