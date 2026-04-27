@@ -148,6 +148,64 @@ One public webapp for players (queue, leaderboard, source browser) — no separa
 - Docker image built via multi-stage: build stage runs `go build` + Vite build; runtime stage ships only the compiled binary and the Phaser bundle.
 - Deployment topology: see [01-architecture.md](./01-architecture.md#deployment-topology-production).
 
+## OBS observability droplet
+
+Separate $4/mo DigitalOcean Basic droplet (512 MB / 10 GB / 1 vCPU) running the observability stack — see [`../observability/design.md`](../observability/design.md) for the full design.
+
+### Provisioning (one-time)
+
+1. **Create the droplet.** DO control panel → Droplets → Create. Distribution: Ubuntu 24.04 LTS. Plan: Basic, $4/mo (1 vCPU / 512 MB / 10 GB SSD). Region: same as the game droplet to minimise scrape latency. Authentication: SSH key — use the **same key already authorized for the game droplet**, since the OBS deploy reuses `DO_SSH_KEY` (rather than introducing a separate `OBS_SSH_KEY`).
+2. **SSH user posture.** The deploy workflow reuses `DO_USER`, so the same admin user must exist on the OBS droplet. `setup-swap.sh` runs via `sudo` during deploy — that means `DO_USER` must have **passwordless sudo** (or BE root, which is the default on a fresh DO droplet). If you log in as a non-root `DO_USER`, run `echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/$USER && sudo chmod 440 /etc/sudoers.d/$USER` once during provisioning.
+3. **DNS.** Point an A-record for `observability.nusgreyhats.org` at the droplet's public IPv4. Caddy obtains a Let's Encrypt cert on first start; it needs the DNS to resolve before the deploy workflow runs.
+4. **DigitalOcean Cloud Firewall** (new firewall, attached to the OBS droplet only):
+    - Inbound `22/tcp` allowlisted to the team's IPs.
+    - Inbound `80/tcp` and `443/tcp` from world (Caddy + LE).
+    - Everything else denied.
+5. **Install Docker + compose v2** on the droplet (one-time):
+    ```bash
+    curl -fsSL https://get.docker.com | sh
+    ```
+6. **Configure GitHub Secrets/Variables.** New entries needed: `OBS_HOST` (the OBS droplet's public IP), `OBS_BASIC_AUTH_HASH` (bcrypt output of `caddy hash-password --plaintext '<your-password>'`), and the variable `OBS_DOMAIN`. The deploy reuses the existing `DO_USER` and `DO_SSH_KEY` secrets — no `OBS_USER` / `OBS_SSH_KEY` needed.
+
+### Deploying
+
+Manual trigger: GitHub → Actions → `Deploy OBS to DigitalOcean` → Run workflow → pick branch.
+
+The workflow:
+1. SSHes into the OBS droplet using `OBS_HOST` + the reused `DO_USER` / `DO_SSH_KEY` secrets.
+2. Clones / fast-forwards the repo to `$HOME/defcon-game`.
+3. Runs `obs/setup-swap.sh` via `sudo` (idempotent — re-running is a no-op; needs passwordless sudo).
+4. Writes `obs/.env` from forwarded Variables and Secrets, mode 600. The bcrypt hash is single-quoted in the heredoc so docker-compose's env_file parser passes the `$` characters through literally.
+5. `docker compose -f obs/docker-compose.yml up -d --build --remove-orphans`.
+6. Smoke-checks Caddy (`:80`) and runs a VictoriaMetrics health check from inside the Grafana container (which has working network connectivity to `victoria-metrics:8428`).
+
+### Verifying after deploy
+
+- Open `https://OBS_DOMAIN/` — basic-auth prompt → enter the credential you configured. You should land in Grafana.
+- Dashboards → "Node Exporter Full" — CPU/memory/disk should populate within ~30 s of scrape.
+- If Grafana shows "No data", `ssh` into the OBS droplet and:
+    ```bash
+    docker compose -f ~/defcon-game/obs/docker-compose.yml logs victoria-metrics --tail 50
+    docker compose -f ~/defcon-game/obs/docker-compose.yml logs node-exporter --tail 50
+    ```
+    Most common failure: missing bind mount on node-exporter → it sees only the container's `/proc` / `/sys`. Verify `obs/docker-compose.yml` matches the spec in this PR.
+
+### Live-resize escape hatch
+
+If the OBS VM OOMs during the event (Grafana panels fail to load, container repeatedly restarts), DO supports live resize without a rebuild:
+
+1. DO console → the OBS droplet → Resize → "CPU and RAM only" (preserves disk).
+2. Pick the next tier up (1 GB RAM / 25 GB SSD, ~$6/mo). Resize is non-destructive on this option.
+3. After resize: SSH in, `docker compose -f ~/defcon-game/obs/docker-compose.yml restart` to pick up the new memory limits.
+
+The 7-day retention plus VictoriaMetrics's lower memory profile means this should be a rare emergency button — not a planned step.
+
+### Tearing down (e.g. post-event)
+
+To stop running while preserving data: `docker compose -f obs/docker-compose.yml down`. Volumes persist.
+
+To wipe everything: `docker compose -f obs/docker-compose.yml down -v`. Then destroy the droplet from the DO console.
+
 ## Implementation status
 
 Greenfield. Current repo has no CI/CD. Minimum first step before merging this spec into code: a GitHub Actions workflow that runs `go vet`, `go test`, and `tsc --noEmit`.

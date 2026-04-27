@@ -1,0 +1,25 @@
+# Grafana dashboard provisioner. Loads any *.json file in the same
+# directory as a dashboard, on Grafana boot and on file change.
+#
+# Add new dashboards by dropping JSON files alongside this one. They'll
+# show up under General/<file>.json in Grafana's dashboard browser.
+#
+# allowUiUpdates: true means edits saved through the UI persist in
+# Grafana's SQLite. The JSON files in this directory are seed values —
+# once Grafana saves an edit, the in-DB version diverges from the file.
+# Source of truth becomes Grafana's volume, not git. Wiping the
+# grafana-data volume (e.g. `docker compose down -v`) loses UI edits.
+
+apiVersion: 1
+
+providers:
+  - name: file-provisioned
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false
