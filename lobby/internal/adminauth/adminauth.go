@@ -375,11 +375,11 @@ func (s *Service) sendTelegram(ctx context.Context, text string) error {
 // in which case we 401 so a stale fetch doesn't get HTML back.
 //
 // Mutating requests (anything but GET / HEAD) additionally require the
-// Origin header's host to match the request Host. SameSite=Lax (the
-// spec'd posture in foundations/04-lobby.md) already blocks the cookie
-// on cross-site form POSTs, but Origin-checking is the explicit second
-// layer that closes the issue 71 #9 CSRF gap on /admin/leaderboard/
-// {flag,unflag}, /admin/replay/:id/ticket, and the admin DELETE routes.
+// Origin header's host to match the request Host. Combined with
+// SameSite=Strict on admin_session — set in HandleVerify — this makes
+// CSRF on /admin/leaderboard/{flag,unflag}, /admin/replay/:id/ticket,
+// and the admin DELETE routes infeasible without the user being
+// already-logged-in AND a same-origin attacker. Issue #71 #9.
 func (s *Service) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.Enabled() {
@@ -556,7 +556,16 @@ func (s *Service) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   int(SessionTTL.Seconds()),
 		HttpOnly: true,
 		Secure:   s.secureCookie(r),
-		SameSite: http.SameSiteLaxMode,
+		// Strict so admin_session is never sent on cross-site
+		// navigations — the only realistic UX cost is that an admin
+		// clicking a /admin/replay/... link from an external chat
+		// hits /admin/login first (with their cookie still valid; one
+		// extra hop). The security gain — defense-in-depth against
+		// any future GET-with-side-effect admin endpoint and against
+		// browsers that loosen Lax — outweighs that. The Origin check
+		// in Wrap covers POST/DELETE either way; Strict closes the
+		// remaining GET vector. Issue #71 #9.
+		SameSite: http.SameSiteStrictMode,
 	})
 	// Clear admin_login — it's been consumed.
 	http.SetCookie(w, &http.Cookie{
@@ -580,7 +589,9 @@ func (s *Service) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   s.secureCookie(r),
-		SameSite: http.SameSiteLaxMode,
+		// Match the Strict attribute used at issuance — Chrome / Safari
+		// refuse to clear a Strict cookie via a Lax Set-Cookie.
+		SameSite: http.SameSiteStrictMode,
 	})
 	if strings.Contains(r.Header.Get("Accept"), "text/html") {
 		http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
