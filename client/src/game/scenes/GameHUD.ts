@@ -114,10 +114,6 @@ export class GameHUD extends Phaser.Scene {
   private holdLabel?: Phaser.GameObjects.Text;
   private holdBarBg?: Phaser.GameObjects.Rectangle;
   private holdBarFill?: Phaser.GameObjects.Rectangle;
-  // Persistent leaderboard pop-out link. Lives under the timer in the
-  // top-left HUD stack.
-  private leaderboardLink?: Phaser.GameObjects.Text;
-
   constructor() {
     super({ key: "GameHUD" });
   }
@@ -224,7 +220,6 @@ export class GameHUD extends Phaser.Scene {
     state.on("runComplete", this.onRunComplete, this);
 
     this.buildHoldRestartWidget();
-    this.buildLeaderboardLink();
 
     const kb = this.input.keyboard;
     if (kb) {
@@ -573,39 +568,6 @@ export class GameHUD extends Phaser.Scene {
       .setVisible(false);
   }
 
-  /**
-   * Persistent leaderboard pop-out link, anchored under the timer in the
-   * top-left HUD stack.
-   */
-  private buildLeaderboardLink(): void {
-    const timerW = this.timeText?.displayWidth ?? 0;
-    const timerPanelW = this.timePanel?.displayWidth ?? 0;
-    const x = GUTTER_MEDIUM + Math.max(timerW, timerPanelW) + 14;
-    const link = this.add
-      .text(
-        x,
-        10,
-        "Leaderboard ↗",
-        {
-          fontFamily: FONT_FAMILY,
-          fontSize: FONT_SIZE_CAPTION,
-          color: hex(ACCENT_PRIMARY),
-          stroke: hex(TEXT_STROKE),
-          strokeThickness: 2,
-        },
-      )
-      .setOrigin(0, 0)
-      .setScrollFactor(0)
-      .setDepth(DEPTH_HUD_FILL)
-      .setInteractive({ useHandCursor: true });
-    link.on("pointerover", () => link.setColor(hex(TEXT_PRIMARY)));
-    link.on("pointerout", () => link.setColor(hex(ACCENT_PRIMARY)));
-    link.on("pointerdown", () => {
-      window.open("/leaderboard", "_blank", "noopener,noreferrer");
-    });
-    this.leaderboardLink = link;
-  }
-
   private onSpaceDown(): void {
     if (this.holdRestartFired) return;
     if (this.holdStartedAt !== undefined) return;
@@ -768,9 +730,6 @@ export class GameHUD extends Phaser.Scene {
     this.holdLabel = undefined;
     this.holdBarBg = undefined;
     this.holdBarFill = undefined;
-    this.leaderboardLink?.destroy();
-    this.leaderboardLink = undefined;
-
     this.timeText?.destroy();
     this.timePanel?.destroy();
     this.roomText?.destroy();

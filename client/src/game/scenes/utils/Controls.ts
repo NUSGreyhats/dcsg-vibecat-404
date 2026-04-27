@@ -6,7 +6,7 @@ export const CONTROL_BINDINGS: ReadonlyArray<readonly [string, string]> = [
   ["Move", "W A S D / Arrows"],
   ["Aim", "Mouse"],
   ["Shoot", "Left mouse button"],
-  ["Switch", "1 / 2 / 3"],
+  ["Weapons", "1 / 2 / 3"],
   ["Shop", "B"],
   ["Menu", "Esc"],
 ];

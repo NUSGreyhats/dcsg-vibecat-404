@@ -230,15 +230,18 @@ export class MainMenu extends Phaser.Scene {
       true,
     );
 
-    this.statusDot = this.add.circle(w - 132, h - 18, 4, TEXT_MUTED);
+    const statusMargin = Math.min(MainMenu.PANEL_MARGIN, Math.max(16, w * 0.05));
+    const statusWidth = Math.max(140, Math.min(360, w - statusMargin * 2));
+    this.statusDot = this.add.circle(w - statusMargin - 12, h - 18, 4, TEXT_MUTED);
     this.statusText = this.add
-      .text(w - 120, h - 18, "Idle", {
+      .text(w - statusMargin, h - 18, "Idle", {
         fontFamily: FONT_FAMILY,
         fontSize: FONT_SIZE_SMALL,
         color: hex(TEXT_MUTED),
-        wordWrap: { width: inputWidth - 34 },
+        align: "right",
+        wordWrap: { width: statusWidth },
       })
-      .setOrigin(0, 0.5);
+      .setOrigin(1, 0.5);
 
     this.loginTexts.push(
       ...this.makePanelActionRow(contentX, panelY + 140, inputWidth, [
@@ -649,6 +652,9 @@ export class MainMenu extends Phaser.Scene {
     this.statusDot?.setFillStyle(displayColor);
     this.statusText?.setText(message);
     this.statusText?.setColor(hex(displayColor));
+    if (this.statusDot && this.statusText) {
+      this.statusDot.setX(this.statusText.x - this.statusText.displayWidth - 12);
+    }
   }
 
   private darkenStatusColor(color: number): number {
