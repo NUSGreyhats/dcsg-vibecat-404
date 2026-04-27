@@ -10,11 +10,11 @@ Server-authoritative leaderboard + tamper-proof replay verification. Every compl
 set to `false`:
 
 - **Game server** does not open `game.db`, does not start the
-  leaderboard goroutine, and passes a `nil` Submit callback into the
-  engine. The engine already guards `if e.Submit != nil` before
-  building a `CompletedRun`, so completed runs simply produce no
-  database row and no `S2C_LEADERBOARD` broadcast. The `/ws/replay`
-  route is not registered (404 on upgrade rather than 503).
+  leaderboard goroutine, and passes `nil` submit callbacks into the
+  engine. Completed runs therefore produce no database row and no
+  `S2C_LEADERBOARD` broadcast when the leaderboard is disabled. The
+  `/ws/replay` route is not registered (404 on upgrade rather than
+  503).
 - **Lobby** does not open `game.db`, does not run admin schema
   bootstrap, and returns `503 leaderboard disabled` on every public
   and admin route that reads `completed_runs` / `flagged_runs`. See
