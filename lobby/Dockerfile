@@ -21,6 +21,7 @@ RUN cd lobby && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/lobby ./cmd/
 FROM golang:1.25-alpine AS strip
 WORKDIR /repo
 ENV GOWORK=off
+COPY pkg ./pkg
 COPY server ./server
 COPY client ./client
 COPY tools ./tools
