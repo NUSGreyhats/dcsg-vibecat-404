@@ -20,12 +20,11 @@ jobs:
         env:
           OBS_DOMAIN: ${{ vars.OBS_DOMAIN }}
           OBS_BASIC_AUTH_HASH: ${{ secrets.OBS_BASIC_AUTH_HASH }}
-          # Reuse the game-droplet IP secrets as scrape targets. DO_HOST is
-          # dev; DO_HOST_PROD is prod. obs/docker-compose.yml maps these to
-          # game-droplet-dev / game-droplet-prod hostnames inside the VM
-          # container so scrape.yml can reference them by name.
+          # Dev game droplet IP. Aliased as game-droplet-dev inside the VM
+          # container (see obs/docker-compose.yml) so scrape.yml can reach
+          # it by name over plain HTTP. Prod is NOT aliased — it's scraped
+          # via its public domain over HTTPS instead (see scrape.yml).
           GAME_HOST_DEV: ${{ secrets.DO_HOST }}
-          GAME_HOST_PROD: ${{ secrets.DO_HOST_PROD }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.OBS_HOST }}
@@ -34,7 +33,7 @@ jobs:
           key: ${{ secrets.OBS_SSH_KEY }}
           script_stop: true
           command_timeout: 15m
-          envs: OBS_DOMAIN,OBS_BASIC_AUTH_HASH,GAME_HOST_DEV,GAME_HOST_PROD,GITHUB_TOKEN
+          envs: OBS_DOMAIN,OBS_BASIC_AUTH_HASH,GAME_HOST_DEV,GITHUB_TOKEN
           script: |
             set -euo pipefail
 
@@ -79,7 +78,6 @@ jobs:
             OBS_DOMAIN=${OBS_DOMAIN:-}
             OBS_BASIC_AUTH_HASH='${OBS_BASIC_AUTH_HASH:-}'
             GAME_HOST_DEV=${GAME_HOST_DEV:-}
-            GAME_HOST_PROD=${GAME_HOST_PROD:-}
             EOF
             umask 022
 

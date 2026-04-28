@@ -18,27 +18,29 @@ Three droplets. Observability runs on a **separate VM** so a saturated game host
 
 ```
 ┌────────────────────────────┐
-│  GAME DROPLET — DEV        │ ─┐
-│  (DO_HOST)                 │  │           ┌─────────────────────────────┐
-│  client (caddy) :80        │  │           │   OBS DROPLET ($4/mo)       │
-│  /_metrics/{lobby,game,    │  │           │                             │
-│   node} → loopback         │  │           │  caddy :80,:443 ─► grafana  │
-└────────────────────────────┘  │           │   (basic-auth + LE TLS)     │
-                                │ HTTP      │                             │
-┌────────────────────────────┐  ├──────────►│  victoria-metrics :8428     │
-│  GAME DROPLET — PROD       │  │ +         │   scrape every 15s, every   │
-│  (DO_HOST_PROD)            │  │ src-IP    │   series labelled with      │
-│  client (caddy) :80        │  │ gate      │   env={obs|dev|prod}        │
-│  /_metrics/{lobby,game,    │  │           │                             │
-│   node} → loopback         │ ─┘           │  node-exp :9100 (env=obs)   │
-└────────────────────────────┘              └─────────────────────────────┘
+│  GAME DROPLET — DEV        │   HTTP        ┌─────────────────────────────┐
+│  (DO_HOST, IP-only)        │ ◄─── alias    │   OBS DROPLET ($4/mo)       │
+│  client (caddy) :80        │   game-       │                             │
+│  /_metrics/{lobby,game,    │   droplet-dev │  caddy :80,:443 ─► grafana  │
+│   node} → loopback         │               │   (basic-auth + LE TLS)     │
+└────────────────────────────┘               │                             │
+                                             │  victoria-metrics :8428     │
+┌────────────────────────────┐   HTTPS       │   scrape every 15s, every   │
+│  GAME DROPLET — PROD       │ ◄─── public   │   series labelled with      │
+│  (vibecat.nusgreyhats.org) │   domain      │   env={obs|dev|prod}        │
+│  client (caddy) :80,:443   │               │                             │
+│  /_metrics/{lobby,game,    │               │  node-exp :9100 (env=obs)   │
+│   node} → loopback         │               │                             │
+└────────────────────────────┘               └─────────────────────────────┘
                                                     │
                                                     ▼
                                              https://observability.<domain>/
 
 Source-IP gate for /_metrics/* lives in Caddy on each game droplet
-(both dev and prod forward OBS_HOST). DO Cloud Firewall on OBS
-allowlists :22 to team IPs and exposes :80/:443 to the world.
+(both dev and prod forward OBS_HOST). Prod's auto-HTTPS forces VM to
+use the canonical domain (HTTPS) rather than an alias-over-HTTP — see
+"Networking and security". DO Cloud Firewall on OBS allowlists :22
+to team IPs and exposes :80/:443 to the world.
 ```
 
 **Tooling choices** (decisions log at the bottom of this doc):
@@ -167,7 +169,9 @@ New repo `Variables` (non-secret, version-controlled-elsewhere) and `Secrets` in
 **Phase 2 additions** (existing secrets reused, no new ones to configure):
 
 - `OBS_HOST` (already present) — game droplet's `deploy.yml` now also forwards this so `client/Caddyfile`'s `remote_ip {$OBS_HOST}` directive can substitute it.
-- `DO_HOST` and `DO_HOST_PROD` (already present) — OBS droplet's `deploy-obs.yml` reads them as `GAME_HOST_DEV` and `GAME_HOST_PROD`, aliased to `game-droplet-dev` and `game-droplet-prod` in the VM container's `/etc/hosts` so `scrape.yml` can reference them by hostname. Each scrape job has two static targets, one per env, with an `env={dev|prod}` label.
+- `DO_HOST` (already present) — OBS droplet's `deploy-obs.yml` reads it as `GAME_HOST_DEV`, aliased to `game-droplet-dev` in the VM container's `/etc/hosts`. Dev is scraped over plain HTTP via this alias.
+- `vars.DOMAIN_PROD` (already present) — prod's public domain (`vibecat.nusgreyhats.org`). Prod is *not* aliased via `extra_hosts`; VM resolves the public DNS and scrapes the domain over HTTPS directly. This sidesteps a Caddy auto-HTTPS quirk: any HTTP request to prod's `:80` is 308-redirected to `https://<request-host>/...`, so an alias-and-HTTP scrape lands on `https://game-droplet-prod` with an SNI mismatch against the Let's Encrypt cert. Scraping the canonical domain over HTTPS resolves SNI cleanly.
+- Each game-side service therefore has two scrape jobs (`<service>-dev` HTTP, `<service>-prod` HTTPS) with `static_configs.labels.job` overriding the resulting series back to a single logical job name. PromQL like `{job="lobby"}` aggregates both envs; `{env="prod"}` filters to one.
 
 The OBS deploy hardcodes `root` as the SSH user (it doesn't reuse `DO_USER`, which on this repo's existing deploy points to a non-root account that doesn't exist on the OBS droplet). Both DO droplets ship with `root` available by default; OBS uses it directly. `setup-swap.sh` runs as root without needing `sudo`. Also forwards `secrets.GITHUB_TOKEN` (auto-issued, run-scoped) so the droplet can `git clone` a private repo.
 

@@ -15,12 +15,13 @@ services:
     volumes:
       - vm-data:/storage
       - ./victoria-metrics/scrape.yml:/etc/victoria-metrics/scrape.yml:ro
-    # game-droplet-{dev,prod} hostnames → respective droplet IPs, used in
-    # scrape.yml. Unset values default to 127.0.0.1 so an incomplete
-    # config produces visibly-failing scrapes (up=0) rather than crashing.
+    # game-droplet-dev hostname → dev droplet IP, used in scrape.yml.
+    # Prod is scraped via its public domain (vibecat.nusgreyhats.org)
+    # over HTTPS, so no alias is needed there. Unset GAME_HOST_DEV
+    # defaults to 127.0.0.1 → up{env="dev"} = 0 (visibly failing,
+    # rather than silently scraping the wrong host).
     extra_hosts:
       - "game-droplet-dev:${GAME_HOST_DEV:-127.0.0.1}"
-      - "game-droplet-prod:${GAME_HOST_PROD:-127.0.0.1}"
     restart: unless-stopped
 
   grafana:

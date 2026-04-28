@@ -1,10 +1,20 @@
 # VictoriaMetrics scrape config. See ../../docs/specs/observability/design.md.
 #
-# Every series gets an `env` label: {obs, dev, prod}. `obs` covers the
-# observability droplet's own internals (VM self + node-exporter on the
-# same VM). `dev` and `prod` cover the two game droplets, aliased as
-# game-droplet-dev / game-droplet-prod via extra_hosts in obs/docker-compose.yml.
-# Dashboards use a $env template variable to filter or overlay envs.
+# Every series gets an `env` label: {obs, dev, prod}.
+# - obs:  observability droplet itself (VM self-scrape + on-box node-exporter).
+# - dev:  dev game droplet, scraped over plain HTTP via the
+#         `game-droplet-dev` alias from extra_hosts.
+# - prod: prod game droplet, scraped over HTTPS via its public domain
+#         (vibecat.nusgreyhats.org). HTTPS is required because prod's Caddy
+#         auto-redirects HTTP→HTTPS. Scraping by IP+host alias hits an SNI
+#         mismatch (Caddy's cert is for the public domain, not the alias),
+#         so VM must talk HTTPS to the canonical domain from the start.
+#
+# Each game-side service has TWO scrape jobs (one per env) because Prom's
+# `scheme:` is job-level, not per-target. The static_config `job:` label
+# override keeps the resulting series unified under a single logical job
+# name (lobby, game-server, node-exporter-game) regardless of env, so
+# dashboard queries like `{job="lobby"}` aggregate across both envs.
 
 global:
   scrape_interval: 15s
@@ -23,32 +33,56 @@ scrape_configs:
         labels:
           env: obs
 
-  - job_name: node-exporter-game
+  # ── node-exporter on game droplets ──────────────────────────────────────
+  - job_name: node-exporter-game-dev
     metrics_path: /_metrics/node
     static_configs:
       - targets: ["game-droplet-dev:80"]
         labels:
           env: dev
-      - targets: ["game-droplet-prod:80"]
+          job: node-exporter-game
+
+  - job_name: node-exporter-game-prod
+    metrics_path: /_metrics/node
+    scheme: https
+    static_configs:
+      - targets: ["vibecat.nusgreyhats.org:443"]
         labels:
           env: prod
+          job: node-exporter-game
 
-  - job_name: lobby
+  # ── lobby ───────────────────────────────────────────────────────────────
+  - job_name: lobby-dev
     metrics_path: /_metrics/lobby
     static_configs:
       - targets: ["game-droplet-dev:80"]
         labels:
           env: dev
-      - targets: ["game-droplet-prod:80"]
+          job: lobby
+
+  - job_name: lobby-prod
+    metrics_path: /_metrics/lobby
+    scheme: https
+    static_configs:
+      - targets: ["vibecat.nusgreyhats.org:443"]
         labels:
           env: prod
+          job: lobby
 
-  - job_name: game-server
+  # ── game-server ─────────────────────────────────────────────────────────
+  - job_name: game-server-dev
     metrics_path: /_metrics/game
     static_configs:
       - targets: ["game-droplet-dev:80"]
         labels:
           env: dev
-      - targets: ["game-droplet-prod:80"]
+          job: game-server
+
+  - job_name: game-server-prod
+    metrics_path: /_metrics/game
+    scheme: https
+    static_configs:
+      - targets: ["vibecat.nusgreyhats.org:443"]
         labels:
           env: prod
+          job: game-server
