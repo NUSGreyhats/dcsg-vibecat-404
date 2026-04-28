@@ -7,11 +7,11 @@
 //
 // Per-file transforms:
 //   - .go         parsed with go/ast; comments + doc strings dropped;
-//                 build-tag comments stripped; output via go/printer
-//                 (gofmt-compatible). _test.go files skipped entirely.
+//     build-tag comments stripped; output via go/printer
+//     (gofmt-compatible). _test.go files skipped entirely.
 //   - .ts / .tsx  state-machine strip of // and /* */ comments while
-//                 preserving content of "" / '' / `` strings. *.test.ts
-//                 and *.test.tsx files skipped.
+//     preserving content of double/single/template strings. *.test.ts
+//     and *.test.tsx files skipped.
 //   - everything else (.json, .html, .css, .mod, .sum, ...) copied
 //     verbatim — they don't carry doc comments that would expose
 //     intentional-bug context.
@@ -70,6 +70,7 @@ func main() {
 func roots() []string {
 	return []string{
 		"server",
+		"pkg/replayauth",
 		"client/src",
 		"client/public",
 		"client/index.html",
@@ -174,11 +175,12 @@ func processFile(srcPath, dstPath string) error {
 	}
 }
 
-// stripGoFile parses src as Go, drops every comment and doc string, and
-// re-prints via go/printer. The build-tag comment (//go:build … line) is
-// part of the file's comment list and gets dropped along with the rest;
-// that's the spec'd behaviour — published source must compile but
-// without revealing the `!norace` directive that hides BUG-11.
+// stripGoFile parses src as Go, drops comments/doc strings, and re-prints
+// via go/printer. The only comments preserved are //go:embed directives,
+// because removing those changes program behaviour by leaving embedded FS
+// variables empty. Build-tag comments (//go:build …) are still dropped after
+// defaultBuildKeepsFile has decided whether the file belongs to the default
+// build; this avoids revealing the `!norace` directive that hides BUG-11.
 //
 // Files that are NOT part of the default build (i.e. whose //go:build
 // constraint evaluates to false with no extra tags) are skipped entirely
@@ -195,11 +197,11 @@ func stripGoFile(src, dst string) error {
 	}
 
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, src, nil, parser.SkipObjectResolution)
+	f, err := parser.ParseFile(fset, src, nil, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
 		return fmt.Errorf("parse %s: %w", src, err)
 	}
-	f.Comments = nil
+	f.Comments = keepGoEmbedComments(f.Comments)
 	f.Doc = nil
 	stripDeclDocs(f)
 
@@ -217,6 +219,22 @@ func stripGoFile(src, dst string) error {
 		return err
 	}
 	return nil
+}
+
+func keepGoEmbedComments(groups []*ast.CommentGroup) []*ast.CommentGroup {
+	var kept []*ast.CommentGroup
+	for _, group := range groups {
+		var list []*ast.Comment
+		for _, c := range group.List {
+			if strings.HasPrefix(c.Text, "//go:embed ") || c.Text == "//go:embed" {
+				list = append(list, c)
+			}
+		}
+		if len(list) > 0 {
+			kept = append(kept, &ast.CommentGroup{List: list})
+		}
+	}
+	return kept
 }
 
 // defaultBuildKeepsFile reports whether the file's //go:build constraint
@@ -291,7 +309,7 @@ func stripDeclDocs(f *ast.File) {
 }
 
 // stripTSFile is a state-machine comment stripper for .ts / .tsx. It
-// preserves the contents of "" / '' / `` strings (including escaped
+// preserves the contents of double/single/template strings (including escaped
 // quotes), and drops // line comments and /* */ block comments outside
 // strings. Edge cases this deliberately doesn't handle: comments inside
 // `${...}` template-literal expression interpolations (rare in our
@@ -405,4 +423,3 @@ func copyFile(src, dst string) error {
 	_, err = io.Copy(out, in)
 	return err
 }
-

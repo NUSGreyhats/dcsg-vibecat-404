@@ -98,7 +98,8 @@ The published tree contains exactly the code a player would need to study to fin
 
 - `server/` — the game-server Go module. The whole runtime, including the file that intentionally races on `KillLog`.
 - `client/src/`, `client/index.html`, `client/spectate.html`, `client/package.json`, `client/style.css`, `client/public/` — the Phaser app source players already see in their browser.
-- `pkg/identity/` (stub) and `pkg/go.mod` — a no-auth stub baked into the strip binary at `tools/strip/stubs/`, copied verbatim into the tarball so `cd server && go build ./...` succeeds. The stub treats every `player_id` as registered, prints a `STUB IDENTITY` warning at startup, and is the only thing players see of the identity package.
+- `pkg/identity/` (stub) and `pkg/go.mod` — a no-auth stub baked into the strip binary at `tools/strip/stubs/`, copied verbatim into the tarball so `cd server && go build ./...` succeeds. The stub treats every `player_id` as registered, mounts no login/register API, prints a `STUB IDENTITY` warning at startup, and is the only thing players see of the identity package.
+- `pkg/replayauth/` — the replay-ticket verifier imported by `server/`. It contains no secrets; tickets still require the runtime `ADMIN_SESSION_SECRET`.
 - `README.md` (top-level) — quickstart for running the server locally and the explicit list of what is stubbed/omitted. Also lives at `tools/strip/stubs/README.md`.
 
 ### What is NOT published
@@ -119,7 +120,7 @@ The published tree contains exactly the code a player would need to study to fin
 | `// BUG:` / `// HACK:` annotations  | Function signatures + implementation |
 | `*_test.go`, `*.test.ts`            | `go.mod` / `go.sum`                  |
 | Markdown files                      | `package.json`, `style.css`, HTML    |
-| Build tags / race exclusion pragmas | —                                    |
+| Build tags / race exclusion pragmas | `//go:embed` directives             |
 
 ### Pipeline
 
@@ -139,7 +140,7 @@ One public webapp for players (queue, leaderboard, source browser) — no separa
 - Lobby's source handler streams a single pre-built `source.tar.gz` via `http.ServeFile` — no directory FileServer, no per-file traversal, no chance of serving anything outside the baked archive.
 - Lobby must not serve its **own** source or any file from outside the stripped tree.
 
-**Note on build tag stripping:** the stripping tool also removes the `//go:build !norace` line from the published source — otherwise it would be a direct hint about the kill-log file. Stripped source must compile on its own but with the race intact.
+**Note on build tag stripping:** the stripping tool also removes the `//go:build !norace` line from the published source — otherwise it would be a direct hint about the kill-log file. Stripped source must compile on its own but with the race intact. `//go:embed` directives are preserved because removing them changes runtime behaviour by leaving embedded asset files empty.
 
 ## Implementation notes
 

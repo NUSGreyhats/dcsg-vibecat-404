@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"net/http"
 
 	_ "modernc.org/sqlite"
 )
@@ -30,3 +31,11 @@ func OpenDB(_ string) (*sql.DB, error) {
 func Lookup(_ *sql.DB, playerID string) (*Player, error) {
 	return &Player{DisplayName: playerID}, nil
 }
+
+type Service struct{}
+
+func NewService(_ *sql.DB) *Service {
+	return &Service{}
+}
+
+func (s *Service) Register(_ *http.ServeMux) {}

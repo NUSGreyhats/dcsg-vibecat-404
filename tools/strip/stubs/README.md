@@ -60,6 +60,8 @@ Included:
   Phaser app source the browser already ships you.
 - `pkg/identity/stub.go` — a no-auth stub that lets `server/` compile.
   See below.
+- `pkg/replayauth` — the replay-ticket verifier imported by `server/`.
+  It contains no secrets; tickets are still keyed by runtime env vars.
 
 Not included:
 
@@ -67,8 +69,8 @@ Not included:
   admin panel). Not part of the in-game puzzle.
 - The real `pkg/identity` — replaced by a stub. The stub treats every
   `player_id` as a registered player whose `display_name` equals the
-  `player_id`, performs no password check, and prints a `STUB IDENTITY`
-  warning at startup. **Do not deploy.**
+  `player_id`, performs no password check, mounts no login/register API,
+  and prints a `STUB IDENTITY` warning at startup. **Do not deploy.**
 - `tools/`, `docs/`, `.github/`, `*.Dockerfile`, `docker-compose.yml`,
   `client/Caddyfile`, `client/vite/*` — build, deploy, and CI plumbing.
 - All comments (`//`, `/* */`), doc strings, and `_test.go` /
