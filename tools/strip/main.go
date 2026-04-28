@@ -72,10 +72,13 @@ func roots() []string {
 		"server",
 		"client/src",
 		"client/public",
+		"client/vite",
 		"client/index.html",
 		"client/spectate.html",
 		"client/package.json",
+		"client/tsconfig.json",
 		"client/style.css",
+		"client/yarn.lock",
 	}
 }
 

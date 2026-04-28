@@ -1,0 +1,39 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    environment:
+      LISTEN_ADDR: ":8080"
+      AUTH_MODE: "identity"
+      GAME_DB: "/data/game.db"
+      IDENTITY_DB: "/data/identity.db"
+      # Mounts /api/login, /api/register, /api/verify on the game server
+      # using the no-auth stub so the client can complete the login flow
+      # without a separate lobby. Any username/password is accepted.
+      DEV_MOUNT_IDENTITY: "1"
+    volumes:
+      - game-data:/data
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  client:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./client:/app
+      - client-modules:/app/node_modules
+    command: sh -c "yarn install --frozen-lockfile && yarn dev --host 0.0.0.0"
+    environment:
+      GAME_SERVER: "http://server:8080"
+      LOBBY_SERVER: "http://server:8080"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - server
+    restart: unless-stopped
+
+volumes:
+  game-data:
+  client-modules:
