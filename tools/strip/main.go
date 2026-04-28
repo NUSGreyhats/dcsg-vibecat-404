@@ -199,12 +199,12 @@ func stripGoFile(src, dst string) error {
 	}
 
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, src, nil, parser.SkipObjectResolution)
+	f, err := parser.ParseFile(fset, src, nil, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
 		return fmt.Errorf("parse %s: %w", src, err)
 	}
-	f.Comments = nil
-	f.Doc = nil
+	f.Comments = keepGoDirectiveGroups(f.Comments)
+	f.Doc = filterGoDirectives(f.Doc)
 	stripDeclDocs(f)
 
 	out, createErr := os.Create(dst)
@@ -254,42 +254,74 @@ func defaultBuildKeepsFile(path string) (bool, error) {
 	return true, scanner.Err()
 }
 
+// filterGoDirectives strips non-//go: lines from cg in place and
+// returns cg, or nil if no //go: lines remain. Mutating in place
+// preserves the pointer identity that go/printer uses to match
+// f.Comments entries against ast.Decl.Doc fields.
+func filterGoDirectives(cg *ast.CommentGroup) *ast.CommentGroup {
+	if cg == nil {
+		return nil
+	}
+	var kept []*ast.Comment
+	for _, c := range cg.List {
+		if strings.HasPrefix(c.Text, "//go:") {
+			kept = append(kept, c)
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	cg.List = kept
+	return cg
+}
+
+// keepGoDirectiveGroups filters f.Comments down to groups that contain
+// at least one //go: pragma (non-pragma lines already removed in place
+// by filterGoDirectives).
+func keepGoDirectiveGroups(comments []*ast.CommentGroup) []*ast.CommentGroup {
+	var kept []*ast.CommentGroup
+	for _, cg := range comments {
+		if filterGoDirectives(cg) != nil {
+			kept = append(kept, cg)
+		}
+	}
+	return kept
+}
+
 // stripDeclDocs walks top-level declarations and removes their attached
-// doc strings. f.Comments is already cleared but ast.Decl.Doc fields
-// (e.g. *ast.GenDecl.Doc) hold their own pointers that printer.Fprint
-// will re-emit unless we nil them.
+// doc strings, preserving any //go: pragma lines (e.g. //go:embed).
 func stripDeclDocs(f *ast.File) {
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.GenDecl:
-			d.Doc = nil
+			d.Doc = filterGoDirectives(d.Doc)
 			for _, spec := range d.Specs {
 				switch s := spec.(type) {
 				case *ast.ValueSpec:
-					s.Doc = nil
+					s.Doc = filterGoDirectives(s.Doc)
 					s.Comment = nil
 				case *ast.TypeSpec:
-					s.Doc = nil
+					s.Doc = filterGoDirectives(s.Doc)
 					s.Comment = nil
 					if st, ok := s.Type.(*ast.StructType); ok && st.Fields != nil {
 						for _, fld := range st.Fields.List {
-							fld.Doc = nil
+							fld.Doc = filterGoDirectives(fld.Doc)
 							fld.Comment = nil
 						}
 					}
 					if it, ok := s.Type.(*ast.InterfaceType); ok && it.Methods != nil {
 						for _, fld := range it.Methods.List {
-							fld.Doc = nil
+							fld.Doc = filterGoDirectives(fld.Doc)
 							fld.Comment = nil
 						}
 					}
 				case *ast.ImportSpec:
-					s.Doc = nil
+					s.Doc = filterGoDirectives(s.Doc)
 					s.Comment = nil
 				}
 			}
 		case *ast.FuncDecl:
-			d.Doc = nil
+			d.Doc = filterGoDirectives(d.Doc)
 		}
 	}
 }
