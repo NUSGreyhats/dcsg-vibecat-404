@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/greyhats/defcon-game/lobby/internal/livegames"
+	"github.com/greyhats/defcon-game/lobby/internal/metrics"
 	"github.com/greyhats/defcon-game/lobby/internal/queue"
 )
 
@@ -248,6 +249,11 @@ func (a *Advancer) step(ctx context.Context, now time.Time, max int, live []live
 			PlayerID:   head.PlayerID,
 			AdmittedAt: now,
 		}
+		dwell := now.UnixMilli() - head.JoinedAt
+		if dwell < 0 {
+			dwell = 0
+		}
+		metrics.QueueDwellTime.Observe(float64(dwell) / 1000.0)
 		log.Printf("advancer: admit %s", head.PlayerID)
 	}
 

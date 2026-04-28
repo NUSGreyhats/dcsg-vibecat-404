@@ -1,4 +1,10 @@
 # VictoriaMetrics scrape config. See ../../docs/specs/observability/design.md.
+#
+# Every series gets an `env` label: {obs, dev, prod}. `obs` covers the
+# observability droplet's own internals (VM self + node-exporter on the
+# same VM). `dev` and `prod` cover the two game droplets, aliased as
+# game-droplet-dev / game-droplet-prod via extra_hosts in obs/docker-compose.yml.
+# Dashboards use a $env template variable to filter or overlay envs.
 
 global:
   scrape_interval: 15s
@@ -8,16 +14,41 @@ scrape_configs:
   - job_name: victoria-metrics
     static_configs:
       - targets: ["victoria-metrics:8428"]
+        labels:
+          env: obs
 
   - job_name: node-exporter-obs
     static_configs:
       - targets: ["node-exporter:9100"]
         labels:
-          host: obs
+          env: obs
 
   - job_name: node-exporter-game
     metrics_path: /_metrics/node
     static_configs:
-      - targets: ["game-droplet:80"]
+      - targets: ["game-droplet-dev:80"]
         labels:
-          host: game
+          env: dev
+      - targets: ["game-droplet-prod:80"]
+        labels:
+          env: prod
+
+  - job_name: lobby
+    metrics_path: /_metrics/lobby
+    static_configs:
+      - targets: ["game-droplet-dev:80"]
+        labels:
+          env: dev
+      - targets: ["game-droplet-prod:80"]
+        labels:
+          env: prod
+
+  - job_name: game-server
+    metrics_path: /_metrics/game
+    static_configs:
+      - targets: ["game-droplet-dev:80"]
+        labels:
+          env: dev
+      - targets: ["game-droplet-prod:80"]
+        labels:
+          env: prod

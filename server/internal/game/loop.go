@@ -7,11 +7,13 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/greyhats/defcon-game/server/internal/leaderboard"
+	"github.com/greyhats/defcon-game/server/internal/metrics"
 	"github.com/greyhats/defcon-game/server/internal/protocol"
 	"github.com/greyhats/defcon-game/server/internal/spectator"
 )
@@ -140,6 +142,7 @@ func (e *Engine) Run(ctx context.Context) {
 // S2C_AUTH_OK with per-spectator seqs.
 func (e *Engine) send(typ uint8, data any) {
 	e.seq++
+	metrics.WSMessages.WithLabelValues("s2c", metrics.PacketTypeName(typ)).Inc()
 	env := protocol.NewS2C(typ, e.seq, data)
 	select {
 	case e.OutCh <- env:
@@ -434,6 +437,12 @@ func (e *Engine) RunStartTime() time.Time {
 
 // tickLoop is the 20 Hz heart of the engine.
 func (e *Engine) tickLoop(ctx context.Context) {
+	// active_players counts players actively running the tick loop —
+	// post-handshake, pre-finishRun. Replay-mode engines also bump it,
+	// which is fine: the gauge models tick-loop pressure on the server.
+	metrics.ActivePlayers.Inc()
+	defer metrics.ActivePlayers.Dec()
+
 	ticker := time.NewTicker(TickDuration)
 	defer ticker.Stop()
 	for {
@@ -444,7 +453,9 @@ func (e *Engine) tickLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			e.stepTick(time.Now())
+			tickStart := time.Now()
+			e.stepTick(tickStart)
+			metrics.GameTickDuration.Observe(time.Since(tickStart).Seconds())
 			if e.run.Status.IsTerminal() {
 				return
 			}
@@ -700,11 +711,19 @@ func (e *Engine) drainInput(now time.Time) {
 }
 
 func (e *Engine) dispatch(raw []byte, now time.Time) {
+	start := time.Now()
 	env, err := protocol.DecodeEnvelope(raw)
 	if err != nil {
+		metrics.WSMessages.WithLabelValues("c2s", "unknown").Inc()
+		metrics.Errors.WithLabelValues("ws_parse_fail").Inc()
 		e.sendError("bad_envelope", err.Error())
 		return
 	}
+	pktName := metrics.PacketTypeName(env.Type)
+	metrics.WSMessages.WithLabelValues("c2s", pktName).Inc()
+	defer func() {
+		metrics.WSHandlerDuration.WithLabelValues(pktName).Observe(time.Since(start).Seconds())
+	}()
 	// Per-packet ts validation: ±2s absolute window. No cumulative drift
 	// check — BUG-02 substrate. Replay skips this entirely: recorded Ts
 	// values come from the original session's wall clock and would
@@ -787,6 +806,22 @@ func (e *Engine) transitionToRoom(nextRoom uint8, now time.Time) {
 		elapsed += bonus
 	}
 	e.run.ElapsedMs = elapsed
+	// roomDuration is the wall-clock time spent in the room we're leaving:
+	// elapsed minus the previous split's TimeMs (or elapsed itself for room 0).
+	// Clamp at 0: ComputeRoomBonus can return hugely negative values under
+	// BUG-11, and a negative observation would poison the histogram _sum.
+	roomDuration := elapsed
+	if n := len(e.run.Splits); n > 0 {
+		roomDuration = elapsed - e.run.Splits[n-1].TimeMs
+	}
+	if roomDuration < 0 {
+		roomDuration = 0
+	}
+	if !e.ReplayMode {
+		metrics.RoomSplitDuration.
+			WithLabelValues(strconv.Itoa(int(e.run.CurrentRoom))).
+			Observe(float64(roomDuration) / 1000.0)
+	}
 	e.run.Splits = append(e.run.Splits, protocol.SplitData{
 		RoomIndex: e.run.CurrentRoom,
 		TimeMs:    elapsed,
@@ -892,6 +927,14 @@ func (e *Engine) currentElapsed(now time.Time) int64 {
 func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {
 	e.run.Status = status
 	e.run.ElapsedMs = totalMs
+
+	// Replay-mode finishRun is a synthetic terminal — don't conflate it
+	// with real player runs in event-day metrics.
+	if !e.ReplayMode {
+		outcome := string(status.Outcome())
+		metrics.RunsCompleted.WithLabelValues(outcome).Inc()
+		metrics.RunDuration.WithLabelValues(outcome).Observe(float64(totalMs) / 1000.0)
+	}
 
 	// Append final split if not already captured.
 	e.run.Splits = append(e.run.Splits, protocol.SplitData{

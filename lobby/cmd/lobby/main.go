@@ -33,6 +33,7 @@ import (
 	"github.com/greyhats/defcon-game/lobby/internal/advancer"
 	"github.com/greyhats/defcon-game/lobby/internal/leaderboard"
 	"github.com/greyhats/defcon-game/lobby/internal/livegames"
+	"github.com/greyhats/defcon-game/lobby/internal/metrics"
 	"github.com/greyhats/defcon-game/lobby/internal/queue"
 	"github.com/greyhats/defcon-game/lobby/internal/settings"
 	"github.com/greyhats/defcon-game/lobby/web"
@@ -494,9 +495,28 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 
+	// /metrics is reachable only through client/Caddyfile's
+	// remote_ip-gated /_metrics/lobby route on the game droplet.
+	// Middleware skips this path so scrapes don't self-count.
+	mux.Handle("/metrics", metrics.Handler())
+
+	// Lobby admission cap mirrors the admin-tunable max_concurrent
+	// setting. Seed it on boot; adminSetMaxConcurrent updates it on
+	// each successful write. Best-effort: a read failure leaves the
+	// gauge at its previous value rather than going to zero.
+	if n, err := settings.GetMaxConcurrent(lobbyDB); err == nil {
+		metrics.LobbyAdmissionCap.Set(float64(n))
+	}
+
+	// queue_depth poller — only meaningful when QUEUE_ENABLED.
+	// 5 s cadence is plenty for a metric mods read from a dashboard.
+	if queueEnabled {
+		go pollQueueDepth(ctx, queueDB)
+	}
+
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           metrics.Middleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -531,6 +551,28 @@ func envDefault(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// pollQueueDepth keeps metrics.QueueDepth in sync with queue_entries row
+// count. 5 s is a reasonable trade-off — fast enough that mods see a
+// queue draining in ~realtime, slow enough that the poll is invisible
+// in profiling.
+func pollQueueDepth(ctx context.Context, db *sql.DB) {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	for {
+		n, err := queue.Length(db)
+		if err == nil {
+			metrics.QueueDepth.Set(float64(n))
+		} else {
+			metrics.Errors.WithLabelValues("queue_length").Inc()
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }
 
 // isLeaderboardAdminPath reports whether (method, path) targets an
@@ -642,6 +684,7 @@ func queueJoinHandler(w http.ResponseWriter, r *http.Request, queueDB, identityD
 			return
 		}
 		log.Printf("queue/join: insert %s: %v", body.PlayerID, err)
+		metrics.Errors.WithLabelValues("queue_write").Inc()
 		http.Error(w, "queue write failed", http.StatusInternalServerError)
 		return
 	}
@@ -869,9 +912,11 @@ func adminSetMaxConcurrent(w http.ResponseWriter, r *http.Request, lobbyDB *sql.
 	}
 	if err := settings.SetMaxConcurrent(lobbyDB, body.Value); err != nil {
 		log.Printf("admin: settings set: %v", err)
+		metrics.Errors.WithLabelValues("settings_write").Inc()
 		http.Error(w, "set failed", http.StatusInternalServerError)
 		return
 	}
+	metrics.LobbyAdmissionCap.Set(float64(body.Value))
 	w.WriteHeader(http.StatusNoContent)
 }
 

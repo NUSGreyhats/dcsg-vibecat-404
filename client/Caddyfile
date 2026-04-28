@@ -8,8 +8,9 @@
 {$DOMAIN::80} {
     encode gzip
 
-    # /_metrics/node gated to OBS droplet's IP. Mismatched source IPs
+    # /_metrics/* gated to OBS droplet's IP. Mismatched source IPs
     # fall through to the static file_server (returns the SPA index).
+    # See docs/specs/observability/design.md.
     @metrics_node {
         path /_metrics/node
         remote_ip {$OBS_HOST}
@@ -17,6 +18,22 @@
     handle @metrics_node {
         rewrite * /metrics
         reverse_proxy node-exporter:9100
+    }
+    @metrics_lobby {
+        path /_metrics/lobby
+        remote_ip {$OBS_HOST}
+    }
+    handle @metrics_lobby {
+        rewrite * /metrics
+        reverse_proxy lobby:3001
+    }
+    @metrics_game {
+        path /_metrics/game
+        remote_ip {$OBS_HOST}
+    }
+    handle @metrics_game {
+        rewrite * /metrics
+        reverse_proxy game-server:8080
     }
 
     # Game-server WebSockets: /ws is the player path, /ws/spectate is the

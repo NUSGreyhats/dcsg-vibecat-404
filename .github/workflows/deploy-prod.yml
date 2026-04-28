@@ -54,6 +54,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
           ADMIN_SESSION_SECRET: ${{ secrets.ADMIN_SESSION_SECRET }}
+          # OBS_HOST gates client/Caddyfile's /_metrics/* paths to the OBS
+          # droplet's source IP. Without this, OBS scrapes of prod fall
+          # through to the SPA index and `up{env="prod"}` stays at 0.
+          OBS_HOST: ${{ secrets.OBS_HOST }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.DO_HOST_PROD }}
@@ -61,7 +65,7 @@ jobs:
           key: ${{ secrets.DO_SSH_KEY_PROD }}
           script_stop: true
           command_timeout: 15m
-          envs: DOMAIN,AUTH_MODE,QUEUE_ENABLED,MAX_CONCURRENT,LEADERBOARD_ENABLED,LEADERBOARD_DISABLED_MESSAGE,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,ADMIN_SESSION_SECRET,GITHUB_TOKEN
+          envs: DOMAIN,AUTH_MODE,QUEUE_ENABLED,MAX_CONCURRENT,LEADERBOARD_ENABLED,LEADERBOARD_DISABLED_MESSAGE,TELEGRAM_BOT_TOKEN,TELEGRAM_ADMIN_CHAT_ID,ADMIN_SESSION_SECRET,OBS_HOST,GITHUB_TOKEN
           script: |
             set -euo pipefail
 
@@ -112,6 +116,7 @@ jobs:
             TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
             TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID:-}
             ADMIN_SESSION_SECRET=${ADMIN_SESSION_SECRET:-}
+            OBS_HOST=${OBS_HOST:-}
             EOF
             umask 022
 
