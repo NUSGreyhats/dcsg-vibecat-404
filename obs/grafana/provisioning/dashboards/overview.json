@@ -38,7 +38,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 - 100 * avg by (env) (rate(node_cpu_seconds_total{env=~\"$env\"}[1m]))",
+          "expr": "100 * (1 - avg by (env) (rate(node_cpu_seconds_total{mode=\"idle\", env=~\"$env\"}[1m])))",
           "legendFormat": "{{env}}"
         }
       ],
