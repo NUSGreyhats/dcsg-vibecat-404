@@ -70,6 +70,7 @@ func main() {
 func roots() []string {
 	return []string{
 		"server",
+		"pkg/replayauth",
 		"client/src",
 		"client/public",
 		"client/vite",
