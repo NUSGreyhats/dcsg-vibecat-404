@@ -12,25 +12,37 @@ Use when:
 
 ## Build & run
 
-The replay client is a Vite-built static bundle. Build it once:
+### Docker (recommended)
+
+Multi-stage Dockerfile builds the Vite client bundle and the Go binary
+in one shot. Build context is the repo root.
+
+```sh
+# from repo root
+docker build -f server/cmd/replay-backup/Dockerfile -t replay-backup:local .
+docker run --rm -p 127.0.0.1:8080:8080 replay-backup:local
+```
+
+Open `http://localhost:8080`. Stop with `Ctrl-C` (or
+`docker stop replay-backup` if started detached).
+
+### Bare metal
+
+If you'd rather skip Docker:
 
 ```sh
 cd ../../../client
 npm install
 npm run build      # produces client/dist/{replay.html, assets/, ...}
+
+cd ../
+go build -o /tmp/replay-backup ./server/cmd/replay-backup
+/tmp/replay-backup -addr=127.0.0.1:8080 -client-dist=client/dist
 ```
 
-Then build and run the backup binary (lives inside the server module so
-it can import `server/internal/replay` directly — that's how it
-inherits the PR #96 inCh-sizing fix):
-
-```sh
-cd ../server/cmd/replay-backup
-go build -o replay-backup .
-./replay-backup -addr=127.0.0.1:8080 -client-dist=../../../client/dist
-```
-
-Or from the repo root: `go build -o /tmp/replay-backup ./server/cmd/replay-backup`.
+Lives inside the `server` module so it can import
+`server/internal/replay` directly — that's how it inherits the PR #96
+inCh-sizing fix.
 
 Flags:
 
