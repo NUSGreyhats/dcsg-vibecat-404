@@ -172,7 +172,15 @@ drainCmds:
 		}
 	}
 
-	inCh := make(chan []byte, game.InChBuf)
+	// inCh must hold every record for a single tick at once: advance()
+	// front-loads all records for nextTick before stepTick gets a chance
+	// to drain. Live recording can produce ticks with more than InChBuf
+	// records — drainInput pops items in a tight loop while the WS reader
+	// concurrently refills, so the recorded burst is bounded by client
+	// send-rate, not channel capacity. Sizing inCh to the worst observed
+	// burst keeps feedRecord's drop-on-full path from firing on bursty
+	// (typically fast) runs and silently desynchronising the replay.
+	inCh := make(chan []byte, max(game.InChBuf, maxBurstPerTick(p.Log)+8))
 	outCh := make(chan protocol.S2CEnvelope, game.OutChBuf)
 	p.activeInCh = inCh
 
@@ -332,11 +340,13 @@ func (p *Player) feedStartRun(in chan<- []byte) {
 // packet had just arrived from a live WS — minus the Ts ±2s check
 // (ReplayMode skips that).
 //
-// Drop-on-full: the engine drains InCh every tick (50ms) so a 64-deep
-// buffer comfortably absorbs even the heaviest single-tick input bursts.
-// If we somehow saturate it during fast-forward, the dropped record
-// causes a small replay divergence — acceptable for the streaming
-// viewer (the verification path will re-run with a real ticker).
+// runOnce sizes inCh to fit the worst single-tick burst observed in the
+// log, so the non-blocking send below should never hit the default
+// branch. The branch remains as defence-in-depth: a dropped record can
+// cascade into severe divergence (e.g. losing C2S_ENTER_DOOR keeps the
+// viewer in the previous room while subsequent inputs target the new
+// one), so the log line is the signal that something pathological got
+// past the sizing logic.
 func (p *Player) feedRecord(in chan<- []byte, rec game.InputRecord) {
 	env := protocol.Envelope{
 		Type: rec.Type,
@@ -353,6 +363,29 @@ func (p *Player) feedRecord(in chan<- []byte, rec game.InputRecord) {
 	default:
 		log.Printf("replay: inCh full at tick %d, dropping record", rec.Tick)
 	}
+}
+
+// maxBurstPerTick returns the largest count of records sharing one Tick
+// in log. log is monotonic in Tick (the live engine appends records in
+// dispatch order, all stamped with the current e.tick), so a single
+// linear scan suffices. Returns 0 for an empty log.
+func maxBurstPerTick(log []game.InputRecord) int {
+	if len(log) == 0 {
+		return 0
+	}
+	maxRun := 1
+	run := 1
+	for i := 1; i < len(log); i++ {
+		if log[i].Tick == log[i-1].Tick {
+			run++
+			if run > maxRun {
+				maxRun = run
+			}
+		} else {
+			run = 1
+		}
+	}
+	return maxRun
 }
 
 // forward drains the engine's outCh and pushes envelopes onto the

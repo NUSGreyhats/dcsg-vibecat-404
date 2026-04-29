@@ -194,6 +194,8 @@ Internally, `Run` constructs an Engine in `ReplayMode`, feeds synthetic `C2S_AUT
 2. Sleep `TickDuration / speed` (or block while paused), waking on `cmdCh` or `ctx.Done()`.
 3. Call `advance` with the next synthetic `now = prev + TickDuration`, returning to `RunReplay`'s caller.
 
+`inCh` for a replay session is sized to `max(InChBuf, maxBurstPerTick(InputLog) + 8)` rather than the default `InChBuf=64`. Live recording can produce single ticks with more than `InChBuf` records — `drainInput` runs in a tight loop while the WS reader concurrently refills, so the per-tick burst is bounded only by client send-rate. Step 1 above front-loads every record for `nextTick` before `stepTick` gets a chance to drain, so a 64-deep channel silently drops the tail of a heavy burst (e.g. an `ENTER_DOOR` colocated with movement and shoot frames in a sprint), and the rest of the run replays in the wrong room. Sizing to the worst observed burst keeps the drop path as defence-in-depth only.
+
 `Restart` resets the player by cancelling the inner context, allocating a fresh Engine + InputLog cursor, and starting again. The viewer sees a fresh `S2C_RUN_STARTED` from `T0`.
 
 ### `/ws/replay` endpoint
