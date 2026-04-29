@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Replay Backup — Upload</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        background: #0b0f14;
+        color: #e6edf3;
+        margin: 0;
+        padding: 2rem;
+        max-width: 640px;
+        margin-inline: auto;
+      }
+      h1 {
+        font-size: 1.4rem;
+        margin-bottom: 0.5rem;
+      }
+      p {
+        color: #9aa5b1;
+        line-height: 1.5;
+      }
+      form {
+        margin-top: 1.5rem;
+        padding: 1.5rem;
+        background: #131922;
+        border: 1px solid #243044;
+        border-radius: 6px;
+      }
+      input[type="file"] {
+        display: block;
+        margin: 0.5rem 0 1rem;
+        color: #e6edf3;
+      }
+      button {
+        background: #2563eb;
+        color: white;
+        border: 0;
+        padding: 0.6rem 1.2rem;
+        border-radius: 4px;
+        font-size: 0.95rem;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #1d4fd8;
+      }
+      code {
+        background: #131922;
+        padding: 0.1rem 0.3rem;
+        border-radius: 3px;
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Replay Backup</h1>
+    <p>
+      Upload the JSON file you downloaded from the lobby's
+      <code>/admin/replay/&lt;id&gt;</code> endpoint. After upload you'll be
+      redirected to the viewer.
+    </p>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+      <input type="file" name="run" accept="application/json,.json" required />
+      <button type="submit">Upload &amp; watch</button>
+    </form>
+  </body>
+</html>
