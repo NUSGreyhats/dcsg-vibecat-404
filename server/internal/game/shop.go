@@ -28,15 +28,25 @@ var ShopCatalog = []ShopOffer{
 // HandleShopPurchase is the C2S_SHOP_PURCHASE handler. Validates the item
 // ID, debits coins, and applies the matching effect. The `ammo` case
 // refills every non-unlimited weapon to its static ammo cap.
-func HandleShopPurchase(p *PlayerState, itemID uint8) bool {
+//
+// `replayMode` waives the coin-balance gate: the recording's
+// SHOP_PURCHASE packet is proof the live engine accepted it (the
+// player had the coins at the time), and rejecting it in replay
+// because of an earlier kill cascade would compound the divergence.
+// Coins still decrement (clamped at 0) so the HUD tracks something
+// reasonable.
+func HandleShopPurchase(p *PlayerState, itemID uint8, replayMode bool) bool {
 	if itemID == 0 || int(itemID) > len(ShopCatalog) {
 		return false
 	}
 	offer := ShopCatalog[itemID-1]
-	if p.Coins < offer.Cost {
+	if !replayMode && p.Coins < offer.Cost {
 		return false
 	}
 	p.Coins -= offer.Cost
+	if p.Coins < 0 {
+		p.Coins = 0
+	}
 
 	switch offer.ID {
 	case ShopItemAmmo:

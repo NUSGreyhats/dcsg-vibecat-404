@@ -40,7 +40,18 @@ func HandleSwitchWeapon(p *PlayerState, weaponID uint8, now time.Time) {
 // HandleShoot spawns a projectile if the weapon's cooldown and the player's
 // swap cooldown permit it. `now` is the tick-shared timestamp captured at
 // tick start (load-bearing for BUG-04 and BUG-07).
-func HandleShoot(p *PlayerState, r *RoomState, aimAngle float32, now time.Time) {
+//
+// `replayMode` opts the gating checks (swap cooldown, weapon cooldown,
+// ammo) out of rejection: the recording's existence is itself proof
+// the live engine accepted the SHOOT, so replay must too. Without
+// these bypasses, tiny live-vs-synthetic timing drifts (wall-clock
+// jitter pushes a live tick past a cooldown boundary the synthetic
+// tick lands exactly on) reject shots in replay that fired in the
+// recording, and the resulting kill shortfall cascades into the coin
+// economy and ammo shop. Ammo still decrements visually (clamped at 0)
+// so HUD trackers don't lie. This trade is documented in
+// docs/specs/foundations/08-leaderboard-replay.md.
+func HandleShoot(p *PlayerState, r *RoomState, aimAngle float32, now time.Time, replayMode bool) {
 	wid := p.CurrentWeapon
 	spec, ok := WeaponSpecs[wid]
 	if !ok {
@@ -48,23 +59,25 @@ func HandleShoot(p *PlayerState, r *RoomState, aimAngle float32, now time.Time) 
 	}
 
 	cd := p.WeaponCooldown[wid]
-	// Check against the swap cooldown as seen *before* the current handler's
-	// potential update. BUG-04 hinges on this ordering.
-	if now.Before(p.SwapCooldownEnd) && !sameTickSwap(p.SwapCooldownEnd, now) {
-		return
-	}
-	if now.Before(cd) {
-		return
+	if !replayMode {
+		// Check against the swap cooldown as seen *before* the current handler's
+		// potential update. BUG-04 hinges on this ordering.
+		if now.Before(p.SwapCooldownEnd) && !sameTickSwap(p.SwapCooldownEnd, now) {
+			return
+		}
+		if now.Before(cd) {
+			return
+		}
+		if p.WeaponAmmo[wid] <= 0 {
+			return
+		}
 	}
 
-	ammo := p.WeaponAmmo[wid]
-	if ammo <= 0 {
-		return
+	// Decrement ammo for HUD parity, but clamp at 0 — replay never blocks
+	// a recorded SHOOT on ammo exhaustion.
+	if ammo := p.WeaponAmmo[wid]; ammo > 0 {
+		p.WeaponAmmo[wid] = ammo - 1
 	}
-
-	// Charge cooldown + ammo. Fire-rate stacks shorten the per-shot cooldown
-	// linearly: cooldown / (1 + 0.1 * stacks). See features/shop.md.
-	p.WeaponAmmo[wid] = ammo - 1
 	metrics.WeaponShots.WithLabelValues(spec.Name).Inc()
 	cooldown := time.Duration(spec.CooldownMs) * time.Millisecond
 	if p.FireRateStacks > 0 {

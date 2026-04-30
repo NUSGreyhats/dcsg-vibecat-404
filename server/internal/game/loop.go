@@ -497,21 +497,12 @@ func (e *Engine) stepTick(now time.Time) {
 	hits := AdvanceProjectiles(e.room, dt, now)
 	deaths = append(deaths, ResolveCollisions(e.room, hits, now)...)
 	for _, id := range deaths {
-		// BUG-11's intentional kill-log race lives only on the live path.
-		// In ReplayMode we append synchronously with the synthetic `now`
-		// so the moderation viewer reproduces the run reliably:
-		//   - Synchronous append: no race-induced lost kills, so
-		//     CheckRoomClear converges at the recorded tick, doors
-		//     unlock on time, recorded ENTER_DOOR succeeds, player
-		//     progresses through rooms instead of getting stuck.
-		//   - Synthetic now timestamp: ComputeRoomBonus computes from
-		//     real per-tick durations rather than wall-clock-jittered
-		//     ones; the BUG-11 negative-duration payload (zero-value
-		//     tail) does not fire in replay.
-		// Trade-off: replayed `total_ms` will not match a recording that
-		// exploited the BUG-11 bonus payload — the metadata's canonical
-		// `total_ms` is shown alongside the engine-reproduced value (see
-		// docs/specs/foundations/08-leaderboard-replay.md).
+		// BUG-11's intentional kill-log race lives only on the live
+		// path. ReplayMode appends synchronously with the synthetic
+		// `now` so the moderation viewer reproduces deterministically
+		// across runs; the door force-unlock in tryEnterDoor handles
+		// the case where the deterministic kill log under-counts vs
+		// the recording's BUG-11 overcount.
 		if e.ReplayMode {
 			e.room.KillLog = append(e.room.KillLog, KillRecord{
 				EntityID:  id,
@@ -790,7 +781,7 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 			return
 		}
 		e.player.LastAimAngle = pkt.AimAngle
-		HandleShoot(e.player, e.room, pkt.AimAngle, now)
+		HandleShoot(e.player, e.room, pkt.AimAngle, now, e.ReplayMode)
 	case protocol.C2SSwitchWeapon:
 		var pkt protocol.SwitchWeaponPacket
 		if err := json.Unmarshal(env.Data, &pkt); err != nil {
@@ -816,7 +807,7 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 		if err := json.Unmarshal(env.Data, &pkt); err != nil {
 			return
 		}
-		HandleShopPurchase(e.player, pkt.ItemID)
+		HandleShopPurchase(e.player, pkt.ItemID, e.ReplayMode)
 	}
 }
 
