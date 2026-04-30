@@ -823,6 +823,18 @@ func (e *Engine) tryEnterDoor(doorID uint32, now time.Time) {
 	// recording can't transition to a phantom room) and emit the
 	// DOOR_UNLOCKED broadcast for sprite-swap parity with the live
 	// engine.
+	//
+	// Any enemies still living in the room when the recorded ENTER_DOOR
+	// fires are abandoned by the recording (BUG-11's overcount let the
+	// player walk past them through the phantom-cleared door). The
+	// moderation viewer renders abandoned-living enemies on the player's
+	// last frame before the room swap, which looks visibly broken — the
+	// player exits a room with mobs still chasing them. Force-kill the
+	// remainder so the viewer sees a clean visual clear at the door,
+	// emitting S2C_ENTITY_DIED for each so the client tears down the
+	// sprites. The KillLog append is a side-effect for parity with the
+	// rest of the death pass; the room is about to be discarded by
+	// transitionToRoom so the records don't matter past this tick.
 	if e.ReplayMode {
 		if door, exists := e.room.Doors[doorID]; exists && !door.Unlocked {
 			door.Unlocked = true
@@ -832,6 +844,18 @@ func (e *Engine) tryEnterDoor(doorID uint32, now time.Time) {
 				TileY:       door.TileY,
 				UnlockedGID: door.UnlockedGID,
 			})
+		}
+		for id, en := range e.room.Enemies {
+			if en.AIState == AIDead {
+				continue
+			}
+			en.AIState = AIDead
+			en.HP = 0
+			e.room.KillLog = append(e.room.KillLog, KillRecord{
+				EntityID:  id,
+				Timestamp: now,
+			})
+			e.send(protocol.S2CEntityDied, protocol.EntityDiedData{EntityID: id})
 		}
 	}
 	nextRoom, ok := HandleEnterDoor(e.player, e.room, doorID)
