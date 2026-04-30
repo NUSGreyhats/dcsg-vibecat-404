@@ -27,7 +27,14 @@ import (
 // Reader / writer / player goroutine shape mirrors the production
 // handler verbatim so the WS protocol behaves identically from the
 // client's perspective.
-func wsReplayHandler(st *store, secret []byte) http.HandlerFunc {
+//
+// `parent` is the server-lifetime context, NOT the per-request context.
+// Crucially: r.Context() is cancelled the moment this handler returns
+// (which happens immediately after Accept + goroutine spawn), so basing
+// connCtx on it would tear down the WS goroutines before they emit a
+// single frame. The prod handler in server/cmd/server/main.go threads a
+// long-lived parent ctx through for exactly this reason.
+func wsReplayHandler(parent context.Context, st *store, secret []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		replayID := r.URL.Query().Get("replay_id")
 		ticket := r.URL.Query().Get("ticket")
@@ -58,7 +65,7 @@ func wsReplayHandler(st *store, secret []byte) http.HandlerFunc {
 			return
 		}
 
-		connCtx, cancel := context.WithCancel(r.Context())
+		connCtx, cancel := context.WithCancel(parent)
 		player := replay.New(run.PlayerID, run.DisplayName, run.Seed, run.Records)
 
 		// Reader: accept C2S_REPLAY_CONTROL only.

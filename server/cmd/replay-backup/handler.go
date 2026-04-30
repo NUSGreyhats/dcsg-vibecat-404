@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -61,7 +62,10 @@ const maxUploadBytes = 64 << 20
 
 // registerRoutes wires the handler set onto mux. Kept separate from
 // main so smoke tests can mount the routes onto a httptest server.
-func registerRoutes(mux *http.ServeMux, st *store, secret []byte, clientDist string) {
+// `parent` is the server-lifetime context — passed through to
+// wsReplayHandler so its goroutines outlive the HTTP request that
+// upgraded the WebSocket.
+func registerRoutes(parent context.Context, mux *http.ServeMux, st *store, secret []byte, clientDist string) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -72,7 +76,7 @@ func registerRoutes(mux *http.ServeMux, st *store, secret []byte, clientDist str
 	})
 	mux.HandleFunc("/upload", uploadHandler(st))
 	mux.HandleFunc("/admin/replay/", adminReplayDispatch(st, secret, clientDist))
-	mux.HandleFunc("/ws/replay", wsReplayHandler(st, secret))
+	mux.HandleFunc("/ws/replay", wsReplayHandler(parent, st, secret))
 	// Vite's prod build emits hashed asset filenames into /assets/* and
 	// also drops top-level entry chunks like /replay-<hash>.js. Serve
 	// everything from the dist directory so relative imports resolve

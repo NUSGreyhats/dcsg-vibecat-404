@@ -85,17 +85,17 @@ func main() {
 
 	st := newStore()
 
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	mux := http.NewServeMux()
-	registerRoutes(mux, st, secret, *clientDist)
+	registerRoutes(ctx, mux, st, secret, *clientDist)
 
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
 
 	go func() {
 		log.Printf("replay-backup listening on http://%s (client-dist=%s)", *addr, *clientDist)
