@@ -37,6 +37,17 @@ const OutChBuf = 64
 // T0 then catch up to ms X without sleeping".
 const FastForwardSpeed = 1000.0
 
+// PostLogGraceTicks is how long the engine keeps ticking after the
+// recorded InputLog is exhausted before the player goroutine
+// force-finishes the run. Sized to roughly cover natural termination
+// paths the engine can still complete on its own — the 2-tick room
+// settle plus the boss death pass plus a small slack. Beyond this
+// budget we assume the recording's natural termination won't reproduce
+// (BUG-06 settle race, projectile collision races, etc.) and call
+// Engine.ForceFinishReplay so the viewer sees S2C_RUN_COMPLETE rather
+// than ticking forever.
+const PostLogGraceTicks = 40
+
 // commandKind enumerates the verbs the WS reader can dispatch into the
 // player goroutine. set_speed carries a Speed value; the others ignore it.
 type commandKind uint8
@@ -61,7 +72,11 @@ type Player struct {
 	PlayerID    string
 	DisplayName string
 	Seed        int64
-	Log         []game.InputRecord
+	// TotalMs is the recording's canonical leaderboard total — used as
+	// the synthetic total when the engine has to be force-finished
+	// because the recorded run's natural termination didn't reproduce.
+	TotalMs int64
+	Log     []game.InputRecord
 
 	// OutCh is where Run forwards the engine's S2C envelopes. Closed
 	// when Run exits; the WS writer should treat the close as "session
@@ -80,22 +95,26 @@ type Player struct {
 	// State owned by the player goroutine — advance() reads/writes,
 	// command intake mutates via applyCmd(). No atomics needed because
 	// only the goroutine driving advance() touches these fields.
-	nextTick  uint64
-	logCursor int
-	speed     float32
-	paused    bool
-	restart   bool
-	ctx       context.Context
+	nextTick    uint64
+	logCursor   int
+	lastLogTick uint64
+	speed       float32
+	paused      bool
+	restart     bool
+	ctx         context.Context
 }
 
 // New constructs a Player around a loaded CompletedRun. The caller is
 // responsible for unmarshaling the stored input_log blob into
 // []game.InputRecord — see leaderboard.GetReplay for the on-disk shape.
-func New(playerID, displayName string, seed int64, log []game.InputRecord) *Player {
+// totalMs is the recording's canonical total; used as the fallback
+// total when ForceFinishReplay terminates the engine.
+func New(playerID, displayName string, seed, totalMs int64, log []game.InputRecord) *Player {
 	return &Player{
 		PlayerID:    playerID,
 		DisplayName: displayName,
 		Seed:        seed,
+		TotalMs:     totalMs,
 		Log:         log,
 		OutCh:       make(chan protocol.S2CEnvelope, OutChBuf),
 		cmdCh:       make(chan command, 8),
@@ -157,6 +176,10 @@ func (p *Player) runOnce(parent context.Context) bool {
 	p.speed = 1.0
 	p.paused = false
 	p.restart = false
+	p.lastLogTick = 0
+	if n := len(p.Log); n > 0 {
+		p.lastLogTick = p.Log[n-1].Tick
+	}
 
 	// Drain any commands queued before this run started. Without this, a
 	// Restart triggered while pause/set_speed commands were still buffered
@@ -204,6 +227,14 @@ drainCmds:
 
 	eng.RunReplay(ctx, p.advance)
 
+	// If the engine didn't terminate naturally (boss kill / RunFailed
+	// already reached), the recorded InputLog must have run out without
+	// the engine reproducing the run's natural endpoint. Force-finish
+	// with the recorded total_ms so the viewer sees S2C_RUN_COMPLETE
+	// rather than ticking forever or going dark. ForceFinishReplay is a
+	// no-op on terminal runs, so it's safe to always call.
+	eng.ForceFinishReplay(p.TotalMs)
+
 	// Engine done. Close the engine's inCh so any pending awaitAuth
 	// blocked on it exits, then close outCh so forward drains and
 	// returns. Order matters: outCh is the side forward reads from.
@@ -236,6 +267,13 @@ func (p *Player) advance(prev time.Time) (time.Time, bool) {
 	for p.logCursor < len(p.Log) && p.Log[p.logCursor].Tick == p.nextTick {
 		p.feedRecord(p.activeInCh, p.Log[p.logCursor])
 		p.logCursor++
+	}
+	// Stop ticking once we've run PostLogGraceTicks past the last
+	// recorded input. The engine still gets that grace window to reach
+	// natural termination (boss kill etc.); past it, runOnce calls
+	// Engine.ForceFinishReplay so the viewer terminates cleanly.
+	if p.logCursor >= len(p.Log) && p.nextTick > p.lastLogTick+PostLogGraceTicks {
+		return time.Time{}, false
 	}
 	if !p.sleepForSpeed() {
 		return time.Time{}, false

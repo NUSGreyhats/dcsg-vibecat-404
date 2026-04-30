@@ -630,7 +630,7 @@ func handleReplayWS(parent context.Context, w http.ResponseWriter, r *http.Reque
 	metrics.ReplayViewersActive.Inc()
 
 	connCtx, cancel := context.WithCancel(parent)
-	player := replay.New(rep.PlayerID, rep.DisplayName, rep.Seed, records)
+	player := replay.New(rep.PlayerID, rep.DisplayName, rep.Seed, rep.TotalMs, records)
 
 	// Reader goroutine: accept C2S_REPLAY_CONTROL only. Any other C2S
 	// type closes the WS with REPLAY_READ_ONLY (mirrors spectator's

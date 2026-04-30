@@ -533,7 +533,18 @@ func (e *Engine) stepTick(now time.Time) {
 	// to negative trips it. Runs after the drain (heals applied) and
 	// enemy-death pass (kamikaze self-destruct resolved), before the
 	// door unlock (no BUG-03 door-skip on the fatal tick).
-	if e.run.Status == RunRunning && e.player.HP <= 0 {
+	//
+	// ReplayMode skips this entirely: the existence of the recorded run
+	// is itself proof the player survived. In replay we sometimes can't
+	// reproduce kills the original landed (e.g. BUG-06 settle-window
+	// shots, projectile/collision races, or simply that the original
+	// exploited a wall-clock-jittered tick boundary). Without this
+	// bypass, surviving enemies hit the player and the recording cuts
+	// short with `outcome=failed` mid-run, defeating the moderation
+	// viewer's "watch what happened" purpose. Run termination in
+	// ReplayMode therefore comes from boss-kill OR replay-engine
+	// force-finish (see replay.Player) rather than this death pass.
+	if !e.ReplayMode && e.run.Status == RunRunning && e.player.HP <= 0 {
 		e.finishRun(now, e.currentElapsed(now), RunFailed)
 		return
 	}
@@ -966,6 +977,23 @@ func (e *Engine) currentElapsed(now time.Time) int64 {
 }
 
 // finishRun transitions the run to a terminal status and emits
+// ForceFinishReplay terminates a replay run as RunCompleted with the
+// caller-supplied total_ms. Intended for replay.Player to call once the
+// recorded InputLog has been exhausted but the engine has not yet
+// terminated naturally (boss un-killed because shots missed,
+// surviving enemies kept the player out of the boss room, etc.).
+//
+// No-op outside ReplayMode and on already-terminal runs.
+func (e *Engine) ForceFinishReplay(totalMs int64) {
+	if !e.ReplayMode || e.run == nil || e.run.Status.IsTerminal() {
+		return
+	}
+	// Synthetic now anchored on the run's start so elapsed math in
+	// finishRun and downstream HUD code stays consistent.
+	now := e.run.RunStartTime.Add(time.Duration(totalMs) * time.Millisecond)
+	e.finishRun(now, totalMs, RunCompleted)
+}
+
 // S2C_RUN_COMPLETE. `status` must be RunCompleted or RunFailed — the wire
 // outcome is derived from it so the two values cannot drift.
 func (e *Engine) finishRun(now time.Time, totalMs int64, status RunStatus) {

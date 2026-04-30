@@ -66,7 +66,7 @@ func wsReplayHandler(parent context.Context, st *store, secret []byte) http.Hand
 		}
 
 		connCtx, cancel := context.WithCancel(parent)
-		player := replay.New(run.PlayerID, run.DisplayName, run.Seed, run.Records)
+		player := replay.New(run.PlayerID, run.DisplayName, run.Seed, run.TotalMs, run.Records)
 
 		// Reader: accept C2S_REPLAY_CONTROL only.
 		go func() {
