@@ -285,9 +285,16 @@ Per-replay cap is **none** — a popular run can be watched by many moderators i
 
 ### Non-determinism and tolerance
 
-[BUG-11 kill-log append race](./05-server-runtime.md#bug-11-kill-log-append-race) is the one source of non-determinism in the live engine. In replay, the same code path runs but the goroutine schedule is different — a replayed run can produce a `total_ms` that drifts from the recorded one within the documented tolerance window. The streaming replay engine emits whatever the replayed tick loop produces; if the divergence becomes visible (e.g. the engine emits `RUN_COMPLETE` at a different `total_ms` than the metadata reports), the viewer just shows what the engine emits — the metadata's `total_ms` is shown alongside as the canonical leaderboard value.
+[BUG-11 kill-log append race](./05-server-runtime.md#bug-11-kill-log-append-race) is the one source of non-determinism in the live engine. The streaming replay engine **opts out of BUG-11** in `ReplayMode`:
 
-This is acceptable because BUG-11 is bounded and the visual difference (a corrupted kill log) is part of the entertainment value of replay viewing.
+- Per-kill goroutine spawn (`go ProcessEnemyDeathAsync(...)`) is replaced with a synchronous append on the same goroutine that drives the death pass. Append order is deterministic (collision-pass order) and the timestamp is the synthetic per-tick `now`, so no zero-value `time.Time` ever lands in the tail.
+- `tryEnterDoor` force-unlocks the named door (gated on existence in the current `RoomState`) before delegating to `HandleEnterDoor`. The recording's `ENTER_DOOR` packet at tick N is proof the door was effectively unlocked then — usually because BUG-11's race overcounted `len(KillLog)` past `len(r.Enemies)` and tripped `CheckRoomClear` early. Without the force-unlock, the deterministic replay's kill log never overcounts, the door stays locked, the recorded packet silently no-ops, and every subsequent input targets the wrong room — the player visibly hangs at a wall while shooting at empty space.
+
+Both changes are scoped strictly to `e.ReplayMode == true`. The live tick loop, leaderboard verification path (when implemented as a separate engine instance), and on-disk run format are unaffected.
+
+The trade-off this codifies: the moderation viewer reproduces **player progression** faithfully (the moderator sees every room, every kill, every shot the player took, in tick-correct order). It does NOT reproduce **BUG-11's bonus payload** (the `ComputeRoomBonus` call returns 0 / the regular fast-clear bonus instead of the negative-duration jackpot) and the engine-emitted `RUN_COMPLETE.total_ms` will therefore drift from the metadata's canonical leaderboard `total_ms` for runs that exploited that payload. The viewer surfaces both numbers so the discrepancy is visible.
+
+`outcome=failed` in the replay where the recording was `outcome=completed` is the next-most-common deviation: it generally indicates the recording exploited a separate timing-dependent path (e.g. BUG-06 settle-window race) that doesn't reproduce when packets are replayed sequentially against synthetic time. The moderator still gets to watch the run unfold up to the point of divergence, which is what the viewer is for.
 
 ## Cross-references
 

@@ -497,7 +497,29 @@ func (e *Engine) stepTick(now time.Time) {
 	hits := AdvanceProjectiles(e.room, dt, now)
 	deaths = append(deaths, ResolveCollisions(e.room, hits, now)...)
 	for _, id := range deaths {
-		go ProcessEnemyDeathAsync(e.room, id)
+		// BUG-11's intentional kill-log race lives only on the live path.
+		// In ReplayMode we append synchronously with the synthetic `now`
+		// so the moderation viewer reproduces the run reliably:
+		//   - Synchronous append: no race-induced lost kills, so
+		//     CheckRoomClear converges at the recorded tick, doors
+		//     unlock on time, recorded ENTER_DOOR succeeds, player
+		//     progresses through rooms instead of getting stuck.
+		//   - Synthetic now timestamp: ComputeRoomBonus computes from
+		//     real per-tick durations rather than wall-clock-jittered
+		//     ones; the BUG-11 negative-duration payload (zero-value
+		//     tail) does not fire in replay.
+		// Trade-off: replayed `total_ms` will not match a recording that
+		// exploited the BUG-11 bonus payload — the metadata's canonical
+		// `total_ms` is shown alongside the engine-reproduced value (see
+		// docs/specs/foundations/08-leaderboard-replay.md).
+		if e.ReplayMode {
+			e.room.KillLog = append(e.room.KillLog, KillRecord{
+				EntityID:  id,
+				Timestamp: now,
+			})
+		} else {
+			go ProcessEnemyDeathAsync(e.room, id)
+		}
 		e.send(protocol.S2CEntityDied, protocol.EntityDiedData{EntityID: id})
 	}
 
@@ -788,6 +810,28 @@ func (e *Engine) dispatch(raw []byte, now time.Time) {
 }
 
 func (e *Engine) tryEnterDoor(doorID uint32, now time.Time) {
+	// Replay best-effort: the recorded run reached this door at this
+	// tick, so it was effectively unlocked then — typically via BUG-11's
+	// kill-log race overcounting and tripping CheckRoomClear early. Our
+	// deterministic ReplayMode kill-log path never overcounts, so left
+	// to its own devices the door stays locked and the recorded
+	// ENTER_DOOR fires into a closed door — every subsequent input
+	// targets the wrong room and the player visibly hangs at a wall.
+	// Force-unlock the door (still gated on existence, so a malformed
+	// recording can't transition to a phantom room) and emit the
+	// DOOR_UNLOCKED broadcast for sprite-swap parity with the live
+	// engine.
+	if e.ReplayMode {
+		if door, exists := e.room.Doors[doorID]; exists && !door.Unlocked {
+			door.Unlocked = true
+			e.send(protocol.S2CDoorUnlocked, protocol.DoorUnlockedData{
+				DoorID:      door.DoorID,
+				TileX:       door.TileX,
+				TileY:       door.TileY,
+				UnlockedGID: door.UnlockedGID,
+			})
+		}
+	}
 	nextRoom, ok := HandleEnterDoor(e.player, e.room, doorID)
 	if !ok {
 		return
